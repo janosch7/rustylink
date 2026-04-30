@@ -38,6 +38,34 @@ fn format_live_scalar_csv(value: f64) -> String {
     if text == "-0" { "0".to_string() } else { text }
 }
 
+fn toggle_manual_switch_setting(app: &mut SubsystemApp, block: &crate::model::Block) -> bool {
+    let Some(block_sid) = block.sid.as_ref() else {
+        return false;
+    };
+    let path = app.path.clone();
+    let Some(system) = resolve_subsystem_by_vec_mut(&mut app.root, &path) else {
+        return false;
+    };
+    let Some(live_block) = system
+        .blocks
+        .iter_mut()
+        .find(|candidate| candidate.sid.as_ref() == Some(block_sid))
+    else {
+        return false;
+    };
+
+    live_block.current_setting = Some(
+        if matches!(live_block.current_setting.as_deref(), Some("1")) {
+            "0"
+        } else {
+            "1"
+        }
+        .to_string(),
+    );
+    app.view_cache.invalidate();
+    true
+}
+
 #[cfg(feature = "dashboard")]
 fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
     block
@@ -572,26 +600,35 @@ pub(crate) fn update_internal(
             } else if resp.clicked() {
                 println!("Block {} clicked", b.name);
                 if !app.move_mode_enabled {
-                    // Dashboard / UI block click: print connected block and signal info.
-                    // Also handle traditional signal-line blocks like Scope and Display.
-                    if crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
-                        &b.block_type,
-                    ) || matches!(b.block_type.as_str(), "Scope" | "Display")
+                    if app.live_mode_enabled
+                        && b.block_type == "ManualSwitch"
+                        && toggle_manual_switch_setting(app, b)
                     {
-                        print_dashboard_connected_signals(b, entities);
-                    }
-                    // Open a scope popout window when a Scope/DashboardScope is clicked.
-                    #[cfg(feature = "dashboard")]
-                    if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
-                        let key = app.scope_key_for_block(b);
-                        app.scope_popout = Some(crate::egui_app::state::ScopePopout {
-                            title: b.name.clone(),
-                            scope_key: key,
-                            open: true,
-                        });
+                        any_block_clicked = true;
+                    } else {
+                        // Dashboard / UI block click: print connected block and signal info.
+                        // Also handle traditional signal-line blocks like Scope and Display.
+                        if crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
+                            &b.block_type,
+                        ) || matches!(b.block_type.as_str(), "Scope" | "Display")
+                        {
+                            print_dashboard_connected_signals(b, entities);
+                        }
+                        // Open a scope popout window when a Scope/DashboardScope is clicked.
+                        #[cfg(feature = "dashboard")]
+                        if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
+                            let key = app.scope_key_for_block(b);
+                            app.scope_popout = Some(crate::egui_app::state::ScopePopout {
+                                title: b.name.clone(),
+                                scope_key: key,
+                                open: true,
+                            });
+                        }
                     }
                 }
-                block_action = Some(ClickAction::Primary);
+                if !(app.live_mode_enabled && b.block_type == "ManualSwitch") {
+                    block_action = Some(ClickAction::Primary);
+                }
             }
 
             // Selection: single-click selects, Shift-click toggles (multi-select).
@@ -2186,7 +2223,10 @@ pub(crate) fn update_internal(
                 .and_then(|sid| port_label_max_widths.get(sid))
                 .copied();
             let live_text = if app.live_mode_enabled
-                && !matches!(b.block_type.as_str(), "Scope" | "DashboardScope")
+                && !matches!(
+                    b.block_type.as_str(),
+                    "Scope" | "DashboardScope" | "ManualSwitch"
+                )
             {
                 block_live_value(app, b).map(format_live_scalar_csv)
             } else {
@@ -2566,10 +2606,15 @@ pub(crate) fn update_internal(
         // use `ui` mutably via `scope_builder`.
         #[cfg(feature = "dashboard")]
         for (scope_key, scope_title, scope_rect) in &deferred_scope_rects {
+            let visible_scope_rect = scope_rect.intersect(avail);
+            if visible_scope_rect.width() <= 0.0 || visible_scope_rect.height() <= 0.0 {
+                continue;
+            }
             let mut scope_clicked = false;
             ui.scope_builder(
-                egui::UiBuilder::new().max_rect(*scope_rect),
+                egui::UiBuilder::new().max_rect(visible_scope_rect),
                 |child_ui| {
+                    child_ui.set_clip_rect(visible_scope_rect);
                     let mut scopes = app.scope_instances.lock().unwrap();
                     let storage_key = app.embedded_scope_storage_key(scope_key);
                     let scope = scopes.entry(storage_key).or_insert_with(|| {
@@ -2581,12 +2626,14 @@ pub(crate) fn update_internal(
                     });
                     child_ui.push_id(("embedded_scope_ui", scope_key.as_str()), |child_ui| {
                         scope.show(child_ui);
-                        let scope_resp = child_ui.interact(
-                            child_ui.max_rect(),
-                            app.egui_id(("embedded_scope_click", scope_key.as_str())),
-                            Sense::click(),
-                        );
-                        scope_clicked = scope_resp.clicked();
+                        scope_clicked = child_ui.input(|input| {
+                            input.pointer.button_clicked(egui::PointerButton::Primary)
+                                && input
+                                    .pointer
+                                    .interact_pos()
+                                    .map(|pos| visible_scope_rect.contains(pos))
+                                    .unwrap_or(false)
+                        });
                     });
                 },
             );

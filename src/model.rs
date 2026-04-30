@@ -614,27 +614,50 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
         .map(|(_, s)| s.as_str())
         .collect();
 
+    let uuid = data_strings
+        .iter()
+        .copied()
+        .find(|value| looks_like_uuid(value))
+        .unwrap_or("");
+    let meaningful_strings: Vec<&str> = data_strings
+        .iter()
+        .copied()
+        .filter(|value| *value != uuid && !looks_like_sid_token(value))
+        .collect();
+
     if is_param {
-        // ParamSourceInfo data layout: [block_path, sid, param_name, uuid]
-        let block_path = data_strings.first()?.to_string();
-        let param_name = data_strings.get(2).unwrap_or(&"Value").to_string();
-        let uuid = data_strings.get(3).unwrap_or(&"").to_string();
+        let block_path = meaningful_strings.first()?.to_string();
+        let param_name = meaningful_strings
+            .get(1)
+            .copied()
+            .unwrap_or("Value")
+            .to_string();
         Some(DashboardBinding::ParamSource {
             block_path,
             param_name,
-            uuid,
+            uuid: uuid.to_string(),
         })
     } else {
-        // SignalSpecification data layout: [uuid, block_path, sid, signal_name]
-        let uuid = data_strings.first()?.to_string();
-        let block_path = data_strings.get(1)?.to_string();
-        let signal_name = data_strings.get(3).unwrap_or(&"").to_string();
+        let block_path = meaningful_strings.first()?.to_string();
+        let signal_name = meaningful_strings.get(1).copied().unwrap_or("").to_string();
         Some(DashboardBinding::SignalSpec {
             block_path,
             signal_name,
-            uuid,
+            uuid: uuid.to_string(),
         })
     }
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.chars().enumerate().all(|(index, ch)| match index {
+            8 | 13 | 18 | 23 => ch == '-',
+            _ => ch.is_ascii_hexdigit(),
+        })
+}
+
+fn looks_like_sid_token(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit())
 }
 
 // ────────────────────────────────────────────────────────────────────────────

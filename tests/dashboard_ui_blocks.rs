@@ -908,6 +908,36 @@ fn raw_mxarray_bytes_parse_correctly() {
     }
 }
 
+#[test]
+fn short_param_source_layout_parses_correctly() {
+    let mut raw = vec![0_u8; 1500];
+    for (offset, text) in [
+        (56_usize, "Simulink.HMI.ParamSourceInfo"),
+        (512, "BlockPath_"),
+        (561, "ParamName_"),
+        (572, "UUID"),
+        (1060, "Knob"),
+        (1304, "Value"),
+        (1368, "076029b3-3965-448f-85fd-7ebfe7ef9d37"),
+    ] {
+        raw[offset..offset + text.len()].copy_from_slice(text.as_bytes());
+    }
+
+    let binding = parse_mxarray_binding(&raw).expect("should parse short ParamSource layout");
+    match binding {
+        DashboardBinding::ParamSource {
+            block_path,
+            param_name,
+            uuid,
+        } => {
+            assert_eq!(block_path, "Knob");
+            assert_eq!(param_name, "Value");
+            assert_eq!(uuid, "076029b3-3965-448f-85fd-7ebfe7ef9d37");
+        }
+        other => panic!("expected ParamSource, got {:?}", other),
+    }
+}
+
 /// Blocks without a BindingPersistence ref must NOT have a dashboard_binding.
 #[test]
 fn non_dashboard_blocks_have_no_binding() {
