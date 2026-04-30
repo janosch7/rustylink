@@ -2185,7 +2185,9 @@ pub(crate) fn update_internal(
                 .as_ref()
                 .and_then(|sid| port_label_max_widths.get(sid))
                 .copied();
-            let live_text = if app.live_mode_enabled {
+            let live_text = if app.live_mode_enabled
+                && !matches!(b.block_type.as_str(), "Scope" | "DashboardScope")
+            {
                 block_live_value(app, b).map(format_live_scalar_csv)
             } else {
                 None
@@ -2564,6 +2566,7 @@ pub(crate) fn update_internal(
         // use `ui` mutably via `scope_builder`.
         #[cfg(feature = "dashboard")]
         for (scope_key, scope_title, scope_rect) in &deferred_scope_rects {
+            let mut scope_clicked = false;
             ui.scope_builder(
                 egui::UiBuilder::new().max_rect(*scope_rect),
                 |child_ui| {
@@ -2578,16 +2581,17 @@ pub(crate) fn update_internal(
                     });
                     child_ui.push_id(("embedded_scope_ui", scope_key.as_str()), |child_ui| {
                         scope.show(child_ui);
+                        let scope_resp = child_ui.interact(
+                            child_ui.max_rect(),
+                            app.egui_id(("embedded_scope_click", scope_key.as_str())),
+                            Sense::click(),
+                        );
+                        scope_clicked = scope_resp.clicked();
                     });
                 },
             );
 
-            let scope_resp = ui.interact(
-                *scope_rect,
-                app.egui_id(("embedded_scope_click", scope_key.as_str())),
-                Sense::click(),
-            );
-            if scope_resp.clicked() {
+            if scope_clicked {
                 app.scope_popout = Some(crate::egui_app::state::ScopePopout {
                     title: scope_title.clone(),
                     scope_key: scope_key.clone(),
@@ -2820,11 +2824,93 @@ fn print_dashboard_connected_signals(
                     "    · dashboard binding missing or unresolved for SID {}",
                     block.sid.as_deref().unwrap_or("<none>")
                 );
+                print_dashboard_binding_debug(block);
             }
             // Fall back to line-based connection scanning
             print_line_based_connections(block, entities);
         }
     }
+}
+
+fn print_dashboard_binding_debug(block: &crate::model::Block) {
+    let binding_persistence = block.properties.get("BindingPersistence");
+    let has_binding_ref =
+        binding_persistence.is_some() || block.ref_properties.contains("BindingPersistence");
+    println!(
+        "    · tag={} library_source={:?} library_block_path={:?}",
+        block.tag_name, block.library_source, block.library_block_path
+    );
+    println!(
+        "    · BindingPersistence present: {}{}",
+        if has_binding_ref { "yes" } else { "no" },
+        binding_persistence
+            .map(|value| format!(" ({value})"))
+            .unwrap_or_default()
+    );
+
+    let property_debug = collect_dashboard_debug_properties(&block.properties);
+    if property_debug.is_empty() {
+        println!("    · no binding-related block properties found");
+    } else {
+        println!(
+            "    · binding-related block properties: {}",
+            property_debug.join(", ")
+        );
+    }
+
+    let instance_debug = block
+        .instance_data
+        .as_ref()
+        .map(|instance_data| collect_dashboard_debug_properties(&instance_data.properties))
+        .unwrap_or_default();
+    if instance_debug.is_empty() {
+        println!("    · no binding-related instance-data properties found");
+    } else {
+        println!(
+            "    · binding-related instance-data properties: {}",
+            instance_debug.join(", ")
+        );
+    }
+
+    let ref_debug: Vec<&str> = block
+        .ref_properties
+        .iter()
+        .filter(|name| is_dashboard_debug_property(name))
+        .map(|name| name.as_str())
+        .collect();
+    if ref_debug.is_empty() {
+        println!("    · no binding-related ref-backed properties found");
+    } else {
+        println!(
+            "    · binding-related ref-backed properties: {}",
+            ref_debug.join(", ")
+        );
+    }
+}
+
+fn collect_dashboard_debug_properties(
+    properties: &indexmap::IndexMap<String, String>,
+) -> Vec<String> {
+    properties
+        .iter()
+        .filter(|(name, _)| is_dashboard_debug_property(name))
+        .take(10)
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect()
+}
+
+fn is_dashboard_debug_property(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("binding")
+        || lower.contains("uuid")
+        || lower.contains("signal")
+        || lower.contains("param")
+        || lower.contains("dashboard")
+        || lower.contains("widget")
+        || lower.contains("hmi")
+        || lower == "sid"
+        || lower.contains("element")
+        || lower.contains("ref")
 }
 
 #[cfg(feature = "dashboard")]
