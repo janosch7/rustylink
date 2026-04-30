@@ -38,6 +38,7 @@ pub use state::{
 #[cfg(feature = "dashboard")]
 pub use state::{DashboardControlEvent, DashboardControlValue};
 pub use text::{highlight_query_job, matlab_syntax_job};
+pub use ui::zoom_controls::show_zoom_controls;
 pub use ui::{
     ClickAction, UpdateResponse, apply_update_response, show_info_windows, update, update_with_info,
 };

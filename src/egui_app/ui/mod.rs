@@ -7,6 +7,7 @@ pub mod signal_routing;
 pub mod types;
 pub mod update;
 pub mod view_transform;
+pub mod zoom_controls;
 
 pub use dialogs::{apply_update_response, show_info_windows};
 pub use types::{ClickAction, UpdateResponse};

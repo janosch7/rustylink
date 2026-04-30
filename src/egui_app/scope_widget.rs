@@ -8,6 +8,7 @@
 #![cfg(feature = "egui")]
 
 use egui::{Color32, Rect, Ui};
+use std::hash::Hasher;
 
 /// State for a single miniature scope instance.
 ///
@@ -22,6 +23,10 @@ pub struct MiniScope {
 impl MiniScope {
     /// Create a new `MiniScope` with a single demonstration trace.
     pub fn new(id: impl std::hash::Hash) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        id.hash(&mut hasher);
+        let scope_id_offset = (hasher.finish() as usize).max(1);
+
         let (sink, rx) = liveplot::channel_plot();
         let mut traces = liveplot::data::traces::TracesCollection::new(rx);
 
@@ -40,13 +45,17 @@ impl MiniScope {
         // Flush the channel so traces has the data
         traces.update();
 
-        let panel = liveplot::LiveplotPanel::new_with_id(id, 0);
+        let panel = liveplot::LiveplotPanel::new_with_id(id, scope_id_offset);
 
         Self { panel, traces }
     }
 
     /// Render the miniature scope into the given UI region.
     pub fn show(&mut self, ui: &mut Ui) {
+        let available = ui.available_size_before_wrap();
+        self.panel.set_total_widget_size(available);
+        self.panel.set_tick_label_thresholds(250.0, 200.0);
+        self.panel.set_legend_thresholds(180.0, 120.0);
         self.panel
             .render_panel(ui, |_plot_ui, _scope_data, _traces| {}, &mut self.traces);
     }

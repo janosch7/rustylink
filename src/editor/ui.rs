@@ -22,7 +22,7 @@ use crate::model::EndpointRef;
 
 use crate::egui_app::{
     BlockDialog, SignalDialog, endpoint_pos_maybe_mirrored, get_block_type_cfg,
-    highlight_query_job, parse_block_rect, parse_rect_str, render_block_icon,
+    highlight_query_job, parse_block_rect, parse_rect_str, render_block_icon, show_zoom_controls,
     wrap_text_to_max_width,
 };
 
@@ -62,7 +62,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let path_snapshot = state.app.path.clone();
 
     // Top panel: breadcrumbs + search + edit toolbar
-    egui::TopBottomPanel::top("editor_top").show_inside(ui, |ui| {
+    egui::TopBottomPanel::top(state.app.egui_id("editor_top")).show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             let up_label = egui::RichText::new("⬆ Up");
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
@@ -352,26 +352,18 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             );
         }
 
-        // Zoom controls
-        egui::Area::new("editor_zoom_controls".into())
-            .fixed_pos(Pos2::new(avail.left() + 8.0, avail.top() + 8.0))
-            .show(ui.ctx(), |ui| {
-                egui::Frame::menu(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.small_button("−").clicked() {
-                            state.app.zoom = (state.app.zoom * 0.9).clamp(0.2, 10.0);
-                        }
-                        if ui.small_button("+").clicked() {
-                            state.app.zoom = (state.app.zoom * 1.1).clamp(0.2, 10.0);
-                        }
-                        if ui.small_button("Reset").clicked() {
-                            state.app.reset_view = true;
-                        }
-                        let percent = (state.app.zoom * 100.0).round() as i32;
-                        ui.label(format!("{}%", percent));
-                    });
-                });
-            });
+        show_zoom_controls(
+            ui.ctx(),
+            state.app.egui_id("editor_zoom_controls"),
+            Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
+            &mut state.app.zoom,
+            &mut state.app.pan,
+            base_scale,
+            bb,
+            Pos2::new(avail.left() + margin, avail.top() + margin),
+            avail.center(),
+            &mut state.app.reset_view,
+        );
 
         // Build SID maps
         let mut sid_map: HashMap<String, Rect> = HashMap::new();

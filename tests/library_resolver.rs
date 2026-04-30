@@ -178,7 +178,6 @@ fn library_resolver_finds_and_reports_missing_libraries() {
 
 #[test]
 fn resolve_virtual_simulink_logic_and_bit() {
-    use camino::Utf8PathBuf;
     use indexmap::IndexMap;
     use rustylink::model::{Block, System};
     use rustylink::parser::{FsSource, SimulinkParser};

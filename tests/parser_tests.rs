@@ -1,8 +1,7 @@
-use camino::Utf8PathBuf;
 use indexmap::IndexMap;
 use rustylink::builtin_libraries::matrix_library;
 use rustylink::model::System;
-use rustylink::parser::{FsSource, LibraryResolver, SimulinkParser, is_virtual_library};
+use rustylink::parser::{FsSource, SimulinkParser, is_virtual_library};
 
 use rustylink::parser::helpers::clean_whitespace;
 

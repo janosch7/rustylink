@@ -5,6 +5,7 @@ use super::line_coloring;
 use super::signal_routing;
 use super::types::{ClickAction, UpdateResponse};
 use super::view_transform;
+use super::zoom_controls::show_zoom_controls;
 use crate::block_types::BlockShape;
 use crate::editor::operations;
 #[cfg(feature = "dashboard")]
@@ -12,7 +13,6 @@ use crate::egui_app::DashboardControlValue;
 use crate::egui_app::geometry::endpoint_pos_maybe_mirrored;
 use crate::egui_app::geometry::{parse_block_rect, parse_rect_str};
 use crate::egui_app::navigation::resolve_subsystem_by_vec;
-#[cfg(not(feature = "dashboard"))]
 use crate::egui_app::render::render_center_glyph_maximized;
 use crate::egui_app::render::{
     ComputedPortYCoordinates, PortLabelMaxWidths, port_label_display_name,
@@ -26,6 +26,32 @@ use crate::egui_app::state::{SubsystemApp, resolve_subsystem_by_vec_mut};
 use crate::egui_app::text::highlight_query_job;
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::HashMap;
+
+fn format_live_scalar_csv(value: f64) -> String {
+    let mut text = format!("{value:.6}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text == "-0" { "0".to_string() } else { text }
+}
+
+#[cfg(feature = "dashboard")]
+fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
+    block
+        .sid
+        .as_ref()
+        .and_then(|sid| app.live_block_values.get(sid))
+        .copied()
+        .or_else(|| dashboard_live_value(app, block))
+}
+
+#[cfg(not(feature = "dashboard"))]
+fn block_live_value(_app: &SubsystemApp, _block: &crate::model::Block) -> Option<f64> {
+    None
+}
 
 pub(crate) fn update_internal(
     app: &mut SubsystemApp,
@@ -421,40 +447,18 @@ pub(crate) fn update_internal(
             }
         }
 
-        egui::Area::new("zoom_controls".into())
-            .fixed_pos(Pos2::new(avail.left() + 8.0, avail.top() + 8.0))
-            .show(ui.ctx(), |ui| {
-                egui::Frame::menu(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let center = avail.center();
-                        let origin = Pos2::new(avail.left() + margin, avail.top() + margin);
-                        let mut zoom_by = |factor: f32| {
-                            let old_zoom = staged_zoom;
-                            let new_zoom = (old_zoom * factor).clamp(0.2, 10.0);
-                            let s_old = base_scale * old_zoom;
-                            let s_new = base_scale * new_zoom;
-                            let world_x = (center.x - origin.x - staged_pan.x) / s_old + bb.left();
-                            let world_y = (center.y - origin.y - staged_pan.y) / s_old + bb.top();
-                            staged_zoom = new_zoom;
-                            staged_pan.x = center.x - ((world_x - bb.left()) * s_new + origin.x);
-                            staged_pan.y = center.y - ((world_y - bb.top()) * s_new + origin.y);
-                        };
-                        // Menu (buttons and zoom percentage) must not scale with zoom
-                        if ui.small_button("−").clicked() {
-                            zoom_by(0.9);
-                        }
-                        if ui.small_button("+").clicked() {
-                            zoom_by(1.1);
-                        }
-                        if ui.small_button("Reset").clicked() {
-                            staged_reset = true;
-                        }
-                        // Display current zoom level as percent
-                        let percent = (staged_zoom * 100.0).round() as i32;
-                        ui.label(format!("{}%", percent));
-                    });
-                });
-            });
+        show_zoom_controls(
+            ui.ctx(),
+            app.egui_id("zoom_controls"),
+            Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
+            &mut staged_zoom,
+            &mut staged_pan,
+            base_scale,
+            bb,
+            Pos2::new(avail.left() + margin, avail.top() + margin),
+            avail.center(),
+            &mut staged_reset,
+        );
 
         let to_screen = |p: Pos2| -> Pos2 {
             let s = base_scale * staged_zoom;
@@ -2184,36 +2188,54 @@ pub(crate) fn update_internal(
                 .as_ref()
                 .and_then(|sid| port_label_max_widths.get(sid))
                 .copied();
-            // Icon/value rendering with precedence: mask > value > custom/icon
-            if b.block_type == "Constant" {
+            let live_text = if app.live_mode_enabled {
+                block_live_value(app, b).map(format_live_scalar_csv)
+            } else {
+                None
+            };
+            let static_constant_value = if b.block_type == "Constant" {
                 #[cfg(feature = "dashboard")]
-                let display_text = {
+                {
                     let sid = b.sid.clone().unwrap_or_default();
                     app.constant_edits
                         .get(&sid)
                         .cloned()
                         .or_else(|| b.value.clone())
                         .unwrap_or_else(|| "1".to_string())
-                };
-                #[cfg(feature = "dashboard")]
-                {
-                    let beneath_font_px = 10.0 * font_scale;
-                    let font_id = egui::FontId::proportional(beneath_font_px);
-                    let galley = painter.layout_no_wrap(display_text, font_id.clone(), fg);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    painter.galley(pos, galley, fg);
                 }
                 #[cfg(not(feature = "dashboard"))]
                 {
-                    render_center_glyph_maximized(
-                        &painter,
-                        r_screen,
-                        font_scale,
-                        "C",
-                        fg,
-                        icon_port_label_widths,
-                    );
+                    b.value.clone().unwrap_or_else(|| "1".to_string())
                 }
+            } else {
+                String::new()
+            };
+            let mut value_tooltip: Option<String> = None;
+            // Icon/value rendering with precedence: mask > value > custom/icon
+            if let Some(text) = live_text.clone() {
+                let font_id = egui::FontId::proportional(12.0 * font_scale);
+                let galley = painter.layout_no_wrap(text.clone(), font_id, fg);
+                let pos = r_screen.center() - galley.size() * 0.5;
+                painter.galley(pos, galley, fg);
+                value_tooltip = Some(text);
+            } else if b.block_type == "Constant" {
+                render_center_glyph_maximized(
+                    &painter,
+                    r_screen,
+                    font_scale,
+                    "C",
+                    fg,
+                    icon_port_label_widths,
+                );
+                value_tooltip = Some(static_constant_value);
+            } else if let Some(label) = display_signal_label {
+                let beneath_font_px = 12.0 * font_scale;
+                let font_id = egui::FontId::proportional(beneath_font_px);
+                let color = fg;
+                let galley = painter.layout_no_wrap(label.clone(), font_id.clone(), color);
+                let pos = r_screen.center() - galley.size() * 0.5;
+                painter.galley(pos, galley, color);
+                value_tooltip = Some(label);
             } else if b.mask.is_some() {
                 if let Some(text) = b.mask_display_text.as_ref() {
                     let font_size = (b.font_size.unwrap_or(14) as f32) * font_scale;
@@ -2235,13 +2257,6 @@ pub(crate) fn update_internal(
                 let color = fg;
                 let text = b.value.as_ref().unwrap().clone();
                 let galley = painter.layout_no_wrap(text, font_id.clone(), color);
-                let pos = r_screen.center() - galley.size() * 0.5;
-                painter.galley(pos, galley, color);
-            } else if let Some(label) = display_signal_label {
-                let beneath_font_px = 12.0 * font_scale;
-                let font_id = egui::FontId::proportional(beneath_font_px);
-                let color = fg;
-                let galley = painter.layout_no_wrap(label, font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
             } else if let Some(instance_label) =
@@ -2283,14 +2298,10 @@ pub(crate) fn update_internal(
                 renderer(&painter, b, r_screen, font_scale);
             } else if app.live_mode_enabled {
                 // Live mode: show the current value for dashboard-bound blocks.
-                let live_val = b
-                    .dashboard_binding
-                    .as_ref()
-                    .and_then(|binding| app.live_values.get(binding.uuid()))
-                    .copied();
+                let live_val = block_live_value(app, b);
                 if let Some(val) = live_val {
                     let font_id = egui::FontId::proportional(12.0 * font_scale);
-                    let text = format!("{val:.4}");
+                    let text = format_live_scalar_csv(val);
                     let galley = painter.layout_no_wrap(text, font_id, fg);
                     let pos = r_screen.center() - galley.size() * 0.5;
                     painter.galley(pos, galley, fg);
@@ -2309,6 +2320,16 @@ pub(crate) fn update_internal(
                     font_scale,
                     icon_port_label_widths,
                 );
+            }
+
+            if let Some(tooltip) = value_tooltip {
+                let hover_key = b.sid.clone().unwrap_or_else(|| b.name.clone());
+                let resp = ui.interact(
+                    *r_screen,
+                    app.egui_id(("block_value_tooltip", hover_key)),
+                    Sense::hover(),
+                );
+                resp.on_hover_text(tooltip);
             }
             #[cfg(feature = "dashboard")]
             let _ = render_dashboard_live_overlay(app, ui, b, *r_screen, fg);
@@ -2778,6 +2799,10 @@ fn print_dashboard_connected_signals(
             );
         }
         None => {
+            println!(
+                "    · no BindingPersistence metadata resolved for SID {}",
+                block.sid.as_deref().unwrap_or("<none>")
+            );
             // Fall back to line-based connection scanning
             print_line_based_connections(block, entities);
         }

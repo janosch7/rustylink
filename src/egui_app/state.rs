@@ -292,6 +292,9 @@ pub struct SubsystemApp {
     /// Live values for dashboard blocks, keyed by `DashboardBinding::uuid()`.
     pub live_values: HashMap<String, f64>,
 
+    /// Live values for visible blocks, keyed by block SID.
+    pub live_block_values: HashMap<String, f64>,
+
     /// Default path used to save/load viewer layout overrides.
     pub layout_file_path: Option<Utf8PathBuf>,
 
@@ -384,6 +387,7 @@ impl SubsystemApp {
             add_mode_enabled: false,
             live_mode_enabled: false,
             live_values: HashMap::new(),
+            live_block_values: HashMap::new(),
             layout_file_path: None,
             layout_dirty: false,
             view_bounds: None,

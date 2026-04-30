@@ -82,3 +82,58 @@ features = ["tiles", "fft", "parquet"]
 
 [dev-dependencies]
 tempfile = "3.10"
+
+[[test]]
+name = "block_catalog"
+path = "tests/block_catalog.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "dashboard_ui_blocks"
+path = "tests/dashboard_ui_blocks.rs"
+required-features = ["dashboard"]
+
+[[test]]
+name = "editor_block_catalog"
+path = "tests/editor_block_catalog.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "editor_selection"
+path = "tests/editor_selection.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "editor_state"
+path = "tests/editor_state.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "editor_ui"
+path = "tests/editor_ui.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "egui_app_render"
+path = "tests/egui_app_render.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "egui_app_ui"
+path = "tests/egui_app_ui.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "library_resolver"
+path = "tests/library_resolver.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "parser_tests"
+path = "tests/parser_tests.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "user_virtual_library"
+path = "tests/user_virtual_library.rs"
+required-features = ["egui"]

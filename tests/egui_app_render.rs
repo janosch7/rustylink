@@ -258,7 +258,7 @@ fn icon_lookup_diagonal_matrix_alias() {
     );
 
     // and the generic fallback via block_type (used by the catalog) also works
-    let mut blk2 =
+    let blk2 =
         rustylink::editor::operations::create_default_block("DiagonalMatrix", "Bar", 0, 0, 1, 1);
     let cfg2 = rustylink::egui_app::get_block_type_cfg(&blk2);
     assert_eq!(
