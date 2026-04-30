@@ -496,7 +496,7 @@ pub(crate) fn update_internal(
 
         // Collect scope blocks for deferred liveplot rendering (after painter borrow ends).
         #[cfg(feature = "dashboard")]
-        let mut deferred_scope_rects: Vec<(String, Rect)> = Vec::new();
+        let mut deferred_scope_rects: Vec<(String, String, Rect)> = Vec::new();
 
         // Collect Constant blocks for deferred TextEdit rendering.
         #[cfg(feature = "dashboard")]
@@ -583,10 +583,7 @@ pub(crate) fn update_internal(
                     // Open a scope popout window when a Scope/DashboardScope is clicked.
                     #[cfg(feature = "dashboard")]
                     if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
-                        let key = b
-                            .sid
-                            .clone()
-                            .unwrap_or_else(|| format!("__scope_{}", b.name));
+                        let key = app.scope_key_for_block(b);
                         app.scope_popout = Some(crate::egui_app::state::ScopePopout {
                             title: b.name.clone(),
                             scope_key: key,
@@ -2277,16 +2274,17 @@ pub(crate) fn update_internal(
                 // Without: simple static waveform glyph.
                 #[cfg(feature = "dashboard")]
                 {
-                    let scope_rect = r_screen.shrink(4.0);
-                    if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
-                        painter.rect_filled(scope_rect, 2.0, Color32::from_rgb(30, 30, 30));
-                        let key = b
-                            .sid
-                            .clone()
-                            .unwrap_or_else(|| format!("__scope_{}", b.name));
-                        deferred_scope_rects.push((key, scope_rect));
+                    if app.live_mode_enabled {
+                        let scope_rect = r_screen.shrink(4.0);
+                        if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
+                            painter.rect_filled(scope_rect, 2.0, Color32::from_rgb(30, 30, 30));
+                            let key = app.scope_key_for_block(b);
+                            deferred_scope_rects.push((key, b.name.clone(), scope_rect));
+                        } else {
+                            // Too small for liveplot — draw a simple waveform glyph
+                            paint_scope_glyph(&painter, r_screen);
+                        }
                     } else {
-                        // Too small for liveplot — draw a simple waveform glyph
                         paint_scope_glyph(&painter, r_screen);
                     }
                 }
@@ -2565,24 +2563,37 @@ pub(crate) fn update_internal(
         // This runs after the painter borrow is no longer needed so we can
         // use `ui` mutably via `scope_builder`.
         #[cfg(feature = "dashboard")]
-        for (scope_key, scope_rect) in &deferred_scope_rects {
-            let mut scopes = app.scope_instances.lock().unwrap();
-            let storage_key = app.embedded_scope_storage_key(scope_key);
-            let scope = scopes
-                .entry(storage_key)
-                .or_insert_with(|| {
-                    crate::egui_app::scope_widget::MiniScope::new((
-                        app.instance_id,
-                        "embedded_scope",
-                        scope_key.as_str(),
-                    ))
-                });
+        for (scope_key, scope_title, scope_rect) in &deferred_scope_rects {
             ui.scope_builder(
                 egui::UiBuilder::new().max_rect(*scope_rect),
                 |child_ui| {
-                    scope.show(child_ui);
+                    let mut scopes = app.scope_instances.lock().unwrap();
+                    let storage_key = app.embedded_scope_storage_key(scope_key);
+                    let scope = scopes.entry(storage_key).or_insert_with(|| {
+                        crate::egui_app::scope_widget::MiniScope::new((
+                            app.instance_id,
+                            "embedded_scope",
+                            scope_key.as_str(),
+                        ))
+                    });
+                    child_ui.push_id(("embedded_scope_ui", scope_key.as_str()), |child_ui| {
+                        scope.show(child_ui);
+                    });
                 },
             );
+
+            let scope_resp = ui.interact(
+                *scope_rect,
+                app.egui_id(("embedded_scope_click", scope_key.as_str())),
+                Sense::click(),
+            );
+            if scope_resp.clicked() {
+                app.scope_popout = Some(crate::egui_app::state::ScopePopout {
+                    title: scope_title.clone(),
+                    scope_key: scope_key.clone(),
+                    open: true,
+                });
+            }
         }
 
         // Deferred inline TextEdit for Constant blocks (after painter borrow ends).
@@ -2799,10 +2810,17 @@ fn print_dashboard_connected_signals(
             );
         }
         None => {
-            println!(
-                "    · no BindingPersistence metadata resolved for SID {}",
-                block.sid.as_deref().unwrap_or("<none>")
-            );
+            if matches!(block.block_type.as_str(), "Display" | "Scope") {
+                println!(
+                    "    · line-based block (no BindingPersistence expected) for SID {}",
+                    block.sid.as_deref().unwrap_or("<none>")
+                );
+            } else {
+                println!(
+                    "    · dashboard binding missing or unresolved for SID {}",
+                    block.sid.as_deref().unwrap_or("<none>")
+                );
+            }
             // Fall back to line-based connection scanning
             print_line_based_connections(block, entities);
         }

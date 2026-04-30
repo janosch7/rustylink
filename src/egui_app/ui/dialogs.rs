@@ -491,7 +491,9 @@ fn show_scope_popout_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                         scope_key.as_str(),
                     ))
                 });
-                scope.show(ui);
+                ui.push_id(("scope_popout_ui", scope_key.as_str()), |ui| {
+                    scope.show(ui);
+                });
             });
         popout.open = open_flag;
         if !popout.open {

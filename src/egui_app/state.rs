@@ -495,6 +495,14 @@ impl SubsystemApp {
         format!("popout::{scope_key}")
     }
 
+    #[cfg(feature = "dashboard")]
+    pub fn scope_key_for_block(&self, block: &Block) -> String {
+        block
+            .sid
+            .clone()
+            .unwrap_or_else(|| format!("__scope_{}", block.name))
+    }
+
     /// Register a custom button in the signal dialog.
     pub fn add_signal_dialog_button<F, G>(
         &mut self,
