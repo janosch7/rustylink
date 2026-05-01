@@ -38,32 +38,26 @@ fn format_live_scalar_csv(value: f64) -> String {
     if text == "-0" { "0".to_string() } else { text }
 }
 
-fn toggle_manual_switch_setting(app: &mut SubsystemApp, block: &crate::model::Block) -> bool {
+fn toggle_manual_switch_setting(app: &mut SubsystemApp, block: &crate::model::Block) -> Option<bool> {
     let Some(block_sid) = block.sid.as_ref() else {
-        return false;
+        return None;
     };
     let path = app.path.clone();
     let Some(system) = resolve_subsystem_by_vec_mut(&mut app.root, &path) else {
-        return false;
+        return None;
     };
     let Some(live_block) = system
         .blocks
         .iter_mut()
         .find(|candidate| candidate.sid.as_ref() == Some(block_sid))
     else {
-        return false;
+        return None;
     };
 
-    live_block.current_setting = Some(
-        if matches!(live_block.current_setting.as_deref(), Some("1")) {
-            "0"
-        } else {
-            "1"
-        }
-        .to_string(),
-    );
+    let enabled = !matches!(live_block.current_setting.as_deref(), Some("1"));
+    live_block.current_setting = Some(if enabled { "1" } else { "0" }.to_string());
     app.view_cache.invalidate();
-    true
+    Some(enabled)
 }
 
 #[cfg(feature = "dashboard")]
@@ -74,6 +68,71 @@ fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f
         .and_then(|sid| app.live_block_values.get(sid))
         .copied()
         .or_else(|| dashboard_live_value(app, block))
+}
+
+#[cfg(feature = "dashboard")]
+fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
+    if branch.dst.as_ref().is_some_and(|dst| dst.sid == sid) {
+        return true;
+    }
+    branch.branches.iter().any(|child| branch_hits_sid(child, sid))
+}
+
+#[cfg(feature = "dashboard")]
+fn first_input_signal_name(
+    block: &crate::model::Block,
+    entities: &crate::egui_app::state::SubsystemEntities,
+) -> Option<String> {
+    let sid = block.sid.as_deref()?;
+    entities.lines.iter().find_map(|line| {
+        let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
+        let branched = line.branches.iter().any(|branch| branch_hits_sid(branch, sid));
+        if direct || branched {
+            line.name.clone().filter(|name| !name.trim().is_empty())
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(feature = "dashboard")]
+fn scope_title_for_block(
+    block: &crate::model::Block,
+    entities: &crate::egui_app::state::SubsystemEntities,
+) -> String {
+    if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
+        block.dashboard_binding.as_ref()
+    {
+        if !signal_name.trim().is_empty() {
+            return signal_name.clone();
+        }
+    }
+
+    first_input_signal_name(block, entities).unwrap_or_else(|| block.name.clone())
+}
+
+#[cfg(feature = "dashboard")]
+fn update_scope_live_sample(
+    app: &mut SubsystemApp,
+    block: &crate::model::Block,
+    entities: &crate::egui_app::state::SubsystemEntities,
+) {
+    if !matches!(block.block_type.as_str(), "Scope" | "DashboardScope") {
+        return;
+    }
+
+    let Some(value) = block_live_value(app, block) else {
+        return;
+    };
+
+    let scope_key = app.scope_key_for_block(block);
+    let scope_title = scope_title_for_block(block, entities);
+    let mut scopes = app.scope_instances.lock().unwrap();
+    let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
+        crate::egui_app::scope_widget::MiniScope::new((app.instance_id, "scope", scope_key.as_str()))
+    });
+    scope.set_signal_name(scope_title);
+    scope.push_sample(value);
 }
 
 #[cfg(not(feature = "dashboard"))]
@@ -600,11 +659,14 @@ pub(crate) fn update_internal(
             } else if resp.clicked() {
                 println!("Block {} clicked", b.name);
                 if !app.move_mode_enabled {
-                    if app.live_mode_enabled
-                        && b.block_type == "ManualSwitch"
-                        && toggle_manual_switch_setting(app, b)
-                    {
-                        any_block_clicked = true;
+                    if app.live_mode_enabled && b.block_type == "ManualSwitch" {
+                        if let Some(enabled) = toggle_manual_switch_setting(app, b) {
+                            app.queue_dashboard_control(
+                                (*b).clone(),
+                                DashboardControlValue::Bool(enabled),
+                            );
+                            any_block_clicked = true;
+                        }
                     } else {
                         // Dashboard / UI block click: print connected block and signal info.
                         // Also handle traditional signal-line blocks like Scope and Display.
@@ -619,7 +681,7 @@ pub(crate) fn update_internal(
                         if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
                             let key = app.scope_key_for_block(b);
                             app.scope_popout = Some(crate::egui_app::state::ScopePopout {
-                                title: b.name.clone(),
+                                title: scope_title_for_block(b, entities),
                                 scope_key: key,
                                 open: true,
                             });
@@ -2193,19 +2255,14 @@ pub(crate) fn update_internal(
                 }
             }
             let fg = contrast_color(*bg);
+            #[cfg(feature = "dashboard")]
+            update_scope_live_sample(app, b, entities);
             let display_signal_label = if b.block_type == "Display" {
                 let sid = b.sid.as_deref();
                 sid.and_then(|sid| {
-                    fn branch_hits(br: &crate::model::Branch, sid: &str) -> bool {
-                        if br.dst.as_ref().map_or(false, |d| d.sid == sid) {
-                            return true;
-                        }
-                        br.branches.iter().any(|sub| branch_hits(sub, sid))
-                    }
-
                     entities.lines.iter().find_map(|line| {
-                        let direct = line.dst.as_ref().map_or(false, |dst| dst.sid == sid);
-                        let branched = line.branches.iter().any(|br| branch_hits(br, sid));
+                        let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
+                        let branched = line.branches.iter().any(|br| branch_hits_sid(br, sid));
                         if direct || branched {
                             line.name.clone().filter(|s| !s.is_empty())
                         } else {
@@ -2321,7 +2378,7 @@ pub(crate) fn update_internal(
                         if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
                             painter.rect_filled(scope_rect, 2.0, Color32::from_rgb(30, 30, 30));
                             let key = app.scope_key_for_block(b);
-                            deferred_scope_rects.push((key, b.name.clone(), scope_rect));
+                            deferred_scope_rects.push((key, scope_title_for_block(b, entities), scope_rect));
                         } else {
                             // Too small for liveplot — draw a simple waveform glyph
                             paint_scope_glyph(&painter, r_screen);
@@ -2616,8 +2673,7 @@ pub(crate) fn update_internal(
                 |child_ui| {
                     child_ui.set_clip_rect(visible_scope_rect);
                     let mut scopes = app.scope_instances.lock().unwrap();
-                    let storage_key = app.embedded_scope_storage_key(scope_key);
-                    let scope = scopes.entry(storage_key).or_insert_with(|| {
+                    let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
                         crate::egui_app::scope_widget::MiniScope::new((
                             app.instance_id,
                             "embedded_scope",
@@ -2989,18 +3045,6 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
 }
 
 #[cfg(feature = "dashboard")]
-fn dashboard_drag_speed(current: f64) -> f64 {
-    let magnitude = current.abs();
-    if magnitude >= 100.0 {
-        1.0
-    } else if magnitude >= 1.0 {
-        0.1
-    } else {
-        0.01
-    }
-}
-
-#[cfg(feature = "dashboard")]
 fn render_dashboard_live_value_badge(painter: &egui::Painter, rect: Rect, fg: Color32, value: f64) {
     let badge_text = format!("{value:.4}");
     let font_id = egui::FontId::proportional(11.0);
@@ -3029,12 +3073,14 @@ fn render_dashboard_live_overlay(
         return false;
     };
 
-    let overlay_rect = rect.shrink(8.0);
+    let interact_id = app.egui_id((
+        "dashboard_live_overlay",
+        block.sid.clone().unwrap_or_else(|| block.name.clone()),
+    ));
+    let response = ui.interact(rect.shrink(4.0), interact_id, Sense::click_and_drag());
     match kind {
         "bool" => {
             let current = live_value >= 0.5;
-            let label = if current { "On" } else { "Off" };
-            let response = ui.put(overlay_rect, egui::Button::new(label));
             if response.clicked() {
                 app.queue_dashboard_control(block.clone(), DashboardControlValue::Bool(!current));
                 return true;
@@ -3042,7 +3088,6 @@ fn render_dashboard_live_overlay(
             false
         }
         "pulse" => {
-            let response = ui.put(overlay_rect, egui::Button::new("Pulse"));
             if response.clicked() {
                 app.queue_dashboard_control(block.clone(), DashboardControlValue::PulseHigh);
                 return true;
@@ -3050,18 +3095,68 @@ fn render_dashboard_live_overlay(
             false
         }
         "scalar" => {
-            let mut value = live_value;
-            let response = ui.put(
-                overlay_rect,
-                egui::DragValue::new(&mut value).speed(dashboard_drag_speed(live_value)),
-            );
-            if response.changed() {
+            if (response.clicked() || response.dragged())
+                && response.interact_pointer_pos().is_some()
+            {
+                let value = dashboard_scalar_value_from_pointer(block, rect, response.interact_pointer_pos().unwrap(), live_value);
                 app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
                 return true;
             }
-            response.clicked() || response.dragged()
+            false
         }
         _ => false,
+    }
+}
+
+#[cfg(feature = "dashboard")]
+fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
+    fn parse_property(block: &crate::model::Block, keys: &[&str]) -> Option<f64> {
+        keys.iter().find_map(|key| {
+            block.properties.get(*key).and_then(|value| value.trim().parse::<f64>().ok())
+        })
+    }
+
+    let min = parse_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]).unwrap_or(0.0);
+    let max = parse_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]).unwrap_or(100.0);
+    if min < max {
+        (min, max)
+    } else {
+        (0.0, 100.0)
+    }
+}
+
+#[cfg(feature = "dashboard")]
+fn dashboard_scalar_value_from_pointer(
+    block: &crate::model::Block,
+    rect: Rect,
+    pointer: Pos2,
+    fallback: f64,
+) -> f64 {
+    let (min, max) = dashboard_scalar_range(block);
+    let fraction = match block.block_type.as_str() {
+        "KnobBlock" | "RotarySwitchBlock" => {
+            let center = rect.center();
+            let dx = pointer.x - center.x;
+            let dy = center.y - pointer.y;
+            let mut angle = dy.atan2(dx);
+            let start = 5.0 * std::f32::consts::PI / 4.0;
+            let end = -std::f32::consts::PI / 4.0;
+            while angle > start {
+                angle -= 2.0 * std::f32::consts::PI;
+            }
+            let normalized = (angle - start) / (end - start);
+            normalized.clamp(0.0, 1.0)
+        }
+        _ if rect.height() > rect.width() => {
+            ((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0)
+        }
+        _ => ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0),
+    };
+
+    if fraction.is_finite() {
+        min + (max - min) * fraction as f64
+    } else {
+        fallback
     }
 }
 
