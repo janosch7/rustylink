@@ -58,6 +58,51 @@ fn font_for_rect(rect: &Rect, scale: f32) -> f32 {
     (rect.height() * 0.25 * scale).clamp(6.0, 24.0)
 }
 
+fn parse_range_property(block: &Block, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        block
+            .properties
+            .get(*key)
+            .and_then(|value| value.trim().parse::<f64>().ok())
+    })
+}
+
+fn normalized_live_value(block: &Block, value: f64) -> f32 {
+    let min =
+        parse_range_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]).unwrap_or(0.0);
+    let max =
+        parse_range_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]).unwrap_or(100.0);
+    if max <= min {
+        return 0.0;
+    }
+    ((value - min) / (max - min)).clamp(0.0, 1.0) as f32
+}
+
+fn discrete_live_index(value: f64, option_count: usize) -> usize {
+    if option_count == 0 {
+        return 0;
+    }
+    value
+        .round()
+        .clamp(0.0, (option_count.saturating_sub(1)) as f64) as usize
+}
+
+fn combo_box_label(block: &Block, index: usize) -> String {
+    block
+        .properties
+        .get("Values")
+        .map(|values| {
+            values
+                .split(['\n', ',', ';'])
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .nth(index)
+                .map(str::to_string)
+        })
+        .flatten()
+        .unwrap_or_else(|| format!("Label {}", index + 1))
+}
+
 // ─── PushButton ─────────────────────────────────────────────────────────
 
 /// Draws a push button like Simulink's Dashboard PushButton.
@@ -1015,4 +1060,677 @@ pub fn get_dashboard_renderer(block_type: &str) -> Option<super::render::Interio
         .iter()
         .find(|(k, _)| *k == block_type)
         .map(|(_, f)| *f)
+}
+
+pub fn paint_live_dashboard_value_overlay(
+    painter: &egui::Painter,
+    block: &Block,
+    rect: &Rect,
+    font_scale: f32,
+    live_value: f64,
+) {
+    match block.block_type.as_str() {
+        "PushButtonBlock" => {
+            let inner = inner_rect(rect, 0.85);
+            let label = prop(block, "ButtonText", &block.name);
+            let fill = if live_value >= 0.5 {
+                ACCENT.linear_multiply(0.25)
+            } else {
+                Color32::from_rgb(230, 230, 235)
+            };
+            painter.rect_filled(inner, 4.0, fill);
+            widget_frame(painter, inner, 4.0);
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.45);
+            painter.text(
+                inner.center(),
+                Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(fsz),
+                TEXT_DARK,
+            );
+        }
+        "SliderSwitchBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let track_w = (inner.width() * 0.50).clamp(16.0, 50.0);
+            let track_h = (inner.height() * 0.25).clamp(8.0, 20.0);
+            let track = Rect::from_center_size(inner.center(), Vec2::new(track_w, track_h));
+            let thumb_r = track_h * 0.4;
+            let thumb_x = if live_value >= 0.5 {
+                track.right() - thumb_r - 2.0
+            } else {
+                track.left() + thumb_r + 2.0
+            };
+            let track_fill = if live_value >= 0.5 {
+                ACCENT.linear_multiply(0.35)
+            } else {
+                Color32::from_rgb(190, 195, 200)
+            };
+            painter.rect_filled(track, track_h / 2.0, track_fill);
+            painter.rect_stroke(
+                track,
+                track_h / 2.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            painter.circle_filled(
+                Pos2::new(thumb_x, track.center().y),
+                thumb_r,
+                Color32::WHITE,
+            );
+            painter.circle_stroke(
+                Pos2::new(thumb_x, track.center().y),
+                thumb_r,
+                Stroke::new(1.0, BORDER),
+            );
+        }
+        "RadioButtonGroup" => {
+            let inner = inner_rect(rect, 0.80);
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.15);
+            let font = egui::FontId::proportional(fsz);
+            let group_name = prop(block, "ButtonGroupName", "Group");
+            painter.text(
+                Pos2::new(inner.left() + 2.0, inner.top()),
+                Align2::LEFT_TOP,
+                group_name,
+                font.clone(),
+                TEXT_DARK,
+            );
+            let labels = [
+                combo_box_label(block, 0),
+                combo_box_label(block, 1),
+                combo_box_label(block, 2),
+            ];
+            let radio_r = (fsz * 0.4).clamp(2.0, 6.0);
+            let y_start = inner.top() + fsz * 1.8;
+            let spacing = (inner.height() - fsz * 2.0) / (labels.len() as f32 + 0.5);
+            let selected = discrete_live_index(live_value, labels.len());
+            for (index, label) in labels.iter().enumerate() {
+                let y = y_start + index as f32 * spacing;
+                let cx = inner.left() + radio_r + 4.0;
+                painter.circle_stroke(Pos2::new(cx, y), radio_r, Stroke::new(1.0, BORDER));
+                if index == selected {
+                    painter.circle_filled(Pos2::new(cx, y), radio_r * 0.55, ACCENT);
+                }
+                painter.text(
+                    Pos2::new(cx + radio_r + 4.0, y),
+                    Align2::LEFT_CENTER,
+                    label,
+                    font.clone(),
+                    TEXT_DARK,
+                );
+            }
+        }
+        "ComboBox" => {
+            let inner = inner_rect(rect, 0.80);
+            let field_h = (inner.height() * 0.4).clamp(10.0, 30.0);
+            let field = Rect::from_min_max(
+                Pos2::new(inner.left(), inner.center().y - field_h / 2.0),
+                Pos2::new(inner.right(), inner.center().y + field_h / 2.0),
+            );
+            painter.rect_filled(field, 3.0, BG_FIELD);
+            painter.rect_stroke(
+                field,
+                3.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.35);
+            let label = combo_box_label(block, discrete_live_index(live_value, 3));
+            painter.text(
+                Pos2::new(field.left() + 4.0, field.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(fsz),
+                TEXT_DARK,
+            );
+            let arrow_sz = (field_h * 0.3).clamp(3.0, 8.0);
+            let arrow_cx = field.right() - arrow_sz * 2.0;
+            let arrow_cy = field.center().y;
+            let pts = vec![
+                Pos2::new(arrow_cx - arrow_sz, arrow_cy - arrow_sz * 0.5),
+                Pos2::new(arrow_cx + arrow_sz, arrow_cy - arrow_sz * 0.5),
+                Pos2::new(arrow_cx, arrow_cy + arrow_sz * 0.5),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, TEXT_DARK, Stroke::NONE));
+        }
+        "Checkbox" => {
+            let inner = inner_rect(rect, 0.80);
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.35);
+            let font = egui::FontId::proportional(fsz);
+            let label = prop(block, "Text", "Label");
+            let box_sz = (fsz * 1.1).clamp(6.0, 16.0);
+            let cx = inner.left() + box_sz / 2.0 + 2.0;
+            let cy = inner.center().y;
+            let check_rect = Rect::from_center_size(Pos2::new(cx, cy), Vec2::splat(box_sz));
+            painter.rect_filled(check_rect, 2.0, BG_FIELD);
+            painter.rect_stroke(
+                check_rect,
+                2.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                Pos2::new(cx + box_sz / 2.0 + 4.0, cy),
+                Align2::LEFT_CENTER,
+                label,
+                font,
+                TEXT_DARK,
+            );
+            if live_value >= 0.5 {
+                let left = cx - box_sz * 0.28;
+                let mid = cx - box_sz * 0.05;
+                let right = cx + box_sz * 0.30;
+                painter.line_segment(
+                    [Pos2::new(left, cy), Pos2::new(mid, cy + box_sz * 0.22)],
+                    Stroke::new(1.5, ACCENT_DARK),
+                );
+                painter.line_segment(
+                    [
+                        Pos2::new(mid, cy + box_sz * 0.22),
+                        Pos2::new(right, cy - box_sz * 0.25),
+                    ],
+                    Stroke::new(1.5, ACCENT_DARK),
+                );
+            }
+        }
+        "SliderBlock" | "LinearGaugeBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let cy = inner.center().y;
+            let track_h = if block.block_type == "SliderBlock" {
+                let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.2);
+                let font = egui::FontId::proportional(fsz);
+                let track_h = (inner.height() * 0.06).clamp(2.0, 5.0);
+                let track = Rect::from_min_max(
+                    Pos2::new(inner.left(), cy - track_h / 2.0),
+                    Pos2::new(inner.right(), cy + track_h / 2.0),
+                );
+                painter.rect_filled(track, 2.0, Color32::from_rgb(190, 200, 210));
+                let n_ticks = 11;
+                for index in 0..n_ticks {
+                    let tick_t = index as f32 / (n_ticks - 1) as f32;
+                    let x = inner.left() + tick_t * inner.width();
+                    let tick_h = if index % 2 == 0 { 4.0 } else { 2.5 };
+                    painter.line_segment(
+                        [
+                            Pos2::new(x, cy + track_h / 2.0 + 1.0),
+                            Pos2::new(x, cy + track_h / 2.0 + 1.0 + tick_h),
+                        ],
+                        Stroke::new(1.0, BORDER),
+                    );
+                }
+                let label_y = cy + track_h / 2.0 + 8.0;
+                painter.text(
+                    Pos2::new(inner.left(), label_y),
+                    Align2::LEFT_TOP,
+                    "0",
+                    font.clone(),
+                    TEXT_DARK,
+                );
+                painter.text(
+                    Pos2::new(inner.right(), label_y),
+                    Align2::RIGHT_TOP,
+                    "100",
+                    font,
+                    TEXT_DARK,
+                );
+                track_h
+            } else {
+                let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.18);
+                let font = egui::FontId::proportional(fsz);
+                let bar_h = (inner.height() * 0.15).clamp(3.0, 10.0);
+                let bar = Rect::from_min_max(
+                    Pos2::new(inner.left(), cy - bar_h / 2.0),
+                    Pos2::new(inner.right(), cy + bar_h / 2.0),
+                );
+                painter.rect_filled(bar, 2.0, Color32::from_rgb(220, 220, 225));
+                painter.rect_stroke(bar, 2.0, Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+                let n_ticks = 11;
+                for index in 0..n_ticks {
+                    let tick_t = index as f32 / (n_ticks - 1) as f32;
+                    let x = inner.left() + tick_t * inner.width();
+                    let tick_len = if index % 5 == 0 { 4.0 } else { 2.5 };
+                    painter.line_segment(
+                        [
+                            Pos2::new(x, bar.bottom() + 1.0),
+                            Pos2::new(x, bar.bottom() + 1.0 + tick_len),
+                        ],
+                        Stroke::new(1.0, TEXT_DARK),
+                    );
+                }
+                let label_y = bar.bottom() + 7.0;
+                painter.text(
+                    Pos2::new(inner.left(), label_y),
+                    Align2::LEFT_TOP,
+                    "0",
+                    font.clone(),
+                    TEXT_DARK,
+                );
+                painter.text(
+                    Pos2::new(inner.right(), label_y),
+                    Align2::RIGHT_TOP,
+                    "100",
+                    font,
+                    TEXT_DARK,
+                );
+                bar_h
+            };
+            let fraction = normalized_live_value(block, live_value);
+            let fill_rect = Rect::from_min_max(
+                Pos2::new(inner.left(), cy - track_h / 2.0),
+                Pos2::new(inner.left() + inner.width() * fraction, cy + track_h / 2.0),
+            );
+            painter.rect_filled(fill_rect, 2.0, ACCENT);
+            let thumb_x = inner.left() + inner.width() * fraction;
+            if block.block_type == "SliderBlock" {
+                let thumb_w = (inner.width() * 0.04).clamp(4.0, 10.0);
+                let thumb = Rect::from_center_size(
+                    Pos2::new(thumb_x, cy),
+                    Vec2::new(thumb_w, track_h * 4.0),
+                );
+                painter.rect_filled(thumb, 2.0, ACCENT_DARK);
+            } else {
+                let tri_sz = track_h * 0.8;
+                let pts = vec![
+                    Pos2::new(thumb_x, cy - track_h / 2.0 - 1.0),
+                    Pos2::new(thumb_x - tri_sz, cy - track_h / 2.0 - 1.0 - tri_sz),
+                    Pos2::new(thumb_x + tri_sz, cy - track_h / 2.0 - 1.0 - tri_sz),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, ACCENT, Stroke::NONE));
+            }
+        }
+        "EditField" | "DisplayBlock" => {
+            let inner = inner_rect(
+                rect,
+                if block.block_type == "DisplayBlock" {
+                    0.85
+                } else {
+                    0.80
+                },
+            );
+            let field_h = if block.block_type == "DisplayBlock" {
+                (inner.height() * 0.55).clamp(10.0, 40.0)
+            } else {
+                (inner.height() * 0.45).clamp(10.0, 30.0)
+            };
+            let field = Rect::from_min_max(
+                Pos2::new(inner.left(), inner.center().y - field_h / 2.0),
+                Pos2::new(inner.right(), inner.center().y + field_h / 2.0),
+            );
+            let fill = if block.block_type == "DisplayBlock" {
+                Color32::from_rgb(240, 245, 240)
+            } else {
+                BG_FIELD
+            };
+            painter.rect_filled(field, 3.0, fill);
+            painter.rect_stroke(
+                field,
+                3.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.42);
+            painter.text(
+                field.center(),
+                Align2::CENTER_CENTER,
+                crate::egui_app::ui::update::format_live_scalar_csv(live_value),
+                if block.block_type == "DisplayBlock" {
+                    egui::FontId::monospace(fsz)
+                } else {
+                    egui::FontId::proportional(fsz)
+                },
+                TEXT_DARK,
+            );
+        }
+        "ToggleSwitchBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.25);
+            let font = egui::FontId::proportional(fsz);
+            let cx = inner.center().x;
+            let cy = inner.center().y;
+            let track_w = (inner.width() * 0.50).clamp(16.0, 50.0);
+            let track_h = (inner.height() * 0.25).clamp(8.0, 20.0);
+            let track = Rect::from_center_size(Pos2::new(cx, cy), Vec2::new(track_w, track_h));
+            let active = live_value >= 0.5;
+            let track_fill = if active {
+                ACCENT.linear_multiply(0.35)
+            } else {
+                Color32::from_rgb(190, 195, 200)
+            };
+            painter.rect_filled(track, track_h / 2.0, track_fill);
+            painter.rect_stroke(
+                track,
+                track_h / 2.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            let thumb_r = track_h * 0.4;
+            let thumb_x = if active {
+                track.right() - thumb_r - 2.0
+            } else {
+                track.left() + thumb_r + 2.0
+            };
+            painter.circle_filled(Pos2::new(thumb_x, cy), thumb_r, Color32::WHITE);
+            painter.circle_stroke(Pos2::new(thumb_x, cy), thumb_r, Stroke::new(1.0, BORDER));
+            painter.text(
+                Pos2::new(track.left() - 4.0, cy),
+                Align2::RIGHT_CENTER,
+                "Off",
+                font.clone(),
+                TEXT_DARK,
+            );
+            painter.text(
+                Pos2::new(track.right() + 4.0, cy),
+                Align2::LEFT_CENTER,
+                "On",
+                font,
+                TEXT_DARK,
+            );
+        }
+        "KnobBlock"
+        | "CircularGaugeBlock"
+        | "SemiCircularGaugeBlock"
+        | "QuarterGaugeBlock"
+        | "RotarySwitchBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let fraction = normalized_live_value(block, live_value);
+            let (cx, cy, radius, start_angle, end_angle, stroke, color) =
+                match block.block_type.as_str() {
+                    "KnobBlock" | "RotarySwitchBlock" => (
+                        inner.center().x,
+                        inner.center().y + inner.height() * 0.05,
+                        (inner.width().min(inner.height()) * 0.35).max(8.0),
+                        5.0 * PI / 4.0,
+                        -PI / 4.0,
+                        2.5,
+                        ACCENT_DARK,
+                    ),
+                    "CircularGaugeBlock" => (
+                        inner.center().x,
+                        inner.center().y + inner.height() * 0.05,
+                        (inner.width().min(inner.height()) * 0.40).max(10.0),
+                        5.0 * PI / 4.0,
+                        -PI / 4.0,
+                        2.0,
+                        NEEDLE_RED,
+                    ),
+                    "SemiCircularGaugeBlock" => (
+                        inner.center().x,
+                        inner.bottom() - inner.height() * 0.15,
+                        (inner.width() * 0.40).min(inner.height() * 0.7).max(10.0),
+                        PI,
+                        0.0,
+                        2.0,
+                        NEEDLE_RED,
+                    ),
+                    _ => (
+                        inner.left() + inner.width() * 0.1,
+                        inner.bottom() - inner.height() * 0.1,
+                        (inner.width() * 0.7).min(inner.height() * 0.7).max(10.0),
+                        PI / 2.0,
+                        0.0,
+                        2.0,
+                        NEEDLE_RED,
+                    ),
+                };
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.12);
+            let font = egui::FontId::proportional(fsz);
+            match block.block_type.as_str() {
+                "KnobBlock" => {
+                    painter.circle_filled(
+                        Pos2::new(cx, cy),
+                        radius,
+                        Color32::from_rgb(220, 220, 225),
+                    );
+                    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+                    painter.circle_filled(
+                        Pos2::new(cx, cy),
+                        radius * 0.7,
+                        Color32::from_rgb(235, 235, 238),
+                    );
+                    let tick_r_outer = radius + 4.0;
+                    let tick_r_inner = radius + 1.0;
+                    let n_ticks = 11;
+                    for index in 0..n_ticks {
+                        let tick_t = index as f32 / (n_ticks - 1) as f32;
+                        let tick_angle = start_angle + tick_t * (end_angle - start_angle);
+                        let outer = Pos2::new(
+                            cx + tick_r_outer * tick_angle.cos(),
+                            cy - tick_r_outer * tick_angle.sin(),
+                        );
+                        let inner_p = Pos2::new(
+                            cx + tick_r_inner * tick_angle.cos(),
+                            cy - tick_r_inner * tick_angle.sin(),
+                        );
+                        painter.line_segment([inner_p, outer], Stroke::new(1.0, BORDER));
+                    }
+                    let label_r = tick_r_outer + fsz;
+                    painter.text(
+                        Pos2::new(
+                            cx + label_r * start_angle.cos(),
+                            cy - label_r * start_angle.sin(),
+                        ),
+                        Align2::CENTER_CENTER,
+                        "0",
+                        font.clone(),
+                        TEXT_DARK,
+                    );
+                    painter.text(
+                        Pos2::new(
+                            cx + label_r * end_angle.cos(),
+                            cy - label_r * end_angle.sin(),
+                        ),
+                        Align2::CENTER_CENTER,
+                        "100",
+                        font.clone(),
+                        TEXT_DARK,
+                    );
+                }
+                "RotarySwitchBlock" => {
+                    painter.circle_filled(
+                        Pos2::new(cx, cy),
+                        radius,
+                        Color32::from_rgb(210, 215, 220),
+                    );
+                    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+                    let labels = ["Low", "Medium", "High"];
+                    let angles = [5.0 * PI / 4.0, PI / 2.0, -PI / 4.0];
+                    let selected = discrete_live_index(live_value, labels.len());
+                    let mark_r = radius + 4.0;
+                    let label_r = radius + fsz * 1.2 + 4.0;
+                    for (index, (label, angle)) in labels.iter().zip(angles.iter()).enumerate() {
+                        let mark_end =
+                            Pos2::new(cx + mark_r * angle.cos(), cy - mark_r * angle.sin());
+                        let mark_start = Pos2::new(
+                            cx + (mark_r - 3.0) * angle.cos(),
+                            cy - (mark_r - 3.0) * angle.sin(),
+                        );
+                        let mark_color = if index == selected {
+                            ACCENT_DARK
+                        } else {
+                            BORDER
+                        };
+                        painter.line_segment([mark_start, mark_end], Stroke::new(1.5, mark_color));
+                        painter.text(
+                            Pos2::new(cx + label_r * angle.cos(), cy - label_r * angle.sin()),
+                            Align2::CENTER_CENTER,
+                            *label,
+                            font.clone(),
+                            TEXT_DARK,
+                        );
+                    }
+                }
+                "CircularGaugeBlock" => {
+                    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(2.0, BORDER));
+                    let n_ticks = 11;
+                    for index in 0..n_ticks {
+                        let tick_t = index as f32 / (n_ticks - 1) as f32;
+                        let tick_angle = start_angle + tick_t * (end_angle - start_angle);
+                        let is_major = index % 2 == 0;
+                        let r_in = if is_major { radius - 4.0 } else { radius - 2.5 };
+                        let p1 =
+                            Pos2::new(cx + r_in * tick_angle.cos(), cy - r_in * tick_angle.sin());
+                        let p2 = Pos2::new(
+                            cx + radius * tick_angle.cos(),
+                            cy - radius * tick_angle.sin(),
+                        );
+                        painter.line_segment(
+                            [p1, p2],
+                            Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+                        );
+                        if is_major {
+                            let val = (tick_t * 100.0).round() as i32;
+                            let label_r = radius + fsz * 0.8;
+                            painter.text(
+                                Pos2::new(
+                                    cx + label_r * tick_angle.cos(),
+                                    cy - label_r * tick_angle.sin(),
+                                ),
+                                Align2::CENTER_CENTER,
+                                format!("{val}"),
+                                font.clone(),
+                                TEXT_DARK,
+                            );
+                        }
+                    }
+                }
+                "SemiCircularGaugeBlock" => {
+                    let n_ticks = 11;
+                    for index in 0..n_ticks {
+                        let tick_t = index as f32 / (n_ticks - 1) as f32;
+                        let tick_angle = start_angle + tick_t * (end_angle - start_angle);
+                        let is_major = index % 2 == 0;
+                        let r_in = if is_major { radius - 4.0 } else { radius - 2.5 };
+                        let p1 =
+                            Pos2::new(cx + r_in * tick_angle.cos(), cy - r_in * tick_angle.sin());
+                        let p2 = Pos2::new(
+                            cx + radius * tick_angle.cos(),
+                            cy - radius * tick_angle.sin(),
+                        );
+                        painter.line_segment(
+                            [p1, p2],
+                            Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+                        );
+                        if is_major {
+                            let val = (tick_t * 100.0).round() as i32;
+                            let label_r = radius + fsz * 0.8;
+                            painter.text(
+                                Pos2::new(
+                                    cx + label_r * tick_angle.cos(),
+                                    cy - label_r * tick_angle.sin(),
+                                ),
+                                Align2::CENTER_CENTER,
+                                format!("{val}"),
+                                font.clone(),
+                                TEXT_DARK,
+                            );
+                        }
+                    }
+                    painter.line_segment(
+                        [Pos2::new(cx - radius, cy), Pos2::new(cx + radius, cy)],
+                        Stroke::new(1.0, BORDER),
+                    );
+                }
+                "QuarterGaugeBlock" => {
+                    let n_ticks = 6;
+                    for index in 0..n_ticks {
+                        let tick_t = index as f32 / (n_ticks - 1) as f32;
+                        let tick_angle = start_angle + tick_t * (end_angle - start_angle);
+                        let p1 = Pos2::new(
+                            cx + (radius - 3.5) * tick_angle.cos(),
+                            cy - (radius - 3.5) * tick_angle.sin(),
+                        );
+                        let p2 = Pos2::new(
+                            cx + radius * tick_angle.cos(),
+                            cy - radius * tick_angle.sin(),
+                        );
+                        painter.line_segment([p1, p2], Stroke::new(1.5, TEXT_DARK));
+                        let label_r = radius + fsz * 0.8;
+                        let val = (tick_t * 100.0).round() as i32;
+                        painter.text(
+                            Pos2::new(
+                                cx + label_r * tick_angle.cos(),
+                                cy - label_r * tick_angle.sin(),
+                            ),
+                            Align2::CENTER_CENTER,
+                            format!("{val}"),
+                            font.clone(),
+                            TEXT_DARK,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            let angle = start_angle + fraction * (end_angle - start_angle);
+            let needle_end = Pos2::new(
+                cx + (radius * 0.85) * angle.cos(),
+                cy - (radius * 0.85) * angle.sin(),
+            );
+            painter.line_segment([Pos2::new(cx, cy), needle_end], Stroke::new(stroke, color));
+            painter.circle_filled(Pos2::new(cx, cy), radius * 0.08, color);
+        }
+        "RockerSwitchBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let fsz = font_for_rect(rect, font_scale).min(inner.width().min(inner.height()) * 0.18);
+            let font = egui::FontId::proportional(fsz);
+            let cx = inner.center().x;
+            let cy = inner.center().y;
+            let w = (inner.width() * 0.28).clamp(10.0, 30.0);
+            let h = (inner.height() * 0.55).clamp(18.0, 56.0);
+            let housing = Rect::from_center_size(Pos2::new(cx, cy), Vec2::new(w, h));
+            painter.rect_filled(housing, w * 0.4, Color32::from_rgb(200, 200, 205));
+            painter.rect_stroke(
+                housing,
+                w * 0.4,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            let rocker_w = w * 0.85;
+            let rocker_h = h * 0.55;
+            let rocker = if live_value >= 0.5 {
+                Rect::from_min_max(
+                    Pos2::new(cx - rocker_w / 2.0, housing.top() + 1.0),
+                    Pos2::new(cx + rocker_w / 2.0, housing.top() + rocker_h + 1.0),
+                )
+            } else {
+                Rect::from_min_max(
+                    Pos2::new(cx - rocker_w / 2.0, housing.bottom() - rocker_h - 1.0),
+                    Pos2::new(cx + rocker_w / 2.0, housing.bottom() - 1.0),
+                )
+            };
+            painter.rect_filled(rocker, 3.0, Color32::from_rgb(230, 230, 235));
+            painter.rect_stroke(
+                rocker,
+                3.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                Pos2::new(cx, housing.top() - 4.0),
+                Align2::CENTER_BOTTOM,
+                "On",
+                font.clone(),
+                TEXT_DARK,
+            );
+            painter.text(
+                Pos2::new(cx, housing.bottom() + 4.0),
+                Align2::CENTER_TOP,
+                "Off",
+                font,
+                TEXT_DARK,
+            );
+        }
+        "LampBlock" => {
+            let inner = inner_rect(rect, 0.80);
+            let radius = (inner.width().min(inner.height()) * 0.35).max(6.0);
+            let center = inner.center();
+            let color = if live_value >= 0.5 {
+                LAMP_ON
+            } else {
+                Color32::from_rgb(120, 120, 120)
+            };
+            painter.circle_filled(center, radius, color);
+            painter.circle_stroke(center, radius, Stroke::new(1.5, BORDER));
+        }
+        _ => {}
+    }
 }

@@ -27,7 +27,7 @@ use crate::egui_app::text::highlight_query_job;
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::HashMap;
 
-fn format_live_scalar_csv(value: f64) -> String {
+pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     let mut text = format!("{value:.6}");
     while text.contains('.') && text.ends_with('0') {
         text.pop();
@@ -38,7 +38,10 @@ fn format_live_scalar_csv(value: f64) -> String {
     if text == "-0" { "0".to_string() } else { text }
 }
 
-fn toggle_manual_switch_setting(app: &mut SubsystemApp, block: &crate::model::Block) -> Option<bool> {
+fn toggle_manual_switch_setting(
+    app: &mut SubsystemApp,
+    block: &crate::model::Block,
+) -> Option<bool> {
     let Some(block_sid) = block.sid.as_ref() else {
         return None;
     };
@@ -60,12 +63,30 @@ fn toggle_manual_switch_setting(app: &mut SubsystemApp, block: &crate::model::Bl
     Some(enabled)
 }
 
+fn uses_live_value_text(block_type: &str) -> bool {
+    matches!(block_type, "Display")
+        || !crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(block_type)
+}
+
+fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
+    live_mode_enabled
+        && uses_live_value_text(block_type)
+        && !matches!(block_type, "Scope" | "DashboardScope" | "ManualSwitch")
+}
+
+fn uses_live_dashboard_widget_renderer(block_type: &str) -> bool {
+    crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(block_type)
+        && !matches!(block_type, "Display" | "DashboardScope")
+}
+
+fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
+    if value >= 0.5 { "1" } else { "0" }
+}
+
 #[cfg(feature = "dashboard")]
 fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
-    block
-        .sid
-        .as_ref()
-        .and_then(|sid| app.live_block_values.get(sid))
+    app.live_block_values
+        .get(&app.live_value_key_for_block(block))
         .copied()
         .or_else(|| dashboard_live_value(app, block))
 }
@@ -75,7 +96,10 @@ fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
     if branch.dst.as_ref().is_some_and(|dst| dst.sid == sid) {
         return true;
     }
-    branch.branches.iter().any(|child| branch_hits_sid(child, sid))
+    branch
+        .branches
+        .iter()
+        .any(|child| branch_hits_sid(child, sid))
 }
 
 #[cfg(feature = "dashboard")]
@@ -86,7 +110,10 @@ fn first_input_signal_name(
     let sid = block.sid.as_deref()?;
     entities.lines.iter().find_map(|line| {
         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
-        let branched = line.branches.iter().any(|branch| branch_hits_sid(branch, sid));
+        let branched = line
+            .branches
+            .iter()
+            .any(|branch| branch_hits_sid(branch, sid));
         if direct || branched {
             line.name.clone().filter(|name| !name.trim().is_empty())
         } else {
@@ -129,7 +156,11 @@ fn update_scope_live_sample(
     let scope_title = scope_title_for_block(block, entities);
     let mut scopes = app.scope_instances.lock().unwrap();
     let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
-        crate::egui_app::scope_widget::MiniScope::new((app.instance_id, "scope", scope_key.as_str()))
+        crate::egui_app::scope_widget::MiniScope::new((
+            app.instance_id,
+            "scope",
+            scope_key.as_str(),
+        ))
     });
     scope.set_signal_name(scope_title);
     scope.push_sample(value);
@@ -222,6 +253,7 @@ pub(crate) fn update_internal(
                 .clicked()
             {
                 app.live_mode_enabled = !app.live_mode_enabled;
+                ui.ctx().request_repaint();
             }
             if app.move_mode_enabled {
                 let undo_btn = egui::Button::new("Undo");
@@ -2279,12 +2311,7 @@ pub(crate) fn update_internal(
                 .as_ref()
                 .and_then(|sid| port_label_max_widths.get(sid))
                 .copied();
-            let live_text = if app.live_mode_enabled
-                && !matches!(
-                    b.block_type.as_str(),
-                    "Scope" | "DashboardScope" | "ManualSwitch"
-                )
-            {
+            let live_text = if should_render_live_text(app.live_mode_enabled, &b.block_type) {
                 block_live_value(app, b).map(format_live_scalar_csv)
             } else {
                 None
@@ -2341,6 +2368,28 @@ pub(crate) fn update_internal(
                     let pos = r_screen.center() - galley.size() * 0.5;
                     painter.galley(pos, galley, color);
                 }
+            } else if app.live_mode_enabled && uses_live_dashboard_widget_renderer(&b.block_type) {
+                if let Some(renderer) = get_interior_renderer(&b.block_type) {
+                    if let Some(live_value) = block_live_value(app, b) {
+                        crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
+                            &painter,
+                            b,
+                            r_screen,
+                            font_scale,
+                            live_value,
+                        );
+                    } else {
+                        renderer(&painter, b, r_screen, font_scale);
+                    }
+                } else {
+                    render_block_icon(
+                        &painter,
+                        b,
+                        r_screen,
+                        font_scale,
+                        icon_port_label_widths,
+                    );
+                }
             } else if b
                 .value
                 .as_ref()
@@ -2367,7 +2416,25 @@ pub(crate) fn update_internal(
                 painter.galley(pos, galley, color);
             } else if b.block_type == "ManualSwitch" {
                 let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
-                render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
+                if app.live_mode_enabled {
+                    if let Some(live_value) = block_live_value(app, b) {
+                        let mut live_block = (*b).clone();
+                        live_block.current_setting = Some(
+                            manual_switch_setting_from_live_value(live_value).to_string(),
+                        );
+                        render_manual_switch(
+                            &painter,
+                            &live_block,
+                            r_screen,
+                            font_scale,
+                            coords_ref,
+                        );
+                    } else {
+                        render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
+                    }
+                } else {
+                    render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
+                }
             } else if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
                 // With the `dashboard` feature: interactive liveplot scope.
                 // Without: simple static waveform glyph.
@@ -2393,7 +2460,8 @@ pub(crate) fn update_internal(
                 }
             } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
                 renderer(&painter, b, r_screen, font_scale);
-            } else if app.live_mode_enabled {
+            } else if app.live_mode_enabled && uses_live_value_text(&b.block_type)
+            {
                 // Live mode: show the current value for dashboard-bound blocks.
                 let live_val = block_live_value(app, b);
                 if let Some(val) = live_val {
@@ -2429,7 +2497,7 @@ pub(crate) fn update_internal(
                 resp.on_hover_text(tooltip);
             }
             #[cfg(feature = "dashboard")]
-            let _ = render_dashboard_live_overlay(app, ui, b, *r_screen, fg);
+            let _ = render_dashboard_live_overlay(app, ui, b, *r_screen);
 
             // Draw block name label near the block according to NameLocation.
             // Global default can be toggled; per-block override uses `Block::show_name`.
@@ -2681,7 +2749,7 @@ pub(crate) fn update_internal(
                         ))
                     });
                     child_ui.push_id(("embedded_scope_ui", scope_key.as_str()), |child_ui| {
-                        scope.show(child_ui);
+                        scope.show_embedded(child_ui);
                         scope_clicked = child_ui.input(|input| {
                             input.pointer.button_clicked(egui::PointerButton::Primary)
                                 && input
@@ -3037,6 +3105,7 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
     let kind = match block.block_type.as_str() {
         "Checkbox" | "ToggleSwitchBlock" | "SliderSwitchBlock" | "RockerSwitchBlock" => "bool",
         "PushButtonBlock" => "pulse",
+        "RadioButtonGroup" | "ComboBox" => "discrete",
         "KnobBlock" | "SliderBlock" | "RotarySwitchBlock" | "EditField" => "scalar",
         _ => return None,
     };
@@ -3045,20 +3114,11 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
 }
 
 #[cfg(feature = "dashboard")]
-fn render_dashboard_live_value_badge(painter: &egui::Painter, rect: Rect, fg: Color32, value: f64) {
-    let badge_text = format!("{value:.4}");
-    let font_id = egui::FontId::proportional(11.0);
-    let badge_pos = egui::pos2(rect.center().x, rect.top() + 10.0);
-    painter.text(badge_pos, Align2::CENTER_CENTER, badge_text, font_id, fg);
-}
-
-#[cfg(feature = "dashboard")]
 fn render_dashboard_live_overlay(
     app: &mut SubsystemApp,
     ui: &mut egui::Ui,
     block: &crate::model::Block,
     rect: Rect,
-    fg: Color32,
 ) -> bool {
     if !app.live_mode_enabled {
         return false;
@@ -3069,7 +3129,6 @@ fn render_dashboard_live_overlay(
     };
 
     let Some(kind) = dashboard_input_control_kind(block) else {
-        render_dashboard_live_value_badge(ui.painter(), rect, fg, live_value);
         return false;
     };
 
@@ -3094,11 +3153,36 @@ fn render_dashboard_live_overlay(
             }
             false
         }
+        "discrete" => {
+            if response.clicked() {
+                let value = match block.block_type.as_str() {
+                    "RadioButtonGroup" => response
+                        .interact_pointer_pos()
+                        .map(|pointer| {
+                            let section_height = (rect.height() / 3.0).max(1.0);
+                            ((pointer.y - rect.top()) / section_height)
+                                .floor()
+                                .clamp(0.0, 2.0) as f64
+                        })
+                        .unwrap_or(live_value.round().clamp(0.0, 2.0)),
+                    "ComboBox" => ((live_value.round() as i64 + 1).rem_euclid(3)) as f64,
+                    _ => live_value,
+                };
+                app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
+                return true;
+            }
+            false
+        }
         "scalar" => {
             if (response.clicked() || response.dragged())
                 && response.interact_pointer_pos().is_some()
             {
-                let value = dashboard_scalar_value_from_pointer(block, rect, response.interact_pointer_pos().unwrap(), live_value);
+                let value = dashboard_scalar_value_from_pointer(
+                    block,
+                    rect,
+                    response.interact_pointer_pos().unwrap(),
+                    live_value,
+                );
                 app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
                 return true;
             }
@@ -3112,17 +3196,16 @@ fn render_dashboard_live_overlay(
 fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
     fn parse_property(block: &crate::model::Block, keys: &[&str]) -> Option<f64> {
         keys.iter().find_map(|key| {
-            block.properties.get(*key).and_then(|value| value.trim().parse::<f64>().ok())
+            block
+                .properties
+                .get(*key)
+                .and_then(|value| value.trim().parse::<f64>().ok())
         })
     }
 
     let min = parse_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]).unwrap_or(0.0);
     let max = parse_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]).unwrap_or(100.0);
-    if min < max {
-        (min, max)
-    } else {
-        (0.0, 100.0)
-    }
+    if min < max { (min, max) } else { (0.0, 100.0) }
 }
 
 #[cfg(feature = "dashboard")]
@@ -3237,5 +3320,87 @@ fn print_line_based_connections(
 
     if !found_any {
         println!("    (no signal-line connections found in current subsystem)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        dashboard_input_control_kind, manual_switch_setting_from_live_value,
+        should_render_live_text,
+    };
+    use crate::model::DashboardBinding;
+
+    #[test]
+    fn dashboard_blocks_do_not_fall_back_to_live_text() {
+        assert!(!should_render_live_text(true, "PushButtonBlock"));
+        assert!(!should_render_live_text(true, "ComboBox"));
+        assert!(!should_render_live_text(true, "DisplayBlock"));
+    }
+
+    #[test]
+    fn non_dashboard_display_blocks_keep_live_text() {
+        assert!(should_render_live_text(true, "Gain"));
+        assert!(should_render_live_text(true, "Display"));
+        assert!(!should_render_live_text(false, "Gain"));
+        assert!(!should_render_live_text(true, "ManualSwitch"));
+    }
+
+    #[test]
+    fn manual_switch_live_values_map_to_expected_setting() {
+        assert_eq!(manual_switch_setting_from_live_value(0.0), "0");
+        assert_eq!(manual_switch_setting_from_live_value(0.49), "0");
+        assert_eq!(manual_switch_setting_from_live_value(0.5), "1");
+        assert_eq!(manual_switch_setting_from_live_value(1.0), "1");
+    }
+
+    #[test]
+    fn dashboard_discrete_controls_are_editable_in_live_mode() {
+        let combo = crate::model::Block {
+            block_type: "ComboBox".to_string(),
+            name: "Combo".to_string(),
+            sid: None,
+            tag_name: "Block".to_string(),
+            position: None,
+            zorder: None,
+            commented: false,
+            name_location: crate::model::NameLocation::default(),
+            is_matlab_function: false,
+            value: None,
+            value_kind: crate::model::ValueKind::default(),
+            value_rows: None,
+            value_cols: None,
+            properties: indexmap::IndexMap::new(),
+            ref_properties: std::collections::BTreeSet::new(),
+            port_counts: None,
+            ports: Vec::new(),
+            subsystem: None,
+            system_ref: None,
+            c_function: None,
+            instance_data: None,
+            link_data: None,
+            mask: None,
+            annotations: Vec::new(),
+            background_color: None,
+            show_name: None,
+            font_size: None,
+            font_weight: None,
+            mask_display_text: None,
+            current_setting: None,
+            block_mirror: None,
+            library_source: None,
+            library_block_path: None,
+            dashboard_binding: Some(DashboardBinding::ParamSource {
+                block_path: "Model/Combo".to_string(),
+                param_name: "Value".to_string(),
+                uuid: "uuid-combo".to_string(),
+            }),
+            child_order: Vec::new(),
+        };
+        let mut radio = combo.clone();
+        radio.block_type = "RadioButtonGroup".to_string();
+
+        assert_eq!(dashboard_input_control_kind(&combo), Some("discrete"));
+        assert_eq!(dashboard_input_control_kind(&radio), Some("discrete"));
     }
 }

@@ -503,6 +503,16 @@ impl SubsystemApp {
             .unwrap_or_else(|| format!("__scope_{}", block.name))
     }
 
+    pub fn live_value_key_for_block(&self, block: &Block) -> String {
+        block.sid.clone().unwrap_or_else(|| {
+            if self.path.is_empty() {
+                format!("__block_{}", block.name)
+            } else {
+                format!("__block_{}/{}", self.path.join("/"), block.name)
+            }
+        })
+    }
+
     /// Register a custom button in the signal dialog.
     pub fn add_signal_dialog_button<F, G>(
         &mut self,
@@ -753,6 +763,58 @@ pub(crate) fn resolve_subsystem_by_vec_mut<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{NameLocation, ValueKind};
+    use indexmap::IndexMap;
+
+    fn empty_system() -> System {
+        System {
+            properties: IndexMap::new(),
+            blocks: Vec::new(),
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        }
+    }
+
+    fn test_block(name: &str, sid: Option<&str>) -> Block {
+        Block {
+            block_type: "Gain".to_string(),
+            name: name.to_string(),
+            sid: sid.map(str::to_string),
+            tag_name: "Block".to_string(),
+            position: None,
+            zorder: None,
+            commented: false,
+            name_location: NameLocation::default(),
+            is_matlab_function: false,
+            value: None,
+            value_kind: ValueKind::default(),
+            value_rows: None,
+            value_cols: None,
+            properties: IndexMap::new(),
+            ref_properties: std::collections::BTreeSet::new(),
+            port_counts: None,
+            ports: Vec::new(),
+            subsystem: None,
+            system_ref: None,
+            c_function: None,
+            instance_data: None,
+            link_data: None,
+            mask: None,
+            annotations: Vec::new(),
+            background_color: None,
+            show_name: None,
+            font_size: None,
+            font_weight: None,
+            mask_display_text: None,
+            current_setting: None,
+            block_mirror: None,
+            library_source: None,
+            library_block_path: None,
+            dashboard_binding: None,
+            child_order: Vec::new(),
+        }
+    }
 
     #[test]
     fn cache_starts_invalid() {
@@ -801,5 +863,30 @@ mod tests {
         // Mark valid again at new generation
         cache.mark_valid(&path, cache.generation);
         assert!(cache.is_valid(&path, cache.generation));
+    }
+
+    #[test]
+    fn live_value_key_uses_sid_when_available() {
+        let mut app =
+            SubsystemApp::new(empty_system(), Vec::new(), BTreeMap::new(), BTreeMap::new());
+        app.path = vec!["Model".to_string(), "Subsystem".to_string()];
+
+        let block = test_block("Gain", Some("42"));
+
+        assert_eq!(app.live_value_key_for_block(&block), "42");
+    }
+
+    #[test]
+    fn live_value_key_falls_back_to_view_path_and_name() {
+        let mut app =
+            SubsystemApp::new(empty_system(), Vec::new(), BTreeMap::new(), BTreeMap::new());
+        app.path = vec!["Model".to_string(), "Subsystem".to_string()];
+
+        let block = test_block("double_param", None);
+
+        assert_eq!(
+            app.live_value_key_for_block(&block),
+            "__block_Model/Subsystem/double_param"
+        );
     }
 }

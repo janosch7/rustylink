@@ -310,7 +310,7 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                 });
                 ui.separator();
                 egui::CollapsingHeader::new("Properties")
-                    .default_open(true)
+                    .default_open(false)
                     .show(ui, |ui| {
                         if block.properties.is_empty() {
                             ui.label("<none>");
@@ -397,7 +397,7 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     }
                 }
                 egui::CollapsingHeader::new("Ports")
-                    .default_open(true)
+                    .default_open(false)
                     .show(ui, |ui| {
                         if block.ports.is_empty() {
                             ui.label("<none>");
@@ -491,7 +491,11 @@ fn show_scope_popout_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     ))
                 });
                 ui.push_id(("scope_popout_ui", scope_key.as_str()), |ui| {
-                    scope.show(ui);
+                    let available = ui.available_size();
+                    let (rect, _) = ui.allocate_exact_size(available, egui::Sense::hover());
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |child_ui| {
+                        scope.show_popout(child_ui);
+                    });
                 });
             });
         popout.open = open_flag;

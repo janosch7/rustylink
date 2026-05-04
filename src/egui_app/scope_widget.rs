@@ -1,12 +1,14 @@
 //! Miniature scope widget rendered inside `DashboardScope` and `Scope` blocks.
 //!
-//! Each scope keeps a short history of live scalar samples and renders them as
-//! a lightweight waveform preview. The same widget instance is reused for the
-//! embedded scope and its popout window so both views stay in sync.
+//! Embedded scopes stay lightweight and `Send` by storing only sample history.
+//! The popout creates a fresh `liveplot` panel for rendering so the default-size
+//! window can show axis descriptions and the trace legend.
 
 #![cfg(feature = "egui")]
 
 use egui::{Align2, Color32, Pos2, Rect, Stroke, Ui, Vec2};
+use liveplot::data::scope::{AxisType, ScopeType};
+use liveplot::{LivePlotPanel, PlotPoint, channel_plot};
 use std::collections::VecDeque;
 
 const MAX_SAMPLES: usize = 512;
@@ -51,15 +53,64 @@ impl MiniScope {
         }
     }
 
-    /// Render the miniature scope into the given UI region.
-    pub fn show(&mut self, ui: &mut Ui) {
+    pub fn show_embedded(&mut self, ui: &mut Ui) {
         let available = ui.available_size_before_wrap();
         let desired = Vec2::new(available.x.max(40.0), available.y.max(30.0));
         let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
-        self.paint(ui, rect);
+        self.paint_compact(ui, rect);
     }
 
-    fn paint(&self, ui: &Ui, rect: Rect) {
+    pub fn show_popout(&mut self, ui: &mut Ui) {
+        if self.samples.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label("No live data");
+            });
+            return;
+        }
+
+        let (sink, rx) = channel_plot();
+        let mut panel = LivePlotPanel::new(rx);
+        panel.traces_data.max_points = MAX_SAMPLES;
+        panel.min_height_for_top_bar = 0.0;
+        panel.min_width_for_sidebar = 0.0;
+        panel.min_height_for_sidebar = 0.0;
+        panel.compact = false;
+        panel.liveplot_panel.set_tick_label_thresholds(0.0, 0.0);
+        panel.liveplot_panel.set_legend_thresholds(0.0, 0.0);
+
+        for scope in panel.liveplot_panel.get_data_mut() {
+            scope.scope_type = ScopeType::XYScope;
+            scope.show_legend = true;
+            scope.show_info_in_legend = false;
+            scope.force_hide_legend = false;
+            scope.x_axis.axis_type = AxisType::Value(None);
+            scope.x_axis.name = Some("Sample".to_string());
+            scope.x_axis.auto_fit = true;
+            scope.y_axis.name = Some(if self.signal_name.trim().is_empty() {
+                "Value".to_string()
+            } else {
+                self.signal_name.clone()
+            });
+            scope.y_axis.auto_fit = true;
+            scope.y_axis.log_scale = false;
+        }
+
+        let trace_name = if self.signal_name.trim().is_empty() {
+            "signal".to_string()
+        } else {
+            self.signal_name.clone()
+        };
+        let trace = sink.create_trace(trace_name, None::<String>);
+        let points: Vec<PlotPoint> = self
+            .samples
+            .iter()
+            .map(|(x, y)| PlotPoint { x: *x, y: *y })
+            .collect();
+        let _ = sink.send_points(&trace, points);
+        panel.update_embedded(ui);
+    }
+
+    fn paint_compact(&self, ui: &Ui, rect: Rect) {
         let painter = ui.painter_at(rect);
         let frame_rect = rect.shrink(2.0);
         painter.rect_filled(frame_rect, 4.0, BG);
@@ -73,7 +124,10 @@ impl MiniScope {
         let has_title = !self.signal_name.is_empty() && frame_rect.height() >= 48.0;
         let title_height = if has_title { 18.0 } else { 0.0 };
         let plot_rect = Rect::from_min_max(
-            Pos2::new(frame_rect.left() + 6.0, frame_rect.top() + 6.0 + title_height),
+            Pos2::new(
+                frame_rect.left() + 6.0,
+                frame_rect.top() + 6.0 + title_height,
+            ),
             Pos2::new(frame_rect.right() - 6.0, frame_rect.bottom() - 6.0),
         );
 
@@ -95,7 +149,10 @@ impl MiniScope {
             let t = i as f32 / 4.0;
             let y = egui::lerp(plot_rect.top()..=plot_rect.bottom(), t);
             painter.line_segment(
-                [Pos2::new(plot_rect.left(), y), Pos2::new(plot_rect.right(), y)],
+                [
+                    Pos2::new(plot_rect.left(), y),
+                    Pos2::new(plot_rect.right(), y),
+                ],
                 Stroke::new(0.75, GRID),
             );
         }
@@ -103,7 +160,10 @@ impl MiniScope {
             let t = i as f32 / 5.0;
             let x = egui::lerp(plot_rect.left()..=plot_rect.right(), t);
             painter.line_segment(
-                [Pos2::new(x, plot_rect.top()), Pos2::new(x, plot_rect.bottom())],
+                [
+                    Pos2::new(x, plot_rect.top()),
+                    Pos2::new(x, plot_rect.bottom()),
+                ],
                 Stroke::new(0.75, GRID),
             );
         }
@@ -120,12 +180,10 @@ impl MiniScope {
         };
         let (last_x, _) = self.samples.back().copied().unwrap_or((first_x + 1.0, 0.0));
 
-        let (mut min_y, mut max_y) = self
-            .samples
-            .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_y, max_y), (_, y)| {
-                (min_y.min(*y), max_y.max(*y))
-            });
+        let (mut min_y, mut max_y) = self.samples.iter().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(min_y, max_y), (_, y)| (min_y.min(*y), max_y.max(*y)),
+        );
         if !min_y.is_finite() || !max_y.is_finite() {
             min_y = -1.0;
             max_y = 1.0;
