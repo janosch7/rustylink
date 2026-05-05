@@ -105,6 +105,7 @@ pub enum DashboardControlValue {
     Scalar(f64),
     Bool(bool),
     PulseHigh,
+    PulseLow,
 }
 
 /// A queued dashboard control interaction awaiting consumption by the host.
@@ -292,8 +293,14 @@ pub struct SubsystemApp {
     /// Live values for dashboard blocks, keyed by `DashboardBinding::uuid()`.
     pub live_values: HashMap<String, f64>,
 
+    /// Full live value text for dashboard bindings, keyed by `DashboardBinding::uuid()`.
+    pub live_value_texts: HashMap<String, String>,
+
     /// Live values for visible blocks, keyed by block SID.
     pub live_block_values: HashMap<String, f64>,
+
+    /// Full live value text for visible blocks, keyed by block SID or fallback key.
+    pub live_block_value_texts: HashMap<String, String>,
 
     /// Default path used to save/load viewer layout overrides.
     pub layout_file_path: Option<Utf8PathBuf>,
@@ -337,6 +344,14 @@ pub struct SubsystemApp {
     /// present, the original `block.value` is used.
     #[cfg(feature = "dashboard")]
     pub constant_edits: std::collections::HashMap<String, String>,
+
+    /// Per-block edit buffers for live dashboard text entry widgets.
+    #[cfg(feature = "dashboard")]
+    pub dashboard_edit_buffers: std::collections::HashMap<String, String>,
+
+    /// Buttons currently held down for pulse-style controls.
+    #[cfg(feature = "dashboard")]
+    pub dashboard_active_pulses: BTreeSet<String>,
 
     /// Pending live dashboard control update for the host application.
     #[cfg(feature = "dashboard")]
@@ -387,7 +402,9 @@ impl SubsystemApp {
             add_mode_enabled: false,
             live_mode_enabled: false,
             live_values: HashMap::new(),
+            live_value_texts: HashMap::new(),
             live_block_values: HashMap::new(),
+            live_block_value_texts: HashMap::new(),
             layout_file_path: None,
             layout_dirty: false,
             view_bounds: None,
@@ -400,6 +417,10 @@ impl SubsystemApp {
             scope_popout: None,
             #[cfg(feature = "dashboard")]
             constant_edits: std::collections::HashMap::new(),
+            #[cfg(feature = "dashboard")]
+            dashboard_edit_buffers: std::collections::HashMap::new(),
+            #[cfg(feature = "dashboard")]
+            dashboard_active_pulses: BTreeSet::new(),
             #[cfg(feature = "dashboard")]
             pending_dashboard_control: None,
         }
