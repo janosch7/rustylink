@@ -7,3 +7,4 @@ simulink
 *.code-workspace
 .vscode
 *.log
+.venv/
