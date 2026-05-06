@@ -8,3 +8,4 @@ simulink
 .vscode
 *.log
 .venv/
+Cargo.lock
