@@ -71,12 +71,14 @@ impl MiniScope {
         let (sink, rx) = channel_plot();
         let mut panel = LivePlotPanel::new(rx);
         panel.traces_data.max_points = MAX_SAMPLES;
-        panel.min_height_for_top_bar = 0.0;
-        panel.min_width_for_sidebar = 0.0;
-        panel.min_height_for_sidebar = 0.0;
+        // Keep the popout at its default size on open. Additional chrome such as
+        // the sidebar/legend only appears once the user enlarges the window.
+        panel.min_height_for_top_bar = 220.0;
+        panel.min_width_for_sidebar = 520.0;
+        panel.min_height_for_sidebar = 260.0;
         panel.compact = false;
-        panel.liveplot_panel.set_tick_label_thresholds(0.0, 0.0);
-        panel.liveplot_panel.set_legend_thresholds(0.0, 0.0);
+        panel.liveplot_panel.set_tick_label_thresholds(360.0, 220.0);
+        panel.liveplot_panel.set_legend_thresholds(520.0, 260.0);
 
         for scope in panel.liveplot_panel.get_data_mut() {
             scope.scope_type = ScopeType::XYScope;

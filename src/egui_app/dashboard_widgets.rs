@@ -88,6 +88,13 @@ fn discrete_live_index(value: f64, option_count: usize) -> usize {
 }
 
 fn combo_box_label(block: &Block, index: usize) -> String {
+    option_labels(block)
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| format!("Label {}", index + 1))
+}
+
+fn option_labels(block: &Block) -> Vec<String> {
     block
         .properties
         .get("Values")
@@ -96,11 +103,17 @@ fn combo_box_label(block: &Block, index: usize) -> String {
                 .split(['\n', ',', ';'])
                 .map(str::trim)
                 .filter(|entry| !entry.is_empty())
-                .nth(index)
                 .map(str::to_string)
+                .collect::<Vec<_>>()
         })
-        .flatten()
-        .unwrap_or_else(|| format!("Label {}", index + 1))
+        .filter(|labels| !labels.is_empty())
+        .unwrap_or_else(|| {
+            vec![
+                "Label 1".to_string(),
+                "Label 2".to_string(),
+                "Label 3".to_string(),
+            ]
+        })
 }
 
 // ─── PushButton ─────────────────────────────────────────────────────────
@@ -1383,45 +1396,57 @@ pub fn paint_live_dashboard_value_overlay(
         }
         "ToggleSwitchBlock" => {
             let inner = inner_rect(rect, 0.80);
-            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.25);
+            let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.15);
             let font = egui::FontId::proportional(fsz);
             let cx = inner.center().x;
-            let cy = inner.center().y;
-            let track_w = (inner.width() * 0.50).clamp(16.0, 50.0);
-            let track_h = (inner.height() * 0.25).clamp(8.0, 20.0);
-            let track = Rect::from_center_size(Pos2::new(cx, cy), Vec2::new(track_w, track_h));
+            let track_w = (inner.width() * 0.15).clamp(4.0, 14.0);
+            let track_top = inner.top() + inner.height() * 0.15;
+            let track_bot = inner.bottom() - inner.height() * 0.15;
+            let track = Rect::from_min_max(
+                Pos2::new(cx - track_w / 2.0, track_top),
+                Pos2::new(cx + track_w / 2.0, track_bot),
+            );
+            let thumb_h = (track_bot - track_top) * 0.25;
             let active = live_value >= 0.5;
             let track_fill = if active {
                 ACCENT.linear_multiply(0.35)
             } else {
                 Color32::from_rgb(190, 195, 200)
             };
-            painter.rect_filled(track, track_h / 2.0, track_fill);
+            painter.rect_filled(track, 3.0, track_fill);
             painter.rect_stroke(
                 track,
-                track_h / 2.0,
+                3.0,
                 Stroke::new(1.0, BORDER),
                 egui::StrokeKind::Inside,
             );
-            let thumb_r = track_h * 0.4;
-            let thumb_x = if active {
-                track.right() - thumb_r - 2.0
+            let thumb_y = if active {
+                track_top
             } else {
-                track.left() + thumb_r + 2.0
+                track_bot - thumb_h
             };
-            painter.circle_filled(Pos2::new(thumb_x, cy), thumb_r, Color32::WHITE);
-            painter.circle_stroke(Pos2::new(thumb_x, cy), thumb_r, Stroke::new(1.0, BORDER));
+            let thumb = Rect::from_min_max(
+                Pos2::new(cx - track_w * 0.8, thumb_y),
+                Pos2::new(cx + track_w * 0.8, thumb_y + thumb_h),
+            );
+            painter.rect_filled(thumb, 3.0, ACCENT);
+            painter.rect_stroke(
+                thumb,
+                3.0,
+                Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
             painter.text(
-                Pos2::new(track.left() - 4.0, cy),
-                Align2::RIGHT_CENTER,
-                "Off",
+                Pos2::new(cx - track_w - fsz * 0.5, track_top),
+                Align2::RIGHT_TOP,
+                "On",
                 font.clone(),
                 TEXT_DARK,
             );
             painter.text(
-                Pos2::new(track.right() + 4.0, cy),
-                Align2::LEFT_CENTER,
-                "On",
+                Pos2::new(cx - track_w - fsz * 0.5, track_bot),
+                Align2::RIGHT_BOTTOM,
+                "Off",
                 font,
                 TEXT_DARK,
             );
@@ -1532,12 +1557,14 @@ pub fn paint_live_dashboard_value_overlay(
                         Color32::from_rgb(210, 215, 220),
                     );
                     painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
-                    let labels = ["Low", "Medium", "High"];
-                    let angles = [5.0 * PI / 4.0, PI / 2.0, -PI / 4.0];
+                    let labels = option_labels(block);
                     let selected = discrete_live_index(live_value, labels.len());
                     let mark_r = radius + 4.0;
                     let label_r = radius + fsz * 1.2 + 4.0;
-                    for (index, (label, angle)) in labels.iter().zip(angles.iter()).enumerate() {
+                    let steps = labels.len().saturating_sub(1).max(1) as f32;
+                    for (index, label) in labels.iter().enumerate() {
+                        let tick_t = index as f32 / steps;
+                        let angle = start_angle + tick_t * (end_angle - start_angle);
                         let mark_end =
                             Pos2::new(cx + mark_r * angle.cos(), cy - mark_r * angle.sin());
                         let mark_start = Pos2::new(
@@ -1553,7 +1580,7 @@ pub fn paint_live_dashboard_value_overlay(
                         painter.text(
                             Pos2::new(cx + label_r * angle.cos(), cy - label_r * angle.sin()),
                             Align2::CENTER_CENTER,
-                            *label,
+                            label,
                             font.clone(),
                             TEXT_DARK,
                         );
