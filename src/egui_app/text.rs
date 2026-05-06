@@ -770,7 +770,20 @@ pub fn matlab_syntax_job(script: &str) -> LayoutJob {
     let mono = FontId::monospace(14.0);
 
     for line in LinesWithEndings::from(script) {
-        let regions: Vec<(Style, &str)> = h.highlight(line, ss);
+        let regions: Vec<(Style, &str)> = match h.highlight_line(line, ss) {
+            Ok(regions) => regions,
+            Err(_) => {
+                job.append(
+                    line,
+                    0.0,
+                    TextFormat {
+                        font_id: mono.clone(),
+                        ..Default::default()
+                    },
+                );
+                continue;
+            }
+        };
         for (style, text) in regions {
             let color = Color32::from_rgba_premultiplied(
                 style.foreground.r,

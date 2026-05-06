@@ -103,10 +103,10 @@ impl SlxArchive {
 
         for entry in &self.entries {
             let options = if entry.compressed {
-                zip::write::FileOptions::default()
+                zip::write::SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated)
             } else {
-                zip::write::FileOptions::default()
+                zip::write::SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Stored)
             };
 

@@ -62,7 +62,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let path_snapshot = state.app.path.clone();
 
     // Top panel: breadcrumbs + search + edit toolbar
-    egui::TopBottomPanel::top(state.app.egui_id("editor_top")).show_inside(ui, |ui| {
+    egui::Panel::top(state.app.egui_id("editor_top")).show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             let up_label = egui::RichText::new("⬆ Up");
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
@@ -302,9 +302,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         handle_keyboard_shortcuts(state, ui, &avail, base_scale, &bb);
 
         // Zoom with scroll
-        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_y.abs() > 0.0 && canvas_resp.hovered() {
-            let factor = (1.0 + scroll_y * 0.001).max(0.1);
+            let factor = (1.0_f32 + scroll_y * 0.001_f32).max(0.1_f32);
             let old_zoom = state.app.zoom;
             let new_zoom = (old_zoom * factor).clamp(0.2, 10.0);
             if (new_zoom - old_zoom).abs() > f32::EPSILON {

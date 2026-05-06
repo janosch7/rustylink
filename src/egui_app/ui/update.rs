@@ -204,7 +204,7 @@ pub(crate) fn update_internal(
     let mut clear_search = false;
     let path_snapshot = app.path.clone();
 
-    egui::TopBottomPanel::top(app.egui_id("top_panel")).show_inside(ui, |ui| {
+    egui::Panel::top(app.egui_id("top_panel")).show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             let up_label = egui::RichText::new("⬆ Up");
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
@@ -571,9 +571,9 @@ pub(crate) fn update_internal(
             let d = canvas_resp.drag_delta();
             staged_pan += d;
         }
-        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_y.abs() > 0.0 && canvas_resp.hovered() {
-            let factor = (1.0_f32 + scroll_y as f32 * 0.001_f32).max(0.1_f32);
+            let factor = (1.0_f32 + scroll_y * 0.001_f32).max(0.1_f32);
             let old_zoom = staged_zoom;
             let new_zoom = (old_zoom * factor).clamp(0.2, 10.0);
             if (new_zoom - old_zoom).abs() > f32::EPSILON {
