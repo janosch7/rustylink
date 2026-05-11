@@ -1973,32 +1973,56 @@ fn render_combo_box_control_widget(
 
     if response.clicked() {
         egui::Popup::open_id(ui.ctx(), popup_id);
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(popup_id.with("just_opened"), true));
     }
 
     let options = discrete_option_items(block);
     let selected_index = discrete_selected_index(block, live_value);
     let palette = widget_palette(block);
     let mut selected_value = None;
-    egui::Popup::from_response(&response)
-        .id(popup_id)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            egui::Frame::popup(ui.style())
-                .fill(palette.bg_field)
-                .stroke(Stroke::new(1.0, palette.border))
-                .show(ui, |ui| {
-                    ui.set_min_width(rect.width().max(120.0));
-                    for (index, (label, value)) in options.iter().enumerate() {
-                        if ui
-                            .selectable_label(index == selected_index, label)
-                            .clicked()
-                        {
-                            selected_value = Some(*value);
-                            egui::Popup::close_id(ui.ctx(), popup_id);
+    if egui::Popup::is_id_open(ui.ctx(), popup_id) {
+        let just_opened = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id.with("just_opened")).unwrap_or(false));
+        let popup_pos = rect.left_bottom();
+        let area_response = egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .fill(palette.bg_field)
+                    .stroke(Stroke::new(1.0, palette.border))
+                    .show(ui, |ui| {
+                        ui.set_min_width(rect.width().max(120.0));
+                        for (index, (label, value)) in options.iter().enumerate() {
+                            if ui
+                                .selectable_label(index == selected_index, label)
+                                .clicked()
+                            {
+                                selected_value = Some(*value);
+                                egui::Popup::close_id(ui.ctx(), popup_id);
+                            }
                         }
-                    }
-                });
+                    });
+            });
+
+        let clicked_outside = ui.ctx().input(|i| {
+            if !i.pointer.any_pressed() {
+                return false;
+            }
+            i.pointer.interact_pos().is_some_and(|pos| {
+                !response.rect.contains(pos) && !area_response.response.rect.contains(pos)
+            })
         });
+        if clicked_outside && !just_opened {
+            egui::Popup::close_id(ui.ctx(), popup_id);
+        }
+        if just_opened {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(popup_id.with("just_opened"), false));
+        }
+    }
 
     if let Some(value) = selected_value {
         app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
