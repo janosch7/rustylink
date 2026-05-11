@@ -37,6 +37,26 @@ pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     if text == "-0" { "0".to_string() } else { text }
 }
 
+fn format_constant_value_for_display(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(value) = trimmed.parse::<f64>() else {
+        return trimmed.to_string();
+    };
+    if value != 0.0 && value.abs() < 0.1 {
+        format!("{value:.2e}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn format_block_value_for_display(block: &crate::model::Block, raw: &str) -> String {
+    if block.block_type == "Constant" {
+        format_constant_value_for_display(raw)
+    } else {
+        raw.to_string()
+    }
+}
+
 #[cfg(feature = "dashboard")]
 fn block_live_text(app: &SubsystemApp, block: &crate::model::Block) -> Option<String> {
     app.live_block_value_texts
@@ -2372,16 +2392,18 @@ pub(crate) fn update_internal(
             // Icon/value rendering with precedence: mask > value > custom/icon
             if let Some(text) = live_text.clone() {
                 let font_id = egui::FontId::proportional(12.0 * font_scale);
-                let galley = painter.layout_no_wrap(text.clone(), font_id, fg);
+                let shown_text = format_block_value_for_display(b, &text);
+                let galley = painter.layout_no_wrap(shown_text.clone(), font_id, fg);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, fg);
-                value_tooltip = Some(text);
+                value_tooltip = Some(shown_text);
             } else if b.block_type == "Constant" && app.live_mode_enabled {
                 let font_id = egui::FontId::proportional(12.0 * font_scale);
-                let galley = painter.layout_no_wrap(static_constant_value.clone(), font_id, fg);
+                let shown_value = format_constant_value_for_display(&static_constant_value);
+                let galley = painter.layout_no_wrap(shown_value.clone(), font_id, fg);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, fg);
-                value_tooltip = Some(static_constant_value);
+                value_tooltip = Some(shown_value);
             } else if let Some(label) = display_signal_label {
                 let beneath_font_px = 12.0 * font_scale;
                 let font_id = egui::FontId::proportional(beneath_font_px);
@@ -2399,7 +2421,8 @@ pub(crate) fn update_internal(
                     let pos = r_screen.center() - galley.size() * 0.5;
                     painter.galley(pos, galley, color);
                 }
-            } else if uses_dashboard_control_widget_renderer(&b.block_type) {
+            } else if app.live_mode_enabled && uses_dashboard_control_widget_renderer(&b.block_type)
+            {
                 let _ = render_dashboard_control_widget(app, ui, b, *r_screen, font_scale);
             } else if b
                 .value
@@ -2455,7 +2478,6 @@ pub(crate) fn update_internal(
                     if app.live_mode_enabled {
                         let scope_rect = r_screen.shrink(4.0);
                         if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
-                            painter.rect_filled(scope_rect, 2.0, Color32::from_rgb(30, 30, 30));
                             let key = app.scope_key_for_block(b);
                             deferred_scope_rects.push((key, scope_title_for_block(b, entities), scope_rect));
                         } else {
@@ -2469,6 +2491,24 @@ pub(crate) fn update_internal(
                 #[cfg(not(feature = "dashboard"))]
                 {
                     paint_scope_glyph(&painter, r_screen);
+                }
+            } else if app.live_mode_enabled
+                && crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
+                    &b.block_type,
+                )
+            {
+                if let Some(live_val) = block_live_value(app, b) {
+                    crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
+                        &painter,
+                        b,
+                        r_screen,
+                        font_scale,
+                        live_val,
+                    );
+                } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
+                    renderer(&painter, b, r_screen, font_scale);
+                } else if cfg.shape != BlockShape::FilledBlack {
+                    render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
                 }
             } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
                 renderer(&painter, b, r_screen, font_scale);
@@ -2758,7 +2798,7 @@ pub(crate) fn update_internal(
                         ))
                     });
                     child_ui.push_id(("embedded_scope_ui", scope_key.as_str()), |child_ui| {
-                        scope.show_embedded(child_ui);
+                        scope.show_embedded(child_ui, app.instance_id, scope_key);
                         scope_clicked = child_ui.input(|input| {
                             input.pointer.button_clicked(egui::PointerButton::Primary)
                                 && input
@@ -3114,50 +3154,12 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
     let kind = match block.block_type.as_str() {
         "Checkbox" | "ToggleSwitchBlock" | "SliderSwitchBlock" | "RockerSwitchBlock" => "bool",
         "PushButtonBlock" => "pulse",
-        "RadioButtonGroup" | "ComboBox" => "discrete",
-        "KnobBlock" | "SliderBlock" | "RotarySwitchBlock" | "EditField" => "scalar",
+        "RadioButtonGroup" | "ComboBox" | "RotarySwitchBlock" => "discrete",
+        "KnobBlock" | "SliderBlock" | "EditField" => "scalar",
         _ => return None,
     };
 
     Some(kind)
-}
-
-#[cfg(feature = "dashboard")]
-fn dashboard_control_storage_key(block: &crate::model::Block) -> String {
-    block.sid.clone().unwrap_or_else(|| block.name.clone())
-}
-
-#[cfg(feature = "dashboard")]
-fn dashboard_option_labels(block: &crate::model::Block) -> Vec<String> {
-    block
-        .properties
-        .get("Values")
-        .map(|values| {
-            values
-                .split(['\n', ',', ';'])
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .filter(|values| !values.is_empty())
-        .unwrap_or_else(|| {
-            vec![
-                "Label 1".to_string(),
-                "Label 2".to_string(),
-                "Label 3".to_string(),
-            ]
-        })
-}
-
-#[cfg(feature = "dashboard")]
-fn dashboard_discrete_index(value: f64, option_count: usize) -> usize {
-    if option_count == 0 {
-        return 0;
-    }
-    value
-        .round()
-        .clamp(0.0, (option_count.saturating_sub(1)) as f64) as usize
 }
 
 #[cfg(feature = "dashboard")]
@@ -3196,224 +3198,17 @@ fn render_dashboard_control_widget(
     rect: Rect,
     font_scale: f32,
 ) -> bool {
-    let Some(kind) = dashboard_input_control_kind(block) else {
-        return false;
-    };
-
-    let enabled = app.live_mode_enabled;
     let live_value = dashboard_widget_value(app, block);
-
-    let storage_key = dashboard_control_storage_key(block);
-    let interact_id = app.egui_id(("dashboard_live_overlay", storage_key.clone()));
-
-    match block.block_type.as_str() {
-        "Checkbox" => {
-            let mut current = live_value >= 0.5;
-            let mut changed = false;
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
-                |child_ui| {
-                    child_ui.add_enabled_ui(enabled, |child_ui| {
-                        child_ui.centered_and_justified(|child_ui| {
-                            if child_ui.checkbox(&mut current, "").changed() {
-                                changed = true;
-                            }
-                        });
-                    });
-                },
-            );
-            if enabled && changed {
-                app.queue_dashboard_control(block.clone(), DashboardControlValue::Bool(current));
-                return true;
-            }
-            return false;
-        }
-        "RadioButtonGroup" => {
-            let labels = dashboard_option_labels(block);
-            let mut selected = dashboard_discrete_index(live_value, labels.len());
-            let mut changed = false;
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
-                |child_ui| {
-                    child_ui.add_enabled_ui(enabled, |child_ui| {
-                        child_ui.vertical_centered(|child_ui| {
-                            for (index, label) in labels.iter().enumerate() {
-                                if child_ui.radio_value(&mut selected, index, label).changed() {
-                                    changed = true;
-                                }
-                            }
-                        });
-                    });
-                },
-            );
-            if enabled && changed {
-                app.queue_dashboard_control(
-                    block.clone(),
-                    DashboardControlValue::Scalar(selected as f64),
-                );
-                return true;
-            }
-            return false;
-        }
-        "ComboBox" => {
-            let labels = dashboard_option_labels(block);
-            let mut selected = dashboard_discrete_index(live_value, labels.len());
-            let mut changed = false;
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
-                |child_ui| {
-                    child_ui.set_max_width(rect.width());
-                    child_ui.add_enabled_ui(enabled, |child_ui| {
-                        egui::ComboBox::from_id_salt(interact_id)
-                            .selected_text(labels.get(selected).cloned().unwrap_or_default())
-                            .width(rect.width().max(40.0) - 8.0)
-                            .show_ui(child_ui, |child_ui| {
-                                for (index, label) in labels.iter().enumerate() {
-                                    if child_ui
-                                        .selectable_value(&mut selected, index, label)
-                                        .changed()
-                                    {
-                                        changed = true;
-                                    }
-                                }
-                            });
-                    });
-                },
-            );
-            if enabled && changed {
-                app.queue_dashboard_control(
-                    block.clone(),
-                    DashboardControlValue::Scalar(selected as f64),
-                );
-                return true;
-            }
-            return false;
-        }
-        "EditField" => {
-            let initial = block_live_text(app, block)
-                .or_else(|| Some(format_live_scalar_csv(live_value)))
-                .unwrap_or_default();
-            let buffer = app
-                .dashboard_edit_buffers
-                .entry(storage_key)
-                .or_insert(initial);
-            let mut submitted = None;
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
-                |child_ui| {
-                    child_ui.add_enabled_ui(enabled, |child_ui| {
-                        let response = child_ui
-                            .add_sized(rect.shrink(6.0).size(), egui::TextEdit::singleline(buffer));
-                        if response.lost_focus()
-                            && child_ui.input(|input| input.key_pressed(egui::Key::Enter))
-                        {
-                            submitted = buffer.trim().parse::<f64>().ok();
-                        }
-                    });
-                },
-            );
-            if enabled {
-                if let Some(value) = submitted {
-                    app.queue_dashboard_control(
-                        block.clone(),
-                        DashboardControlValue::Scalar(value),
-                    );
-                    return true;
-                }
-            }
-            return false;
-        }
-        "PushButtonBlock" => {
-            let label = block
-                .properties
-                .get("ButtonText")
-                .cloned()
-                .unwrap_or_else(|| block.name.clone());
-            let mut button_response = None;
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(rect.shrink(4.0)),
-                |child_ui| {
-                    child_ui.add_enabled_ui(enabled, |child_ui| {
-                        button_response = Some(
-                            child_ui.add_sized(rect.shrink(4.0).size(), egui::Button::new(label)),
-                        );
-                    });
-                },
-            );
-            if enabled {
-                if let Some(response) = button_response {
-                    let is_down = response.is_pointer_button_down_on();
-                    let was_down = app.dashboard_active_pulses.contains(&storage_key);
-                    if is_down && !was_down {
-                        app.dashboard_active_pulses.insert(storage_key.clone());
-                        app.queue_dashboard_control(
-                            block.clone(),
-                            DashboardControlValue::PulseHigh,
-                        );
-                        return true;
-                    }
-                    if was_down && !ui.input(|input| input.pointer.primary_down()) {
-                        app.dashboard_active_pulses.remove(&storage_key);
-                        app.queue_dashboard_control(block.clone(), DashboardControlValue::PulseLow);
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-        "SliderSwitchBlock" | "ToggleSwitchBlock" | "RockerSwitchBlock" | "KnobBlock"
-        | "SliderBlock" | "RotarySwitchBlock" => {
-            crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
-                &ui.painter().with_clip_rect(rect),
-                block,
-                &rect,
-                font_scale,
-                live_value,
-            );
-        }
-        _ => {}
-    }
-
-    let sense = if enabled {
-        match kind {
-            "scalar" => Sense::click_and_drag(),
-            _ => Sense::click(),
-        }
-    } else {
-        Sense::hover()
-    };
-    let response = ui.interact(rect.shrink(4.0), interact_id, sense);
-    if !enabled {
-        return false;
-    }
-
-    match kind {
-        "bool" => {
-            let current = live_value >= 0.5;
-            if response.clicked() {
-                app.queue_dashboard_control(block.clone(), DashboardControlValue::Bool(!current));
-                return true;
-            }
-            false
-        }
-        "pulse" => false,
-        "discrete" => false,
-        "scalar" => {
-            if let Some(pointer_pos) = response.interact_pointer_pos() {
-                if response.clicked() || response.dragged() {
-                    let value =
-                        dashboard_scalar_value_from_pointer(block, rect, pointer_pos, live_value);
-                    app.queue_dashboard_control(
-                        block.clone(),
-                        DashboardControlValue::Scalar(value),
-                    );
-                    return true;
-                }
-            }
-            false
-        }
-        _ => false,
-    }
+    let live_text = block_live_text(app, block);
+    crate::egui_app::dashboard_widgets::render_dashboard_control_widget(
+        app,
+        ui,
+        block,
+        rect,
+        font_scale,
+        live_value,
+        live_text.as_deref(),
+    )
 }
 
 #[cfg(feature = "dashboard")]
@@ -3427,68 +3222,26 @@ fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
         })
     }
 
-    let min = parse_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]).unwrap_or(0.0);
-    let max = parse_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]).unwrap_or(100.0);
+    let min = parse_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]);
+    let max = parse_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]);
+    println!(
+        "[Dashboard Debug] {} '{}': Minimum={:?}, Maximum={:?} -> range ({}, {})",
+        block.block_type,
+        block.name,
+        block
+            .properties
+            .get("Minimum")
+            .or_else(|| block.properties.get("ScaleMin")),
+        block
+            .properties
+            .get("Maximum")
+            .or_else(|| block.properties.get("ScaleMax")),
+        min.unwrap_or(0.0),
+        max.unwrap_or(100.0)
+    );
+    let min = min.unwrap_or(0.0);
+    let max = max.unwrap_or(100.0);
     if min < max { (min, max) } else { (0.0, 100.0) }
-}
-
-#[cfg(feature = "dashboard")]
-fn dashboard_scalar_value_from_pointer(
-    block: &crate::model::Block,
-    rect: Rect,
-    pointer: Pos2,
-    fallback: f64,
-) -> f64 {
-    let (min, max) = dashboard_scalar_range(block);
-    let fraction = match block.block_type.as_str() {
-        "KnobBlock" => {
-            let center = rect.center();
-            let dx = pointer.x - center.x;
-            let dy = center.y - pointer.y;
-            let mut angle_deg = dy.atan2(dx).to_degrees();
-            if angle_deg < 0.0 {
-                angle_deg += 360.0;
-            }
-            let clockwise_from_down = (270.0 - angle_deg).rem_euclid(360.0);
-            if clockwise_from_down < 45.0 {
-                0.0
-            } else if clockwise_from_down > 315.0 {
-                1.0
-            } else {
-                ((clockwise_from_down - 45.0) / 270.0).clamp(0.0, 1.0)
-            }
-        }
-        "RotarySwitchBlock" => {
-            let center = rect.center();
-            let dx = pointer.x - center.x;
-            let dy = center.y - pointer.y;
-            let mut angle_deg = dy.atan2(dx).to_degrees();
-            if angle_deg < 0.0 {
-                angle_deg += 360.0;
-            }
-            let clockwise_from_down = (270.0 - angle_deg).rem_euclid(360.0);
-            let normalized = if clockwise_from_down < 45.0 {
-                0.0
-            } else if clockwise_from_down > 315.0 {
-                1.0
-            } else {
-                ((clockwise_from_down - 45.0) / 270.0).clamp(0.0, 1.0)
-            };
-            let labels = dashboard_option_labels(block);
-            let steps = labels.len().saturating_sub(1).max(1) as f32;
-            return (normalized * steps).round() as f64;
-        }
-        _ if rect.height() > rect.width() => {
-            ((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0)
-        }
-        _ => ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0),
-    };
-
-    if fraction.is_finite() {
-        min + (max - min) * fraction as f64
-    } else {
-        fallback
-    }
 }
 
 /// Scan lines in the current subsystem for connections to/from the given block.
@@ -3574,9 +3327,10 @@ fn print_line_based_connections(
 #[cfg(test)]
 mod tests {
     use super::{
-        dashboard_input_control_kind, dashboard_scalar_value_from_pointer,
-        manual_switch_setting_from_live_value, should_render_live_text,
+        dashboard_input_control_kind, manual_switch_setting_from_live_value,
+        should_render_live_text,
     };
+    use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
     use crate::model::DashboardBinding;
     use eframe::egui::{Pos2, Rect};
 

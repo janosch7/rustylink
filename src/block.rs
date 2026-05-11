@@ -274,6 +274,71 @@ fn parse_value_shape(val: &str) -> (ValueKind, Option<u32>, Option<u32>) {
     }
 }
 
+fn collect_array_cell_values(
+    node: Node,
+    char_values: &mut Vec<String>,
+    numeric_values: &mut Vec<String>,
+) {
+    if node.is_element() && node.has_tag_name("Cell") {
+        let text = node.text().unwrap_or("").trim();
+        if !text.is_empty() {
+            match node
+                .attribute("Class")
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "char" => char_values.push(text.to_string()),
+                "double" | "single" | "int" | "uint" => numeric_values.push(text.to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    for child in node.children().filter(|c| c.is_element()) {
+        collect_array_cell_values(child, char_values, numeric_values);
+    }
+}
+
+fn parse_array_property_value(node: Node) -> Option<String> {
+    let mut char_values = Vec::new();
+    let mut numeric_values = Vec::new();
+    collect_array_cell_values(node, &mut char_values, &mut numeric_values);
+
+    if !char_values.is_empty() && !numeric_values.is_empty() {
+        let nums: Vec<f64> = numeric_values
+            .iter()
+            .flat_map(|raw| {
+                let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
+                trimmed
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        if nums.len() == char_values.len() {
+            let mapped = char_values
+                .iter()
+                .zip(nums.iter())
+                .map(|(label, value)| format!("{}:{}", label, value))
+                .collect::<Vec<_>>();
+            return Some(mapped.join(";"));
+        }
+    }
+
+    if !char_values.is_empty() {
+        return Some(char_values.join(";"));
+    }
+    match numeric_values.len() {
+        0 => None,
+        1 => numeric_values.first().cloned(),
+        _ => Some(numeric_values.join("|")),
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Branch
 // ────────────────────────────────────────────────────────────────────────────
@@ -490,6 +555,14 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                             current_setting = Some(value);
                         }
                         _ => {}
+                    }
+                }
+            }
+            "Array" => {
+                if let Some(prop_name) = child.attribute("PropName") {
+                    if let Some(value) = parse_array_property_value(child) {
+                        properties.insert(prop_name.to_string(), value);
+                        child_order.push(BlockChildKind::P(prop_name.to_string()));
                     }
                 }
             }
@@ -807,4 +880,26 @@ pub fn parse_system_shallow(node: Node, base_dir: &Utf8Path) -> Result<System> {
         annotations,
         chart: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_array_property_value;
+
+    #[test]
+    fn numeric_array_properties_preserve_multiple_cells() {
+        let xml = r#"
+            <Array PropName="States" Type="Cell" Dimension="1*2">
+              <Cell Class="double">[0.0, 1.0]</Cell>
+              <Cell Class="double">Matrix(2,3)
+[[100.0, 212.0, 19.0]; [0.0, 114.0, 189.0]]</Cell>
+            </Array>
+        "#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let value = parse_array_property_value(doc.root_element()).unwrap();
+        assert_eq!(
+            value,
+            "[0.0, 1.0]|Matrix(2,3)\n[[100.0, 212.0, 19.0]; [0.0, 114.0, 189.0]]"
+        );
+    }
 }

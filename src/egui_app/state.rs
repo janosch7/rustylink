@@ -475,6 +475,18 @@ impl SubsystemApp {
     /// Queue a live dashboard control event for the host application.
     #[cfg(feature = "dashboard")]
     pub fn queue_dashboard_control(&mut self, block: Block, value: DashboardControlValue) {
+        if let Some(binding) = block.dashboard_binding.as_ref() {
+            let preview_value = match value {
+                DashboardControlValue::Scalar(value) => Some(value),
+                DashboardControlValue::Bool(value) => Some(if value { 1.0 } else { 0.0 }),
+                DashboardControlValue::PulseHigh => Some(1.0),
+                DashboardControlValue::PulseLow => Some(0.0),
+            };
+            if let Some(preview_value) = preview_value {
+                self.live_values
+                    .insert(binding.uuid().to_string(), preview_value);
+            }
+        }
         self.pending_dashboard_control = Some(DashboardControlEvent { block, value });
     }
 

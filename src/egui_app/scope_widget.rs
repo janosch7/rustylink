@@ -1,15 +1,16 @@
 //! Miniature scope widget rendered inside `DashboardScope` and `Scope` blocks.
 //!
 //! Embedded scopes stay lightweight and `Send` by storing only sample history.
-//! The popout creates a fresh `liveplot` panel for rendering so the default-size
-//! window can show axis descriptions and the trace legend.
+//! Popout rendering keeps a persistent `liveplot` panel per scope so controls,
+//! legend, and zoom state remain stable across frames.
 
 #![cfg(feature = "egui")]
 
 use egui::{Align2, Color32, Pos2, Rect, Stroke, Ui, Vec2};
 use liveplot::data::scope::{AxisType, ScopeType};
-use liveplot::{LivePlotPanel, PlotPoint, channel_plot};
-use std::collections::VecDeque;
+use liveplot::{LivePlotPanel, PlotPoint, PlotSink, Trace, channel_plot};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 
 const MAX_SAMPLES: usize = 512;
 const BG: Color32 = Color32::from_rgb(18, 20, 24);
@@ -23,6 +24,88 @@ pub struct MiniScope {
     signal_name: String,
     next_x: f64,
     samples: VecDeque<(f64, f64)>,
+}
+
+struct ScopePopoutState {
+    sink: PlotSink,
+    panel: LivePlotPanel,
+    trace: Trace,
+    last_sent_x: Option<f64>,
+    trace_label: String,
+}
+
+thread_local! {
+    static SCOPE_POPOUT_STATE: RefCell<HashMap<(u64, String), ScopePopoutState>> =
+        RefCell::new(HashMap::new());
+    static SCOPE_EMBEDDED_STATE: RefCell<HashMap<(u64, String), ScopePopoutState>> =
+        RefCell::new(HashMap::new());
+}
+
+fn configure_popout_panel(panel: &mut LivePlotPanel, signal_name: &str) {
+    configure_panel(panel, signal_name, None, false);
+}
+
+fn configure_embedded_panel(panel: &mut LivePlotPanel, signal_name: &str, size: Vec2) {
+    configure_panel(panel, signal_name, Some(size), true);
+}
+
+fn configure_panel(
+    panel: &mut LivePlotPanel,
+    signal_name: &str,
+    size: Option<Vec2>,
+    compact: bool,
+) {
+    panel.traces_data.max_points = MAX_SAMPLES;
+    panel.min_height_for_top_bar = if compact { f32::INFINITY } else { 220.0 };
+    panel.min_width_for_sidebar = if compact { f32::INFINITY } else { 520.0 };
+    panel.min_height_for_sidebar = if compact { f32::INFINITY } else { 260.0 };
+    panel.compact = compact;
+    if compact {
+        panel.liveplot_panel.set_tick_label_thresholds(190.0, 130.0);
+        panel
+            .liveplot_panel
+            .set_legend_thresholds(f32::INFINITY, f32::INFINITY);
+    } else {
+        panel.liveplot_panel.set_tick_label_thresholds(360.0, 220.0);
+        panel.liveplot_panel.set_legend_thresholds(520.0, 260.0);
+    }
+
+    for scope in panel.liveplot_panel.get_data_mut() {
+        scope.scope_type = ScopeType::XYScope;
+        scope.show_legend = !compact;
+        scope.show_info_in_legend = false;
+        scope.force_hide_legend = compact;
+        scope.x_axis.axis_type = AxisType::Value(None);
+        let show_axis_names = size
+            .map(|size| size.x >= 250.0 && size.y >= 150.0)
+            .unwrap_or(true);
+        scope.x_axis.name = if compact && !show_axis_names {
+            None
+        } else {
+            Some("Sample".to_string())
+        };
+        scope.x_axis.auto_fit = true;
+        scope.y_axis.name = if compact && !show_axis_names {
+            None
+        } else {
+            Some(if signal_name.trim().is_empty() {
+                "Value".to_string()
+            } else {
+                signal_name.to_string()
+            })
+        };
+        scope.y_axis.auto_fit = true;
+        scope.y_axis.log_scale = false;
+        scope.pause_on_click = false;
+    }
+}
+
+pub fn clear_popout_state(viewer_instance_id: u64, scope_key: &str) {
+    SCOPE_POPOUT_STATE.with(|state| {
+        state
+            .borrow_mut()
+            .remove(&(viewer_instance_id, scope_key.to_string()));
+    });
 }
 
 impl MiniScope {
@@ -53,14 +136,61 @@ impl MiniScope {
         }
     }
 
-    pub fn show_embedded(&mut self, ui: &mut Ui) {
+    pub fn show_embedded(&mut self, ui: &mut Ui, viewer_instance_id: u64, scope_key: &str) {
         let available = ui.available_size_before_wrap();
         let desired = Vec2::new(available.x.max(40.0), available.y.max(30.0));
-        let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
-        self.paint_compact(ui, rect);
+        if self.samples.is_empty() || desired.x < 40.0 || desired.y < 30.0 {
+            let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
+            self.paint_compact(ui, rect);
+            return;
+        }
+
+        let state_key = (viewer_instance_id, scope_key.to_string());
+        SCOPE_EMBEDDED_STATE.with(|state| {
+            let mut cache = state.borrow_mut();
+            let embedded = cache.entry(state_key).or_insert_with(|| {
+                let (sink, rx) = channel_plot();
+                let mut panel = LivePlotPanel::new(rx);
+                let trace_label = if self.signal_name.trim().is_empty() {
+                    "signal".to_string()
+                } else {
+                    self.signal_name.clone()
+                };
+                configure_embedded_panel(&mut panel, &self.signal_name, desired);
+                let trace = sink.create_trace(trace_label.clone(), None::<String>);
+                ScopePopoutState {
+                    sink,
+                    panel,
+                    trace,
+                    last_sent_x: None,
+                    trace_label,
+                }
+            });
+
+            configure_embedded_panel(&mut embedded.panel, &self.signal_name, desired);
+            if !self.signal_name.trim().is_empty() && embedded.trace_label != self.signal_name {
+                embedded.trace_label = self.signal_name.clone();
+                embedded
+                    .sink
+                    .set_trace_info(&embedded.trace, self.signal_name.clone());
+            }
+
+            let new_points: Vec<PlotPoint> = self
+                .samples
+                .iter()
+                .filter(|(x, _)| embedded.last_sent_x.map(|last| *x > last).unwrap_or(true))
+                .map(|(x, y)| PlotPoint { x: *x, y: *y })
+                .collect();
+            if !new_points.is_empty() {
+                let _ = embedded.sink.send_points(&embedded.trace, new_points);
+                embedded.last_sent_x = self.samples.back().map(|(x, _)| *x);
+            }
+
+            embedded.panel.update_embedded(ui);
+        });
     }
 
-    pub fn show_popout(&mut self, ui: &mut Ui) {
+    pub fn show_popout(&mut self, ui: &mut Ui, viewer_instance_id: u64, scope_key: &str) {
         if self.samples.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label("No live data");
@@ -68,48 +198,51 @@ impl MiniScope {
             return;
         }
 
-        let (sink, rx) = channel_plot();
-        let mut panel = LivePlotPanel::new(rx);
-        panel.traces_data.max_points = MAX_SAMPLES;
-        // Keep the popout at its default size on open. Additional chrome such as
-        // the sidebar/legend only appears once the user enlarges the window.
-        panel.min_height_for_top_bar = 220.0;
-        panel.min_width_for_sidebar = 520.0;
-        panel.min_height_for_sidebar = 260.0;
-        panel.compact = false;
-        panel.liveplot_panel.set_tick_label_thresholds(360.0, 220.0);
-        panel.liveplot_panel.set_legend_thresholds(520.0, 260.0);
-
-        for scope in panel.liveplot_panel.get_data_mut() {
-            scope.scope_type = ScopeType::XYScope;
-            scope.show_legend = true;
-            scope.show_info_in_legend = false;
-            scope.force_hide_legend = false;
-            scope.x_axis.axis_type = AxisType::Value(None);
-            scope.x_axis.name = Some("Sample".to_string());
-            scope.x_axis.auto_fit = true;
-            scope.y_axis.name = Some(if self.signal_name.trim().is_empty() {
-                "Value".to_string()
-            } else {
-                self.signal_name.clone()
+        let state_key = (viewer_instance_id, scope_key.to_string());
+        SCOPE_POPOUT_STATE.with(|state| {
+            let mut cache = state.borrow_mut();
+            let popout = cache.entry(state_key).or_insert_with(|| {
+                let (sink, rx) = channel_plot();
+                let mut panel = LivePlotPanel::new(rx);
+                let trace_label = if self.signal_name.trim().is_empty() {
+                    "signal".to_string()
+                } else {
+                    self.signal_name.clone()
+                };
+                configure_popout_panel(&mut panel, &self.signal_name);
+                let trace = sink.create_trace(trace_label.clone(), None::<String>);
+                ScopePopoutState {
+                    sink,
+                    panel,
+                    trace,
+                    last_sent_x: None,
+                    trace_label,
+                }
             });
-            scope.y_axis.auto_fit = true;
-            scope.y_axis.log_scale = false;
-        }
 
-        let trace_name = if self.signal_name.trim().is_empty() {
-            "signal".to_string()
-        } else {
-            self.signal_name.clone()
-        };
-        let trace = sink.create_trace(trace_name, None::<String>);
-        let points: Vec<PlotPoint> = self
-            .samples
-            .iter()
-            .map(|(x, y)| PlotPoint { x: *x, y: *y })
-            .collect();
-        let _ = sink.send_points(&trace, points);
-        panel.update_embedded(ui);
+            if !self.signal_name.trim().is_empty() {
+                configure_popout_panel(&mut popout.panel, &self.signal_name);
+                if popout.trace_label != self.signal_name {
+                    popout.trace_label = self.signal_name.clone();
+                    popout
+                        .sink
+                        .set_trace_info(&popout.trace, self.signal_name.clone());
+                }
+            }
+
+            let new_points: Vec<PlotPoint> = self
+                .samples
+                .iter()
+                .filter(|(x, _)| popout.last_sent_x.map(|last| *x > last).unwrap_or(true))
+                .map(|(x, y)| PlotPoint { x: *x, y: *y })
+                .collect();
+            if !new_points.is_empty() {
+                let _ = popout.sink.send_points(&popout.trace, new_points);
+                popout.last_sent_x = self.samples.back().map(|(x, _)| *x);
+            }
+
+            popout.panel.update_embedded(ui);
+        });
     }
 
     fn paint_compact(&self, ui: &Ui, rect: Rect) {

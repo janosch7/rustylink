@@ -438,6 +438,78 @@ fn radio_button_has_values_property() {
         rb.properties.get("ButtonGroupName").map(|s| s.as_str()),
         Some("Group")
     );
+    assert_eq!(
+        rb.properties.get("Values").map(|s| s.as_str()),
+        Some("Label1;Label2;Label3;Test")
+    );
+}
+
+#[test]
+fn combo_box_values_are_extracted_from_array_property() {
+    let archive = match load_ui_test_archive() {
+        Some(a) => a,
+        None => return,
+    };
+    let system = archive.root_system().unwrap();
+
+    let combo = system
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "ComboBox")
+        .expect("ComboBox not found");
+
+    assert_eq!(
+        combo.properties.get("Values").map(|s| s.as_str()),
+        Some("Label1;Label2;Label3;ABTest")
+    );
+}
+
+#[test]
+fn checkbox_parses_label_and_values() {
+    let archive = match load_ui_test_archive() {
+        Some(a) => a,
+        None => return,
+    };
+    let system = archive.root_system().unwrap();
+
+    let checkbox = system
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "Checkbox")
+        .expect("Checkbox not found");
+
+    assert_eq!(
+        checkbox.properties.get("Label").map(|s| s.as_str()),
+        Some("TestLabel")
+    );
+    assert_eq!(
+        checkbox.properties.get("Values").map(|s| s.as_str()),
+        Some("[0.0, 1.0]")
+    );
+}
+
+#[test]
+fn edit_field_parses_alignment_and_initial_text_flags() {
+    let archive = match load_ui_test_archive() {
+        Some(a) => a,
+        None => return,
+    };
+    let system = archive.root_system().unwrap();
+
+    let edit = system
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "EditField")
+        .expect("EditField not found");
+
+    assert_eq!(
+        edit.properties.get("Alignment").map(|s| s.as_str()),
+        Some("Center")
+    );
+    assert_eq!(
+        edit.properties.get("ShowInitialText").map(|s| s.as_str()),
+        Some("on")
+    );
 }
 
 #[test]

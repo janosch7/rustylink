@@ -494,12 +494,13 @@ fn show_scope_popout_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     let available = ui.available_size();
                     let (rect, _) = ui.allocate_exact_size(available, egui::Sense::hover());
                     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |child_ui| {
-                        scope.show_popout(child_ui);
+                        scope.show_popout(child_ui, viewer_instance_id, &scope_key);
                     });
                 });
             });
         popout.open = open_flag;
         if !popout.open {
+            crate::egui_app::scope_widget::clear_popout_state(viewer_instance_id, &scope_key);
             app.scope_popout = None;
         }
     }
