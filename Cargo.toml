@@ -30,6 +30,7 @@ egui = [
 	"dep:eframe",
 	"dep:egui",
 	"dep:egui_extras",
+	"dep:rfd",
 	"dep:resvg",
 	"dep:rust-embed",
 	"dep:syntect",
@@ -79,6 +80,10 @@ version = "2.0.2"
 optional = true
 default-features = false
 features = ["tiles", "fft", "parquet"]
+
+[dependencies.rfd]
+version = "0.17.2"
+optional = true
 
 [dev-dependencies]
 tempfile = "3.10"

@@ -566,21 +566,12 @@ fn paint_switch_visual(
 }
 
 fn checkbox_label(block: &Block) -> String {
-    let label = block
+    block
         .properties
         .get("Label")
         .or_else(|| block.properties.get("Text"))
         .cloned()
-        .unwrap_or_else(|| "Label".to_string());
-    println!(
-        "[Dashboard Debug] {} '{}': Label={:?}, Text={:?} -> using {:?}",
-        block.block_type,
-        block.name,
-        block.properties.get("Label"),
-        block.properties.get("Text"),
-        label
-    );
-    label
+        .unwrap_or_else(|| "Label".to_string())
 }
 
 fn parse_range_property(block: &Block, keys: &[&str]) -> Option<f64> {
@@ -620,7 +611,7 @@ fn combo_box_label(block: &Block, index: usize) -> String {
 }
 
 fn option_label_value_pairs(block: &Block) -> Vec<(String, Option<f64>)> {
-    let pairs = block
+    block
         .properties
         .get("Values")
         .map(|values| {
@@ -638,15 +629,7 @@ fn option_label_value_pairs(block: &Block) -> Vec<(String, Option<f64>)> {
                 })
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_default();
-    println!(
-        "[Dashboard Debug] {} '{}': Values={:?} -> parsed {:?}",
-        block.block_type,
-        block.name,
-        block.properties.get("Values"),
-        pairs
-    );
-    pairs
+        .unwrap_or_default()
 }
 
 fn checkbox_state_from_value(block: &Block, live_value: f64) -> bool {
@@ -733,13 +716,6 @@ fn push_button_visuals(block: &Block, live_value: Option<f64>) -> (Color32, f64)
         .get("OffValue")
         .and_then(|v| v.trim().parse::<f64>().ok())
         .unwrap_or(0.0);
-    println!(
-        "[Dashboard Debug] PushButton '{}': IconOnColor={:?}, IconOffColor={:?}, OffValue={:?}",
-        block.name,
-        block.properties.get("IconOnColor"),
-        block.properties.get("IconOffColor"),
-        block.properties.get("OffValue")
-    );
     let color = match live_value {
         Some(value) if (value - off_value).abs() > f64::EPSILON => on_color,
         Some(_) => off_color,
@@ -893,15 +869,6 @@ pub fn render_radio_button(painter: &egui::Painter, block: &Block, rect: &Rect, 
     let (fsz, row_h, header_h) = radio_group_metrics(rect, font_scale, labels.len());
     let font = egui::FontId::proportional(fsz);
     let group_name = prop(block, "ButtonGroupName", "Group");
-    println!(
-        "[Dashboard Debug] RadioButtonGroup '{}': ButtonGroupName={:?}, Values={:?}, labels={}, font={:.2}",
-        block.name,
-        block.properties.get("ButtonGroupName"),
-        block.properties.get("Values"),
-        labels.len(),
-        fsz
-    );
-
     painter.text(
         Pos2::new(inner.left() + 4.0, inner.top() + 2.0),
         Align2::LEFT_TOP,
@@ -1958,71 +1925,48 @@ fn render_combo_box_control_widget(
     }
     let storage_key = dashboard_control_storage_key(block);
     let interact_id = app.egui_id(("dashboard_combo_box", storage_key.as_str()));
-    let popup_id = app.egui_id(("dashboard_combo_popup", storage_key.as_str()));
-    let response = ui.interact(rect.shrink(4.0), interact_id, egui::Sense::click());
-    paint_live_dashboard_value_overlay(
-        &ui.painter().with_clip_rect(rect),
-        block,
-        &rect,
-        font_scale,
-        live_value,
-    );
-    if !app.live_mode_enabled {
-        return false;
-    }
-
-    if response.clicked() {
-        egui::Popup::open_id(ui.ctx(), popup_id);
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(popup_id.with("just_opened"), true));
-    }
-
     let options = discrete_option_items(block);
-    let selected_index = discrete_selected_index(block, live_value);
+    let selected_index = discrete_selected_index(block, live_value).min(options.len().saturating_sub(1));
     let palette = widget_palette(block);
+    let default_visuals = ui.style().visuals.clone();
     let mut selected_value = None;
-    if egui::Popup::is_id_open(ui.ctx(), popup_id) {
-        let just_opened = ui
-            .ctx()
-            .data(|data| data.get_temp::<bool>(popup_id.with("just_opened")).unwrap_or(false));
-        let popup_pos = rect.left_bottom();
-        let area_response = egui::Area::new(popup_id)
-            .order(egui::Order::Foreground)
-            .fixed_pos(popup_pos)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style())
-                    .fill(palette.bg_field)
-                    .stroke(Stroke::new(1.0, palette.border))
-                    .show(ui, |ui| {
+    paint_dashboard_widget_background(ui, rect, palette);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(6.0)), |child_ui| {
+        apply_dashboard_widget_style(child_ui, rect, font_scale, palette);
+        child_ui.add_enabled_ui(app.live_mode_enabled, |child_ui| {
+            let selected_label = options
+                .get(selected_index)
+                .map(|(label, _)| label.as_str())
+                .unwrap_or("—");
+            child_ui.scope(|combo_ui| {
+                let mut combo_style: egui::Style = combo_ui.style().as_ref().clone();
+                combo_style.visuals.override_text_color = default_visuals.override_text_color;
+                combo_style.visuals.widgets.noninteractive.fg_stroke.color =
+                    default_visuals.widgets.noninteractive.fg_stroke.color;
+                combo_style.visuals.widgets.inactive.fg_stroke.color =
+                    default_visuals.widgets.inactive.fg_stroke.color;
+                combo_style.visuals.widgets.hovered.fg_stroke.color =
+                    default_visuals.widgets.hovered.fg_stroke.color;
+                combo_style.visuals.widgets.active.fg_stroke.color =
+                    default_visuals.widgets.active.fg_stroke.color;
+                *combo_ui.style_mut() = combo_style;
+
+                egui::ComboBox::from_id_salt(interact_id)
+                    .selected_text(egui::RichText::new(selected_label))
+                    .width(rect.shrink(12.0).width().max(80.0))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .show_ui(combo_ui, |ui| {
                         ui.set_min_width(rect.width().max(120.0));
                         for (index, (label, value)) in options.iter().enumerate() {
-                            if ui
-                                .selectable_label(index == selected_index, label)
-                                .clicked()
-                            {
+                            if ui.selectable_label(index == selected_index, label).clicked() {
                                 selected_value = Some(*value);
-                                egui::Popup::close_id(ui.ctx(), popup_id);
+                                ui.close();
                             }
                         }
                     });
             });
-
-        let clicked_outside = ui.ctx().input(|i| {
-            if !i.pointer.any_pressed() {
-                return false;
-            }
-            i.pointer.interact_pos().is_some_and(|pos| {
-                !response.rect.contains(pos) && !area_response.response.rect.contains(pos)
-            })
         });
-        if clicked_outside && !just_opened {
-            egui::Popup::close_id(ui.ctx(), popup_id);
-        }
-        if just_opened {
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(popup_id.with("just_opened"), false));
-        }
-    }
+    });
 
     if let Some(value) = selected_value {
         app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));

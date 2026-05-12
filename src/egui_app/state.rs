@@ -633,19 +633,27 @@ impl SubsystemApp {
         )));
     }
 
-    /// Save the current viewer layout to the configured layout file.
-    pub fn save_layout_to_default_path(&mut self) -> anyhow::Result<()> {
-        let Some(path) = self.layout_file_path.clone() else {
-            anyhow::bail!("No layout file path configured");
-        };
+    /// Save the current viewer layout to an explicit path and remember it as
+    /// the default layout file for later save/load operations.
+    pub fn save_layout_to_path(&mut self, path: impl Into<Utf8PathBuf>) -> anyhow::Result<()> {
+        let path = path.into();
         let snapshot = LayoutSnapshot {
             version: 1,
             root: self.root.clone(),
         };
         let text = serde_json::to_string_pretty(&snapshot)?;
         std::fs::write(path.as_str(), text)?;
+        self.layout_file_path = Some(path);
         self.layout_dirty = false;
         Ok(())
+    }
+
+    /// Save the current viewer layout to the configured layout file.
+    pub fn save_layout_to_default_path(&mut self) -> anyhow::Result<()> {
+        let Some(path) = self.layout_file_path.clone() else {
+            anyhow::bail!("No layout file path configured");
+        };
+        self.save_layout_to_path(path)
     }
 
     /// Load the viewer layout from the configured layout file.
@@ -653,6 +661,12 @@ impl SubsystemApp {
         let Some(path) = self.layout_file_path.clone() else {
             anyhow::bail!("No layout file path configured");
         };
+        self.load_layout_from_path(path)
+    }
+
+    /// Load the viewer layout from an explicit layout file and remember it.
+    pub fn load_layout_from_path(&mut self, path: impl Into<Utf8PathBuf>) -> anyhow::Result<()> {
+        let path = path.into();
         let text = std::fs::read_to_string(path.as_str())?;
         let snapshot: LayoutSnapshot = serde_json::from_str(&text)?;
         if snapshot.version != 1 {
@@ -669,6 +683,7 @@ impl SubsystemApp {
         self.selected_block_sids.clear();
         self.selected_line_indices.clear();
         self.viewer_drag_state = ViewerDragState::None;
+        self.layout_file_path = Some(path);
         self.layout_dirty = false;
         self.viewer_history.clear();
         self.notify_subsystem_changed();

@@ -330,15 +330,68 @@ pub(crate) fn update_internal(
                 "Save layout"
             };
             if ui.button(save_label).clicked() {
-                match app.save_layout_to_default_path() {
-                    Ok(()) => app.show_notification("Layout saved", 3000),
-                    Err(err) => app.show_notification(format!("Save layout failed: {}", err), 5000),
+                let mut dialog = rfd::FileDialog::new()
+                    .add_filter("rustylink layout", &["json"])
+                    .set_title("Save rustylink layout");
+                if let Some(default_path) = app.layout_file_path.as_ref() {
+                    let default_path = std::path::Path::new(default_path.as_str());
+                    if let Some(parent) = default_path.parent() {
+                        dialog = dialog.set_directory(parent);
+                    }
+                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str()) {
+                        dialog = dialog.set_file_name(file_name);
+                    }
+                }
+
+                if let Some(path) = dialog.save_file() {
+                    match camino::Utf8PathBuf::from_path_buf(path) {
+                        Ok(path) => match app.save_layout_to_path(path) {
+                            Ok(()) => app.show_notification("Layout saved", 3000),
+                            Err(err) => {
+                                app.show_notification(format!("Save layout failed: {}", err), 5000)
+                            }
+                        },
+                        Err(path) => app.show_notification(
+                            format!(
+                                "Save layout failed: selected path is not valid UTF-8 ({})",
+                                path.display()
+                            ),
+                            5000,
+                        ),
+                    }
                 }
             }
             if ui.button("Load layout").clicked() {
-                match app.load_layout_from_default_path() {
-                    Ok(()) => app.show_notification("Layout loaded", 3000),
-                    Err(err) => app.show_notification(format!("Load layout failed: {}", err), 5000),
+                let mut dialog = rfd::FileDialog::new()
+                    .add_filter("rustylink layout", &["json"])
+                    .set_title("Load rustylink layout");
+                if let Some(default_path) = app.layout_file_path.as_ref() {
+                    let default_path = std::path::Path::new(default_path.as_str());
+                    if let Some(parent) = default_path.parent() {
+                        dialog = dialog.set_directory(parent);
+                    }
+                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str()) {
+                        dialog = dialog.set_file_name(file_name);
+                    }
+                }
+
+                if let Some(path) = dialog.pick_file() {
+                    match camino::Utf8PathBuf::from_path_buf(path) {
+                        Ok(path) => match app.load_layout_from_path(path) {
+                            Ok(()) => app.show_notification("Layout loaded", 3000),
+                            Err(err) => app.show_notification(
+                                format!("Load layout failed: {}", err),
+                                5000,
+                            ),
+                        },
+                        Err(path) => app.show_notification(
+                            format!(
+                                "Load layout failed: selected path is not valid UTF-8 ({})",
+                                path.display()
+                            ),
+                            5000,
+                        ),
+                    }
                 }
             }
             if ui.button("Restore layout").clicked() {
@@ -3224,21 +3277,6 @@ fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
 
     let min = parse_property(block, &["Minimum", "ScaleMin", "LowerLimit", "Min"]);
     let max = parse_property(block, &["Maximum", "ScaleMax", "UpperLimit", "Max"]);
-    println!(
-        "[Dashboard Debug] {} '{}': Minimum={:?}, Maximum={:?} -> range ({}, {})",
-        block.block_type,
-        block.name,
-        block
-            .properties
-            .get("Minimum")
-            .or_else(|| block.properties.get("ScaleMin")),
-        block
-            .properties
-            .get("Maximum")
-            .or_else(|| block.properties.get("ScaleMax")),
-        min.unwrap_or(0.0),
-        max.unwrap_or(100.0)
-    );
     let min = min.unwrap_or(0.0);
     let max = max.unwrap_or(100.0);
     if min < max { (min, max) } else { (0.0, 100.0) }
