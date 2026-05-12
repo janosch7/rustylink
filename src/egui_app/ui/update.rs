@@ -2552,7 +2552,11 @@ pub(crate) fn update_internal(
             let mut value_tooltip: Option<String> = None;
             // Icon/value rendering with precedence: mask > value > custom/icon
             if let Some(text) = live_text.clone() {
-                let shown_text = format_block_value_for_display(b, &text);
+                let shown_text = if b.block_type == "Constant" {
+                    text
+                } else {
+                    format_block_value_for_display(b, &text)
+                };
                 if matches!(b.block_type.as_str(), "Display" | "Constant") {
                     paint_fitted_centered_text(
                         &painter,
