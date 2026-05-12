@@ -49,6 +49,107 @@ fn format_constant_value_for_display(raw: &str) -> String {
     }
 }
 
+const MIN_BLOCK_NAME_FONT_FACTOR: f32 = 0.5;
+const MIN_BLOCK_VALUE_FONT_FACTOR: f32 = 0.45;
+
+fn ellipsize_text_to_width(
+    painter: &egui::Painter,
+    text: &str,
+    font_id: &egui::FontId,
+    max_width: f32,
+    color: Color32,
+) -> String {
+    let measure = |value: &str| {
+        painter
+            .layout_no_wrap(value.to_string(), font_id.clone(), color)
+            .size()
+            .x
+    };
+
+    if measure(text) <= max_width {
+        return text.to_string();
+    }
+
+    let ellipsis = "...";
+    let mut trimmed = text.to_string();
+    while !trimmed.is_empty() {
+        trimmed.pop();
+        let candidate = format!("{}{}", trimmed.trim_end(), ellipsis);
+        if measure(&candidate) <= max_width {
+            return candidate;
+        }
+    }
+
+    ellipsis.to_string()
+}
+
+fn paint_fitted_centered_text(
+    painter: &egui::Painter,
+    rect: Rect,
+    text: &str,
+    color: Color32,
+    desired_font_px: f32,
+    min_font_px: f32,
+    monospace: bool,
+) {
+    let inner = rect.shrink2(Vec2::new(4.0, 4.0));
+    if inner.width() <= 1.0 || inner.height() <= 1.0 || text.trim().is_empty() {
+        return;
+    }
+
+    let mut current_font_px = desired_font_px.max(min_font_px).max(1.0);
+
+    let (best_lines, best_font_px) = loop {
+        let font_id = if monospace {
+            egui::FontId::monospace(current_font_px)
+        } else {
+            egui::FontId::proportional(current_font_px)
+        };
+        let line_height = (current_font_px * 1.15).max(1.0);
+        let max_lines = ((inner.height() / line_height).floor() as usize).max(1);
+        let mut lines = wrap_text_to_max_width(painter, text, font_id.clone(), inner.width());
+        if lines.is_empty() {
+            return;
+        }
+        if lines.len() > max_lines {
+            lines.truncate(max_lines);
+        }
+        for line in &mut lines {
+            *line = ellipsize_text_to_width(painter, line, &font_id, inner.width(), color);
+        }
+
+        let total_h = lines.len() as f32 * line_height;
+        if total_h <= inner.height() + 0.5 || current_font_px <= min_font_px + f32::EPSILON {
+            break (lines, current_font_px);
+        }
+
+        let next_font_px = (current_font_px * 0.9).max(min_font_px);
+        if (next_font_px - current_font_px).abs() < f32::EPSILON {
+            break (lines, current_font_px);
+        }
+        current_font_px = next_font_px;
+    };
+
+    let font_id = if monospace {
+        egui::FontId::monospace(best_font_px)
+    } else {
+        egui::FontId::proportional(best_font_px)
+    };
+    let line_height = (best_font_px * 1.15).max(1.0);
+    let total_h = best_lines.len() as f32 * line_height;
+    let mut y = inner.center().y - total_h * 0.5 + line_height * 0.5;
+    for line in &best_lines {
+        painter.text(
+            Pos2::new(inner.center().x, y),
+            Align2::CENTER_CENTER,
+            line,
+            font_id.clone(),
+            color,
+        );
+        y += line_height;
+    }
+}
+
 fn format_block_value_for_display(block: &crate::model::Block, raw: &str) -> String {
     if block.block_type == "Constant" {
         format_constant_value_for_display(raw)
@@ -255,6 +356,20 @@ pub(crate) fn update_internal(
             }
 
             ui.separator();
+            let live_label = if app.live_mode_enabled {
+                "Live: On"
+            } else {
+                "Live: Off"
+            };
+            if ui
+                .selectable_label(app.live_mode_enabled, live_label)
+                .clicked()
+            {
+                app.live_mode_enabled = !app.live_mode_enabled;
+                ui.ctx().request_repaint();
+            }
+
+            ui.separator();
             ui.checkbox(&mut app.show_block_names_default, "Block names");
             ui.label("Name size");
             ui.add(
@@ -262,17 +377,17 @@ pub(crate) fn update_internal(
                     .speed(0.05)
                     .range(0.2..=2.0),
             );
-            ui.label("Min name size");
-            ui.add(
-                egui::DragValue::new(&mut app.block_name_min_font_factor)
-                    .speed(0.05)
-                    .range(0.1..=1.0),
-            );
             ui.label("Max char frac");
             ui.add(
                 egui::DragValue::new(&mut app.block_name_max_char_width_factor)
                     .speed(0.01)
                     .range(0.05..=0.5),
+            );
+            ui.label("Value size");
+            ui.add(
+                egui::DragValue::new(&mut app.block_value_font_factor)
+                    .speed(0.05)
+                    .range(0.2..=2.0),
             );
             ui.separator();
             let move_label = if app.move_mode_enabled {
@@ -285,18 +400,6 @@ pub(crate) fn update_internal(
                 .clicked()
             {
                 app.move_mode_enabled = !app.move_mode_enabled;
-            }
-            let live_label = if app.live_mode_enabled {
-                "Live: On"
-            } else {
-                "Live: Off"
-            };
-            if ui
-                .selectable_label(app.live_mode_enabled, live_label)
-                .clicked()
-            {
-                app.live_mode_enabled = !app.live_mode_enabled;
-                ui.ctx().request_repaint();
             }
             if app.move_mode_enabled {
                 let undo_btn = egui::Button::new("Undo");
@@ -338,7 +441,8 @@ pub(crate) fn update_internal(
                     if let Some(parent) = default_path.parent() {
                         dialog = dialog.set_directory(parent);
                     }
-                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str()) {
+                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str())
+                    {
                         dialog = dialog.set_file_name(file_name);
                     }
                 }
@@ -370,7 +474,8 @@ pub(crate) fn update_internal(
                     if let Some(parent) = default_path.parent() {
                         dialog = dialog.set_directory(parent);
                     }
-                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str()) {
+                    if let Some(file_name) = default_path.file_name().and_then(|name| name.to_str())
+                    {
                         dialog = dialog.set_file_name(file_name);
                     }
                 }
@@ -379,10 +484,9 @@ pub(crate) fn update_internal(
                     match camino::Utf8PathBuf::from_path_buf(path) {
                         Ok(path) => match app.load_layout_from_path(path) {
                             Ok(()) => app.show_notification("Layout loaded", 3000),
-                            Err(err) => app.show_notification(
-                                format!("Load layout failed: {}", err),
-                                5000,
-                            ),
+                            Err(err) => {
+                                app.show_notification(format!("Load layout failed: {}", err), 5000)
+                            }
                         },
                         Err(path) => app.show_notification(
                             format!(
@@ -395,8 +499,12 @@ pub(crate) fn update_internal(
                 }
             }
             if ui.button("Restore layout").clicked() {
-                app.restore_original_layout();
-                app.show_notification("Layout restored", 3000);
+                match app.restore_original_layout() {
+                    Ok(()) => app.show_notification("Layout restored", 3000),
+                    Err(err) => {
+                        app.show_notification(format!("Restore layout failed: {}", err), 5000)
+                    }
+                }
             }
 
             // Render transient in-GUI notification (right-aligned in the top bar)
@@ -2444,26 +2552,46 @@ pub(crate) fn update_internal(
             let mut value_tooltip: Option<String> = None;
             // Icon/value rendering with precedence: mask > value > custom/icon
             if let Some(text) = live_text.clone() {
-                let font_id = egui::FontId::proportional(12.0 * font_scale);
                 let shown_text = format_block_value_for_display(b, &text);
-                let galley = painter.layout_no_wrap(shown_text.clone(), font_id, fg);
-                let pos = r_screen.center() - galley.size() * 0.5;
-                painter.galley(pos, galley, fg);
+                if b.block_type == "Display" {
+                    paint_fitted_centered_text(
+                        &painter,
+                        *r_screen,
+                        &shown_text,
+                        fg,
+                        12.0 * font_scale * app.block_value_font_factor,
+                        12.0 * font_scale * MIN_BLOCK_VALUE_FONT_FACTOR,
+                        false,
+                    );
+                } else {
+                    let font_id = egui::FontId::proportional(12.0 * font_scale);
+                    let galley = painter.layout_no_wrap(shown_text.clone(), font_id, fg);
+                    let pos = r_screen.center() - galley.size() * 0.5;
+                    painter.galley(pos, galley, fg);
+                }
                 value_tooltip = Some(shown_text);
             } else if b.block_type == "Constant" && app.live_mode_enabled {
-                let font_id = egui::FontId::proportional(12.0 * font_scale);
                 let shown_value = format_constant_value_for_display(&static_constant_value);
-                let galley = painter.layout_no_wrap(shown_value.clone(), font_id, fg);
-                let pos = r_screen.center() - galley.size() * 0.5;
-                painter.galley(pos, galley, fg);
+                paint_fitted_centered_text(
+                    &painter,
+                    *r_screen,
+                    &shown_value,
+                    fg,
+                    12.0 * font_scale * app.block_value_font_factor,
+                    12.0 * font_scale * MIN_BLOCK_VALUE_FONT_FACTOR,
+                    false,
+                );
                 value_tooltip = Some(shown_value);
             } else if let Some(label) = display_signal_label {
-                let beneath_font_px = 12.0 * font_scale;
-                let font_id = egui::FontId::proportional(beneath_font_px);
-                let color = fg;
-                let galley = painter.layout_no_wrap(label.clone(), font_id.clone(), color);
-                let pos = r_screen.center() - galley.size() * 0.5;
-                painter.galley(pos, galley, color);
+                paint_fitted_centered_text(
+                    &painter,
+                    *r_screen,
+                    &label,
+                    fg,
+                    12.0 * font_scale * app.block_value_font_factor,
+                    12.0 * font_scale * MIN_BLOCK_VALUE_FONT_FACTOR,
+                    false,
+                );
                 value_tooltip = Some(label);
             } else if b.mask.is_some() {
                 if let Some(text) = b.mask_display_text.as_ref() {
@@ -2484,14 +2612,24 @@ pub(crate) fn update_internal(
                 .unwrap_or(false)
                 && b.block_type != "Constant"
             {
-                // Render block value centered; smaller than label: use beneath-label font size
-                let beneath_font_px = 10.0 * font_scale; // same as label beneath block
-                let font_id = egui::FontId::proportional(beneath_font_px);
-                let color = fg;
                 let text = b.value.as_ref().unwrap().clone();
-                let galley = painter.layout_no_wrap(text, font_id.clone(), color);
-                let pos = r_screen.center() - galley.size() * 0.5;
-                painter.galley(pos, galley, color);
+                if b.block_type == "Display" {
+                    paint_fitted_centered_text(
+                        &painter,
+                        *r_screen,
+                        &text,
+                        fg,
+                        10.0 * font_scale * app.block_value_font_factor,
+                        10.0 * font_scale * MIN_BLOCK_VALUE_FONT_FACTOR,
+                        false,
+                    );
+                } else {
+                    let beneath_font_px = 10.0 * font_scale;
+                    let font_id = egui::FontId::proportional(beneath_font_px);
+                    let galley = painter.layout_no_wrap(text, font_id, fg);
+                    let pos = r_screen.center() - galley.size() * 0.5;
+                    painter.galley(pos, galley, fg);
+                }
             } else if let Some(instance_label) =
                 crate::builtin_libraries::compute_block_instance_label(b)
             {
@@ -2639,7 +2777,7 @@ pub(crate) fn update_internal(
                 if font_px > max_font_px {
                     font_px = max_font_px.max(1.0);
                 }
-                let min_font_px = (chevron_h * app.block_name_min_font_factor).max(1.0);
+                let min_font_px = (chevron_h * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
 
                 let color = contrast_color(ui.visuals().panel_fill);
 

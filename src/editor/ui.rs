@@ -1018,7 +1018,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let max_label_w = overall_w * state.app.block_name_max_char_width_factor;
 
-            let min_font_px = (chevron_h * state.app.block_name_min_font_factor).max(1.0);
+            let min_font_px = (chevron_h * 0.5).max(1.0);
 
             let font_px = (chevron_h * state.app.block_name_font_factor).max(1.0);
 

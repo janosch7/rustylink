@@ -1926,47 +1926,54 @@ fn render_combo_box_control_widget(
     let storage_key = dashboard_control_storage_key(block);
     let interact_id = app.egui_id(("dashboard_combo_box", storage_key.as_str()));
     let options = discrete_option_items(block);
-    let selected_index = discrete_selected_index(block, live_value).min(options.len().saturating_sub(1));
+    let selected_index =
+        discrete_selected_index(block, live_value).min(options.len().saturating_sub(1));
     let palette = widget_palette(block);
     let default_visuals = ui.style().visuals.clone();
     let mut selected_value = None;
     paint_dashboard_widget_background(ui, rect, palette);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(6.0)), |child_ui| {
-        apply_dashboard_widget_style(child_ui, rect, font_scale, palette);
-        child_ui.add_enabled_ui(app.live_mode_enabled, |child_ui| {
-            let selected_label = options
-                .get(selected_index)
-                .map(|(label, _)| label.as_str())
-                .unwrap_or("—");
-            child_ui.scope(|combo_ui| {
-                let mut combo_style: egui::Style = combo_ui.style().as_ref().clone();
-                combo_style.visuals.override_text_color = default_visuals.override_text_color;
-                combo_style.visuals.widgets.noninteractive.fg_stroke.color =
-                    default_visuals.widgets.noninteractive.fg_stroke.color;
-                combo_style.visuals.widgets.inactive.fg_stroke.color =
-                    default_visuals.widgets.inactive.fg_stroke.color;
-                combo_style.visuals.widgets.hovered.fg_stroke.color =
-                    default_visuals.widgets.hovered.fg_stroke.color;
-                combo_style.visuals.widgets.active.fg_stroke.color =
-                    default_visuals.widgets.active.fg_stroke.color;
-                *combo_ui.style_mut() = combo_style;
+    ui.scope_builder(
+        egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
+        |child_ui| {
+            apply_dashboard_widget_style(child_ui, rect, font_scale, palette);
+            child_ui.add_enabled_ui(app.live_mode_enabled, |child_ui| {
+                let selected_label = options
+                    .get(selected_index)
+                    .map(|(label, _)| label.as_str())
+                    .unwrap_or("—");
+                child_ui.scope(|combo_ui| {
+                    let mut combo_style: egui::Style = combo_ui.style().as_ref().clone();
+                    combo_style.visuals.override_text_color = default_visuals.override_text_color;
+                    combo_style.visuals.widgets.noninteractive.fg_stroke.color =
+                        default_visuals.widgets.noninteractive.fg_stroke.color;
+                    combo_style.visuals.widgets.inactive.fg_stroke.color =
+                        default_visuals.widgets.inactive.fg_stroke.color;
+                    combo_style.visuals.widgets.hovered.fg_stroke.color =
+                        default_visuals.widgets.hovered.fg_stroke.color;
+                    combo_style.visuals.widgets.active.fg_stroke.color =
+                        default_visuals.widgets.active.fg_stroke.color;
+                    *combo_ui.style_mut() = combo_style;
 
-                egui::ComboBox::from_id_salt(interact_id)
-                    .selected_text(egui::RichText::new(selected_label))
-                    .width(rect.shrink(12.0).width().max(80.0))
-                    .wrap_mode(egui::TextWrapMode::Truncate)
-                    .show_ui(combo_ui, |ui| {
-                        ui.set_min_width(rect.width().max(120.0));
-                        for (index, (label, value)) in options.iter().enumerate() {
-                            if ui.selectable_label(index == selected_index, label).clicked() {
-                                selected_value = Some(*value);
-                                ui.close();
+                    egui::ComboBox::from_id_salt(interact_id)
+                        .selected_text(egui::RichText::new(selected_label))
+                        .width(rect.shrink(12.0).width().max(80.0))
+                        .wrap_mode(egui::TextWrapMode::Truncate)
+                        .show_ui(combo_ui, |ui| {
+                            ui.set_min_width(rect.width().max(120.0));
+                            for (index, (label, value)) in options.iter().enumerate() {
+                                if ui
+                                    .selectable_label(index == selected_index, label)
+                                    .clicked()
+                                {
+                                    selected_value = Some(*value);
+                                    ui.close();
+                                }
                             }
-                        }
-                    });
+                        });
+                });
             });
-        });
-    });
+        },
+    );
 
     if let Some(value) = selected_value {
         app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));

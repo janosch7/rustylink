@@ -1,19 +1,66 @@
 #![cfg(feature = "egui")]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::BufReader;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use camino::Utf8PathBuf;
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
 use eframe::egui::{self, Vec2};
 
 use crate::editor::operations::EditorHistory;
-use crate::model::{Annotation, Block, Chart, Line, System};
+use crate::model::{Annotation, Block, Chart, Line, SlxArchive, System};
+use crate::parser::{FsSource, SimulinkParser, ZipSource};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct LayoutSnapshot {
     version: u32,
     root: System,
+}
+
+fn load_source_model(
+    source_path: &Utf8Path,
+) -> anyhow::Result<(System, BTreeMap<u32, Chart>, BTreeMap<String, u32>)> {
+    if source_path.extension() == Some("slx") {
+        let archive = SlxArchive::from_file(source_path)?;
+        let system = archive.assembled_root_system()?;
+
+        let file =
+            std::fs::File::open(source_path).with_context(|| format!("Open {}", source_path))?;
+        let reader = BufReader::new(file);
+        let mut parser = SimulinkParser::new("", ZipSource::new(reader)?);
+        let root = Utf8PathBuf::from("simulink/systems/system_root.xml");
+        let _ = parser.parse_system_file(&root)?;
+
+        let charts = parser.get_charts().clone();
+        let mut chart_map: BTreeMap<String, u32> = parser
+            .get_sid_to_chart_map()
+            .iter()
+            .map(|(sid, cid)| (sid.to_string(), *cid))
+            .collect();
+        for (name, cid) in parser.get_system_to_chart_map().iter() {
+            chart_map.entry(name.clone()).or_insert(*cid);
+        }
+        return Ok((system, charts, chart_map));
+    }
+
+    let root_dir = source_path.parent().unwrap_or(Utf8Path::new("."));
+    let mut parser = SimulinkParser::new(root_dir, FsSource);
+    let system = parser
+        .parse_system_file(source_path)
+        .with_context(|| format!("Failed to parse {}", source_path))?;
+
+    let charts = parser.get_charts().clone();
+    let mut chart_map: BTreeMap<String, u32> = parser
+        .get_sid_to_chart_map()
+        .iter()
+        .map(|(sid, cid)| (sid.to_string(), *cid))
+        .collect();
+    for (name, cid) in parser.get_system_to_chart_map().iter() {
+        chart_map.entry(name.clone()).or_insert(*cid);
+    }
+    Ok((system, charts, chart_map))
 }
 
 // use super::geometry::parse_block_rect;
@@ -217,6 +264,8 @@ pub struct SubsystemApp {
     pub root: System,
     /// Snapshot of the root system at construction / last load, used for "Restore layout".
     pub original_root: System,
+    /// Original source-model path when the viewer was loaded from disk.
+    pub source_model_path: Option<Utf8PathBuf>,
     pub path: Vec<String>,
     pub all_subsystems: Vec<Vec<String>>,
     pub search_query: String,
@@ -258,16 +307,14 @@ pub struct SubsystemApp {
     /// A value of ~1.0 makes the text approximately the same height as the chevrons.
     pub block_name_font_factor: f32,
 
+    /// Value-text font size factor for Constant/Display block content.
+    pub block_value_font_factor: f32,
+
     /// Maximum block-name font size factor relative to block width.
     ///
     /// The actual font size will be bounded so that a typical character is at most
     /// `block_width * block_name_max_char_width_factor` pixels wide.
     pub block_name_max_char_width_factor: f32,
-
-    /// Minimum block-name font size factor relative to port chevron height.
-    ///
-    /// Used when avoiding collisions with other elements.
-    pub block_name_min_font_factor: f32,
 
     /// Selected block SIDs in the current view (supports multi-selection).
     pub selected_block_sids: BTreeSet<String>,
@@ -372,6 +419,7 @@ impl SubsystemApp {
             instance_id: NEXT_VIEWER_INSTANCE_ID.fetch_add(1, Ordering::Relaxed),
             root,
             original_root,
+            source_model_path: None,
             path: initial_path,
             all_subsystems: all,
             search_query: String::new(),
@@ -394,8 +442,8 @@ impl SubsystemApp {
             block_click_handler: None,
             show_block_names_default: true,
             block_name_font_factor: 0.85,
+            block_value_font_factor: 1.0,
             block_name_max_char_width_factor: 1.0 / 8.0,
-            block_name_min_font_factor: 0.5,
             selected_block_sids: BTreeSet::new(),
             selected_line_indices: BTreeSet::new(),
             move_mode_enabled: false,
@@ -627,10 +675,35 @@ impl SubsystemApp {
     /// Configure the default layout file path from the original model path.
     pub fn set_layout_source_path(&mut self, source_path: impl Into<Utf8PathBuf>) {
         let source_path = source_path.into();
+        self.source_model_path = Some(source_path.clone());
         self.layout_file_path = Some(Utf8PathBuf::from(format!(
             "{}.rustylink-layout.json",
             source_path
         )));
+    }
+
+    fn replace_root_state(
+        &mut self,
+        root: System,
+        charts: BTreeMap<u32, Chart>,
+        chart_map: BTreeMap<String, u32>,
+    ) {
+        self.root = root;
+        self.charts = charts;
+        self.chart_map = chart_map;
+        self.all_subsystems = collect_subsystems_paths(&self.root);
+        if resolve_subsystem_by_vec(&self.root, &self.path).is_none() {
+            self.path.clear();
+        }
+        self.reset_view = true;
+        self.view_bounds = None;
+        self.selected_block_sids.clear();
+        self.selected_line_indices.clear();
+        self.viewer_drag_state = ViewerDragState::None;
+        self.layout_dirty = false;
+        self.view_cache.invalidate();
+        self.viewer_history.clear();
+        self.notify_subsystem_changed();
     }
 
     /// Save the current viewer layout to an explicit path and remember it as
@@ -672,40 +745,27 @@ impl SubsystemApp {
         if snapshot.version != 1 {
             anyhow::bail!("Unsupported layout version {}", snapshot.version);
         }
-        self.root = snapshot.root;
-        self.original_root = self.root.clone();
-        self.all_subsystems = collect_subsystems_paths(&self.root);
-        if resolve_subsystem_by_vec(&self.root, &self.path).is_none() {
-            self.path.clear();
-        }
-        self.reset_view = true;
-        self.view_bounds = None;
-        self.selected_block_sids.clear();
-        self.selected_line_indices.clear();
-        self.viewer_drag_state = ViewerDragState::None;
+        self.original_root = snapshot.root.clone();
+        self.replace_root_state(snapshot.root, self.charts.clone(), self.chart_map.clone());
         self.layout_file_path = Some(path);
-        self.layout_dirty = false;
-        self.viewer_history.clear();
-        self.notify_subsystem_changed();
         Ok(())
     }
 
     /// Restore the root system to its original state (at construction or last load).
-    pub fn restore_original_layout(&mut self) {
-        self.root = self.original_root.clone();
-        self.all_subsystems = collect_subsystems_paths(&self.root);
-        if resolve_subsystem_by_vec(&self.root, &self.path).is_none() {
-            self.path.clear();
+    pub fn restore_original_layout(&mut self) -> anyhow::Result<()> {
+        if let Some(source_path) = self.source_model_path.clone() {
+            let (root, charts, chart_map) = load_source_model(&source_path)?;
+            self.original_root = root.clone();
+            self.replace_root_state(root, charts, chart_map);
+            return Ok(());
         }
-        self.reset_view = true;
-        self.view_bounds = None;
-        self.selected_block_sids.clear();
-        self.selected_line_indices.clear();
-        self.viewer_drag_state = ViewerDragState::None;
-        self.layout_dirty = false;
-        self.view_cache.invalidate();
-        self.viewer_history.clear();
-        self.notify_subsystem_changed();
+
+        self.replace_root_state(
+            self.original_root.clone(),
+            self.charts.clone(),
+            self.chart_map.clone(),
+        );
+        Ok(())
     }
 
     /// Navigate one level up, if possible.
