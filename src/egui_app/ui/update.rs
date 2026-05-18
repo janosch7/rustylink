@@ -207,6 +207,14 @@ fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
 }
 
 fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
+    #[cfg(not(feature = "dashboard"))]
+    {
+        let _ = block_type;
+        false
+    }
+
+    #[cfg(feature = "dashboard")]
+    {
     matches!(
         block_type,
         "Checkbox"
@@ -221,6 +229,7 @@ fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
             | "SliderSwitchBlock"
             | "ToggleSwitchBlock"
     )
+    }
 }
 
 fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
@@ -235,7 +244,6 @@ fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f
         .or_else(|| dashboard_live_value(app, block))
 }
 
-#[cfg(feature = "dashboard")]
 fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
     if branch.dst.as_ref().is_some_and(|dst| dst.sid == sid) {
         return true;
@@ -897,10 +905,13 @@ pub(crate) fn update_internal(
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
+                                #[cfg(feature = "dashboard")]
+                                {
                             app.queue_dashboard_control(
                                 (*b).clone(),
                                 DashboardControlValue::Bool(enabled),
                             );
+                                }
                             any_block_clicked = true;
                         }
                     } else {
@@ -3400,6 +3411,17 @@ fn render_dashboard_control_widget(
         live_value,
         live_text.as_deref(),
     )
+}
+
+#[cfg(not(feature = "dashboard"))]
+fn render_dashboard_control_widget(
+    _app: &mut SubsystemApp,
+    _ui: &mut egui::Ui,
+    _block: &crate::model::Block,
+    _rect: Rect,
+    _font_scale: f32,
+) -> bool {
+    false
 }
 
 #[cfg(feature = "dashboard")]
