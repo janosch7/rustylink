@@ -1,0 +1,267 @@
+#![cfg(feature = "egui")]
+
+use crate::model::{Block, DashboardBinding, System};
+use eframe::egui::{Painter, Rect};
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimulinkIcon {
+    Utf8(&'static str),
+    Svg(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortLabelPolicy {
+    None,
+    Internal,
+    Connected,
+    Fixed(&'static [&'static str]),
+}
+
+pub type InteriorRendererFn = fn(&Painter, &Block, &Rect, f32);
+pub type LiveRendererFn = fn(&Painter, &Block, &Rect, f32, &LiveRenderContext<'_>);
+
+#[derive(Clone, Copy, Debug)]
+pub struct LiveRenderContext<'a> {
+    pub dashboard_binding: Option<&'a DashboardBinding>,
+    pub live_mode_enabled: bool,
+    pub live_value: Option<f64>,
+    pub live_text: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IOPorts {
+    None,
+    Fixed(u32),    // Exact number of ports this block has.
+    Variable(u32), // Default number of ports to display when no number can be parsed form the simulink model. This is used for blocks that can have a variable number of ports, like the Sum block.
+}
+
+impl IOPorts {
+    /// Get the default port count for rendering and configuration purposes.
+    ///
+    /// - `None` → 0
+    /// - `Fixed(n)` → n
+    /// - `Variable(n)` → n (the default value)
+    pub const fn default_count(self) -> u32 {
+        match self {
+            IOPorts::None => 0,
+            IOPorts::Fixed(n) => n,
+            IOPorts::Variable(n) => n,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SimulinkBlockDefinition {
+    pub block_type: &'static str,
+    pub aliases: &'static [&'static str],
+    pub category: &'static str,
+    pub description: &'static str,
+    pub inputs: IOPorts,
+    pub outputs: IOPorts,
+    pub shape: SimulinkShape,
+    pub icon: Option<SimulinkIcon>,
+    pub input_port_label: PortLabelPolicy,
+    pub output_port_label: PortLabelPolicy,
+    pub special_renderer: Option<InteriorRendererFn>,
+    pub live_renderer: Option<LiveRendererFn>,
+    /// Optional per-port position overrides (e.g. Sum block has its second
+    /// input on the bottom edge instead of the left edge).
+    pub port_position_overrides: &'static [PortPositionOverride],
+    /// Optional per-instance label generator for this block type.
+    ///
+    /// Called with the full parsed `Block`; returns `Some(label)` when a
+    /// textual label can be derived from instance data (e.g. the Gain value).
+    pub compute_instance_label: Option<fn(&Block) -> Option<String>>,
+    pub parse_block_extension: Option<ParseBlockExtensionFn>,
+    pub post_parse_normalizer: Option<PostParseNormalizerFn>,
+    pub on_primary_click: BlockPrimaryClickPolicy,
+    pub on_double_click: BlockDoubleClickPolicy,
+    pub on_live_click: BlockLiveClickPolicy,
+    pub value_text_policy: BlockValueTextPolicy,
+    pub show_connected_input_signal_label: bool,
+    pub dashboard_connection_policy: DashboardConnectionPolicy,
+    pub code_editor_kind: BlockCodeEditorKind,
+    pub creates_subsystem: bool,
+    pub marks_matlab_function: bool,
+    pub allow_inline_editor: bool,
+    pub popout_kind: BlockPopoutKind,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SimulinkLibraryDefinition {
+    pub name: &'static str,
+    pub category: &'static str,
+    pub blocks: &'static [SimulinkBlockDefinition],
+    pub parse_enricher: Option<ParseEnricherFn>,
+}
+
+impl SimulinkBlockDefinition {
+    pub const fn new(
+        block_type: &'static str,
+        aliases: &'static [&'static str],
+        category: &'static str,
+        description: &'static str,
+        inputs: IOPorts,
+        outputs: IOPorts,
+        shape: SimulinkShape,
+        icon: Option<SimulinkIcon>,
+        input_port_label: PortLabelPolicy,
+        output_port_label: PortLabelPolicy,
+        special_renderer: Option<InteriorRendererFn>,
+        live_renderer: Option<LiveRendererFn>,
+    ) -> Self {
+        Self {
+            block_type,
+            aliases,
+            category,
+            description,
+            inputs,
+            outputs,
+            shape,
+            icon,
+            input_port_label,
+            output_port_label,
+            special_renderer,
+            live_renderer,
+            port_position_overrides: &[],
+            compute_instance_label: None,
+            parse_block_extension: None,
+            post_parse_normalizer: None,
+            on_primary_click: BlockPrimaryClickPolicy::None,
+            on_double_click: BlockDoubleClickPolicy::None,
+            on_live_click: BlockLiveClickPolicy::None,
+            value_text_policy: BlockValueTextPolicy::Auto,
+            show_connected_input_signal_label: false,
+            dashboard_connection_policy: DashboardConnectionPolicy::Default,
+            code_editor_kind: BlockCodeEditorKind::None,
+            creates_subsystem: false,
+            marks_matlab_function: false,
+            allow_inline_editor: false,
+            popout_kind: BlockPopoutKind::None,
+        }
+    }
+
+    /// Set port position overrides for this block definition (builder method).
+    pub const fn with_port_overrides(mut self, overrides: &'static [PortPositionOverride]) -> Self {
+        self.port_position_overrides = overrides;
+        self
+    }
+
+    /// Set a per-instance label function for this block definition (builder method).
+    pub const fn with_instance_label(mut self, f: fn(&Block) -> Option<String>) -> Self {
+        self.compute_instance_label = Some(f);
+        self
+    }
+
+    pub const fn with_parse_block_extension(mut self, f: ParseBlockExtensionFn) -> Self {
+        self.parse_block_extension = Some(f);
+        self
+    }
+
+    pub const fn with_post_parse_normalizer(mut self, f: PostParseNormalizerFn) -> Self {
+        self.post_parse_normalizer = Some(f);
+        self
+    }
+
+    pub const fn with_primary_click_policy(mut self, policy: BlockPrimaryClickPolicy) -> Self {
+        self.on_primary_click = policy;
+        self
+    }
+
+    pub const fn with_double_click_policy(mut self, policy: BlockDoubleClickPolicy) -> Self {
+        self.on_double_click = policy;
+        self
+    }
+
+    pub const fn with_live_click_policy(mut self, policy: BlockLiveClickPolicy) -> Self {
+        self.on_live_click = policy;
+        self
+    }
+
+    pub const fn with_value_text_policy(mut self, policy: BlockValueTextPolicy) -> Self {
+        self.value_text_policy = policy;
+        self
+    }
+
+    pub const fn with_connected_input_signal_label(mut self, enabled: bool) -> Self {
+        self.show_connected_input_signal_label = enabled;
+        self
+    }
+
+    pub const fn with_dashboard_connection_policy(
+        mut self,
+        policy: DashboardConnectionPolicy,
+    ) -> Self {
+        self.dashboard_connection_policy = policy;
+        self
+    }
+
+    pub const fn with_code_editor_kind(mut self, kind: BlockCodeEditorKind) -> Self {
+        self.code_editor_kind = kind;
+        self
+    }
+
+    pub const fn with_embedded_subsystem(mut self, enabled: bool) -> Self {
+        self.creates_subsystem = enabled;
+        self
+    }
+
+    pub const fn with_matlab_function_flag(mut self, enabled: bool) -> Self {
+        self.marks_matlab_function = enabled;
+        self
+    }
+
+    pub const fn with_inline_editor(mut self, allow: bool) -> Self {
+        self.allow_inline_editor = allow;
+        self
+    }
+
+    pub const fn with_popout_kind(mut self, kind: BlockPopoutKind) -> Self {
+        self.popout_kind = kind;
+        self
+    }
+}
+
+impl SimulinkLibraryDefinition {
+    pub const fn empty(name: &'static str, category: &'static str) -> Self {
+        Self {
+            name,
+            category,
+            blocks: &[],
+            parse_enricher: None,
+        }
+    }
+}
+
+pub const fn unknown_block_definition() -> SimulinkBlockDefinition {
+    SimulinkBlockDefinition {
+        block_type: "Unknown",
+        aliases: &[],
+        category: "Unknown",
+        description: "Fallback definition for blocks that are not recognized yet.",
+        inputs: IOPorts::Variable(1),
+        outputs: IOPorts::Variable(1),
+        shape: SimulinkShape::Rectangle,
+        icon: Some(SimulinkIcon::Utf8("?")),
+        input_port_label: PortLabelPolicy::None,
+        output_port_label: PortLabelPolicy::None,
+        special_renderer: None,
+        live_renderer: None,
+        port_position_overrides: &[],
+        compute_instance_label: None,
+        parse_block_extension: None,
+        post_parse_normalizer: None,
+        on_primary_click: BlockPrimaryClickPolicy::None,
+        on_double_click: BlockDoubleClickPolicy::None,
+        on_live_click: BlockLiveClickPolicy::None,
+        value_text_policy: BlockValueTextPolicy::Auto,
+        show_connected_input_signal_label: false,
+        dashboard_connection_policy: DashboardConnectionPolicy::Default,
+        code_editor_kind: BlockCodeEditorKind::None,
+        creates_subsystem: false,
+        marks_matlab_function: false,
+        allow_inline_editor: false,
+        popout_kind: BlockPopoutKind::None,
+    }
+}

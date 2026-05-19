@@ -6,7 +6,9 @@ pub mod block;
 ///
 /// The binary `rustylink` demonstrates usage and prints the parsed JSON.
 pub mod color;
+pub mod connection_targets;
 pub mod label_place;
+pub mod live_values;
 pub mod model;
 pub mod parser;
 

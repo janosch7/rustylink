@@ -338,16 +338,13 @@ pub struct SubsystemApp {
     pub live_mode_enabled: bool,
 
     /// Live values for dashboard blocks, keyed by `DashboardBinding::uuid()`.
-    pub live_values: HashMap<String, f64>,
+    pub live_values: HashMap<String, crate::live_values::LiveValueEntry>,
 
-    /// Full live value text for dashboard bindings, keyed by `DashboardBinding::uuid()`.
-    pub live_value_texts: HashMap<String, String>,
+    /// Live values for visible blocks, keyed by block SID or fallback key.
+    pub live_block_values: HashMap<String, crate::live_values::LiveValueEntry>,
 
-    /// Live values for visible blocks, keyed by block SID.
-    pub live_block_values: HashMap<String, f64>,
-
-    /// Full live value text for visible blocks, keyed by block SID or fallback key.
-    pub live_block_value_texts: HashMap<String, String>,
+    /// Default live-value display options used when no per-value override is provided.
+    pub live_display_defaults: crate::live_values::LiveValueDisplayOptions,
 
     /// Default path used to save/load viewer layout overrides.
     pub layout_file_path: Option<Utf8PathBuf>,
@@ -450,9 +447,11 @@ impl SubsystemApp {
             add_mode_enabled: false,
             live_mode_enabled: false,
             live_values: HashMap::new(),
-            live_value_texts: HashMap::new(),
             live_block_values: HashMap::new(),
-            live_block_value_texts: HashMap::new(),
+            live_display_defaults: crate::live_values::LiveValueDisplayOptions {
+                float_decimals: crate::live_values::DEFAULT_LIVE_FLOAT_DECIMALS,
+                use_scientific: false,
+            },
             layout_file_path: None,
             layout_dirty: false,
             view_bounds: None,
@@ -531,8 +530,14 @@ impl SubsystemApp {
                 DashboardControlValue::PulseLow => Some(0.0),
             };
             if let Some(preview_value) = preview_value {
-                self.live_values
-                    .insert(binding.uuid().to_string(), preview_value);
+                self.live_values.insert(
+                    binding.uuid().to_string(),
+                    crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+                        vec![1],
+                        crate::live_values::LiveValueList::Float64(vec![preview_value]),
+                    ))
+                    .with_display(self.live_display_defaults.clone()),
+                );
             }
         }
         self.pending_dashboard_control = Some(DashboardControlEvent { block, value });

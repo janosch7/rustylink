@@ -160,9 +160,9 @@ fn format_block_value_for_display(block: &crate::model::Block, raw: &str) -> Str
 
 #[cfg(feature = "dashboard")]
 fn block_live_text(app: &SubsystemApp, block: &crate::model::Block) -> Option<String> {
-    app.live_block_value_texts
+    app.live_block_values
         .get(&app.live_value_key_for_block(block))
-        .cloned()
+        .map(crate::live_values::LiveValueEntry::formatted_text)
 }
 
 #[cfg(not(feature = "dashboard"))]
@@ -215,20 +215,20 @@ fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
 
     #[cfg(feature = "dashboard")]
     {
-    matches!(
-        block_type,
-        "Checkbox"
-            | "ComboBox"
-            | "EditField"
-            | "KnobBlock"
-            | "PushButtonBlock"
-            | "RadioButtonGroup"
-            | "RockerSwitchBlock"
-            | "RotarySwitchBlock"
-            | "SliderBlock"
-            | "SliderSwitchBlock"
-            | "ToggleSwitchBlock"
-    )
+        matches!(
+            block_type,
+            "Checkbox"
+                | "ComboBox"
+                | "EditField"
+                | "KnobBlock"
+                | "PushButtonBlock"
+                | "RadioButtonGroup"
+                | "RockerSwitchBlock"
+                | "RotarySwitchBlock"
+                | "SliderBlock"
+                | "SliderSwitchBlock"
+                | "ToggleSwitchBlock"
+        )
     }
 }
 
@@ -240,7 +240,7 @@ fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
 fn block_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
     app.live_block_values
         .get(&app.live_value_key_for_block(block))
-        .copied()
+        .and_then(crate::live_values::LiveValueEntry::first_f64)
         .or_else(|| dashboard_live_value(app, block))
 }
 
@@ -896,12 +896,15 @@ pub(crate) fn update_internal(
             let mut block_action: Option<ClickAction> = None;
             if resp.double_clicked() {
                 println!("Block {} double-clicked", b.name);
+                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
                 block_action = Some(ClickAction::DoublePrimary);
             } else if resp.secondary_clicked() {
                 println!("Block {} secondary clicked", b.name);
+                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
                 block_action = Some(ClickAction::Secondary);
             } else if resp.clicked() {
                 println!("Block {} clicked", b.name);
+                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
@@ -1619,12 +1622,15 @@ pub(crate) fn update_internal(
                         let double_clicked = ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
                         let action = if double_clicked {
                             println!("Line {} double-clicked", li);
+                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
                             Some(ClickAction::DoublePrimary)
                         } else if secondary_clicked {
                             println!("Line {} secondary clicked", li);
+                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
                             Some(ClickAction::Secondary)
                         } else if primary_clicked {
                             println!("Line {} clicked", li);
+                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
                             Some(ClickAction::Primary)
                         } else {
                             None
@@ -3341,7 +3347,7 @@ fn dashboard_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Opti
         .dashboard_binding
         .as_ref()
         .and_then(|binding| app.live_values.get(binding.uuid()))
-        .copied()
+        .and_then(crate::live_values::LiveValueEntry::first_f64)
 }
 
 #[cfg(feature = "dashboard")]
