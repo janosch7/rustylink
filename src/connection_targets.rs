@@ -11,6 +11,7 @@ pub enum ConnectionTargetOrigin {
     #[default]
     SourceBlock,
     SelfBlock,
+    Internal,
     DashboardBinding,
     BusCreator,
     BusSelector,
@@ -24,6 +25,7 @@ pub struct ConnectionTarget {
     pub signal_name: Option<String>,
     pub element_index: Option<u32>,
     pub origin: ConnectionTargetOrigin,
+    pub signals_only: bool,
     pub testpoint: bool,
 }
 
@@ -143,6 +145,8 @@ impl ConnectionTargetResolver {
                 ConnectionTargetOrigin::SelfBlock,
             ));
 
+            targets.extend(self.direct_internal_block_targets(system_path, block));
+
             for incoming in incoming_lines_for_block(system, block) {
                 if let Some(index) = system
                     .lines
@@ -156,10 +160,10 @@ impl ConnectionTargetResolver {
             if let Some(binding) = &block.dashboard_binding {
                 let target_path =
                     qualify_external_path(&self.model_name, dashboard_binding_block_path(binding));
-                targets.push(ConnectionTarget::new(
-                    target_path,
-                    ConnectionTargetOrigin::DashboardBinding,
-                ));
+                let mut target =
+                    ConnectionTarget::new(target_path, ConnectionTargetOrigin::DashboardBinding);
+                target.signals_only = matches!(binding, DashboardBinding::SignalSpec { .. });
+                targets.push(target);
             }
 
             let deduped = dedup_targets(targets);
@@ -206,7 +210,7 @@ impl ConnectionTargetResolver {
                     "Inport" => parent_ctx
                         .and_then(|ctx| ctx.incoming_by_port.get(&boundary_port_index(block)))
                         .map(|targets| {
-                            rename_boundary_targets(
+                            boundary_targets(
                                 targets,
                                 self.full_block_path(system_path, &block.name),
                             )
@@ -256,6 +260,8 @@ impl ConnectionTargetResolver {
             ConnectionTargetOrigin::SourceBlock,
         );
         target.signal_name = resolve_line_signal_name(system, line);
+        target.signals_only = true;
+        target.testpoint = port_testpoint(block, src.port_type.as_str(), src.port_index);
         vec![target]
     }
 
@@ -394,6 +400,28 @@ impl ConnectionTargetResolver {
         parts.retain(|part| !part.is_empty());
         parts.join("/")
     }
+
+    fn direct_internal_block_targets(
+        &self,
+        system_path: &[String],
+        block: &Block,
+    ) -> Vec<ConnectionTarget> {
+        let Some(subsystem) = &block.subsystem else {
+            return Vec::new();
+        };
+
+        let child_path = child_system_path(system_path, &block.name);
+        subsystem
+            .blocks
+            .iter()
+            .map(|child| {
+                ConnectionTarget::new(
+                    self.full_block_path(&child_path, &child.name),
+                    ConnectionTargetOrigin::Internal,
+                )
+            })
+            .collect()
+    }
 }
 
 pub fn debug_print_block_targets(root: &System, system_path: &[String], block: &Block) {
@@ -418,8 +446,13 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} index={:?} testpoint={}",
-            target.path, target.origin, target.signal_name, target.element_index, target.testpoint
+            "    - path='{}' origin={:?} signal={:?} index={:?} signals_only={} testpoint={}",
+            target.path,
+            target.origin,
+            target.signal_name,
+            target.element_index,
+            target.signals_only,
+            target.testpoint
         );
     }
 }
@@ -505,32 +538,22 @@ fn child_outgoing_targets_by_port(
         if !targets.is_empty() {
             by_port.insert(
                 port_index,
-                rename_boundary_targets(
-                    &targets,
-                    resolver.full_block_path(system_path, &block.name),
-                ),
+                boundary_targets(&targets, resolver.full_block_path(system_path, &block.name)),
             );
         }
     }
     by_port
 }
 
-fn rename_boundary_targets(
-    targets: &[ConnectionTarget],
-    boundary_path: String,
-) -> Vec<ConnectionTarget> {
-    dedup_targets(
-        targets
-            .iter()
-            .cloned()
-            .map(|mut target| {
-                target.path = boundary_path.clone();
-                target.signal_name = None;
-                target.element_index = None;
-                target
-            })
-            .collect(),
-    )
+fn boundary_targets(targets: &[ConnectionTarget], boundary_path: String) -> Vec<ConnectionTarget> {
+    let mut combined = targets.to_vec();
+    combined.extend(targets.iter().cloned().map(|mut target| {
+        target.path = boundary_path.clone();
+        target.signal_name = None;
+        target.element_index = None;
+        target
+    }));
+    dedup_targets(combined)
 }
 
 fn incoming_lines_for_block<'a>(system: &'a System, block: &Block) -> Vec<&'a Line> {
@@ -570,6 +593,15 @@ fn port_signal_name(block: &Block, port_type: &str, port_index: u32) -> Option<S
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
         })
+}
+
+fn port_testpoint(block: &Block, port_type: &str, port_index: u32) -> bool {
+    block
+        .ports
+        .iter()
+        .find(|port| port.port_type == port_type && port.index.unwrap_or(0) == port_index)
+        .and_then(|port| port.properties.get("TestPoint"))
+        .is_some_and(|value| matches!(value.trim(), "on" | "true" | "1" | "On" | "True"))
 }
 
 fn resolve_line_signal_name(system: &System, line: &Line) -> Option<String> {
@@ -697,6 +729,7 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
             target.signal_name.clone(),
             target.element_index,
             target.origin.clone(),
+            target.signals_only,
             target.testpoint,
         );
         if seen.insert(key) {
@@ -888,8 +921,156 @@ mod tests {
         let resolver = ConnectionTargetResolver::new(&system);
         let targets = resolver.line_targets_for_line(&[], &system.lines[1]);
 
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/Sub/Out1");
+        assert!(
+            targets
+                .iter()
+                .any(|target| target.path == "model/Src" && target.signals_only)
+        );
+        assert!(targets.iter().any(|target| target.path == "model/Sub/Out1"));
+    }
+
+    #[test]
+    fn subsystem_block_includes_direct_internal_block_targets_only() {
+        let nested_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![block(
+                "Constant",
+                "Deep",
+                "20",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            )],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let child_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![
+                block(
+                    "Constant",
+                    "InnerDirect",
+                    "10",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block(
+                    "SubSystem",
+                    "Nested",
+                    "11",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    Some(nested_system),
+                    &[],
+                ),
+            ],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![block(
+                "SubSystem",
+                "Sub",
+                "1",
+                vec![port("in", 1, None), port("out", 1, None)],
+                Some(child_system),
+                &[],
+            )],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.block_targets_for_block(&[], &system.blocks[0]);
+
+        assert!(targets.iter().any(|target| {
+            target.path == "model/Sub/InnerDirect"
+                && target.origin == ConnectionTargetOrigin::Internal
+        }));
+        assert!(targets.iter().any(|target| {
+            target.path == "model/Sub/Nested" && target.origin == ConnectionTargetOrigin::Internal
+        }));
+        assert!(
+            !targets
+                .iter()
+                .any(|target| target.path == "model/Sub/Nested/Deep")
+        );
+    }
+
+    #[test]
+    fn dashboard_signal_bindings_are_marked_signals_only() {
+        let mut signal_block = block("DisplayBlock", "Gauge", "1", vec![], None, &[]);
+        signal_block.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
+            block_path: "Source".to_string(),
+            signal_name: "sig".to_string(),
+            uuid: "uuid-1".to_string(),
+        });
+
+        let mut param_block = block("KnobBlock", "Knob", "2", vec![], None, &[]);
+        param_block.dashboard_binding = Some(crate::model::DashboardBinding::ParamSource {
+            block_path: "ParamBlock".to_string(),
+            param_name: "Value".to_string(),
+            uuid: "uuid-2".to_string(),
+        });
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![signal_block, param_block],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let signal_targets = resolver.block_targets_for_block(&[], &system.blocks[0]);
+        let param_targets = resolver.block_targets_for_block(&[], &system.blocks[1]);
+
+        assert!(signal_targets.iter().any(|target| {
+            target.origin == ConnectionTargetOrigin::DashboardBinding
+                && target.path == "model/Source"
+                && target.signals_only
+        }));
+        assert!(param_targets.iter().any(|target| {
+            target.origin == ConnectionTargetOrigin::DashboardBinding
+                && target.path == "model/ParamBlock"
+                && !target.signals_only
+        }));
+    }
+
+    #[test]
+    fn base_line_targets_preserve_source_port_testpoint() {
+        let mut source = block(
+            "Constant",
+            "Source",
+            "1",
+            vec![port("out", 1, Some("sig"))],
+            None,
+            &[],
+        );
+        source.ports[0]
+            .properties
+            .insert("TestPoint".to_string(), "on".to_string());
+
+        let sink = block("Display", "Sink", "2", vec![port("in", 1, None)], None, &[]);
+        let wire = line("1", 1, "2", 1, Some("sig"));
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, sink],
+            lines: vec![wire.clone()],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &wire);
+
+        assert!(targets.iter().any(|target| target.testpoint));
     }
 
     fn block(

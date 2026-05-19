@@ -700,14 +700,24 @@ impl SubsystemApp {
         if resolve_subsystem_by_vec(&self.root, &self.path).is_none() {
             self.path.clear();
         }
+        self.reset_navigation_view_state();
+        self.layout_dirty = false;
+        self.view_cache.invalidate();
+    }
+
+    fn reset_navigation_view_state(&mut self) {
+        self.zoom = 1.0;
+        self.pan = Vec2::ZERO;
         self.reset_view = true;
         self.view_bounds = None;
         self.selected_block_sids.clear();
         self.selected_line_indices.clear();
         self.viewer_drag_state = ViewerDragState::None;
-        self.layout_dirty = false;
-        self.view_cache.invalidate();
         self.viewer_history.clear();
+    }
+
+    fn finish_navigation_change(&mut self) {
+        self.reset_navigation_view_state();
         self.notify_subsystem_changed();
     }
 
@@ -777,13 +787,7 @@ impl SubsystemApp {
     pub fn go_up(&mut self) {
         if !self.path.is_empty() {
             self.path.pop();
-            self.reset_view = true;
-            self.view_bounds = None;
-            self.selected_block_sids.clear();
-            self.selected_line_indices.clear();
-            self.viewer_drag_state = ViewerDragState::None;
-            self.viewer_history.clear();
-            self.notify_subsystem_changed();
+            self.finish_navigation_change();
         }
     }
 
@@ -791,13 +795,7 @@ impl SubsystemApp {
     pub fn navigate_to_path(&mut self, p: Vec<String>) {
         if resolve_subsystem_by_vec(&self.root, &p).is_some() {
             self.path = p;
-            self.reset_view = true;
-            self.view_bounds = None;
-            self.selected_block_sids.clear();
-            self.selected_line_indices.clear();
-            self.viewer_drag_state = ViewerDragState::None;
-            self.viewer_history.clear();
-            self.notify_subsystem_changed();
+            self.finish_navigation_change();
         }
     }
 
@@ -807,13 +805,7 @@ impl SubsystemApp {
             if let Some(sub) = &b.subsystem {
                 if sub.chart.is_none() {
                     self.path.push(b.name.clone());
-                    self.reset_view = true;
-                    self.view_bounds = None;
-                    self.selected_block_sids.clear();
-                    self.selected_line_indices.clear();
-                    self.viewer_drag_state = ViewerDragState::None;
-                    self.viewer_history.clear();
-                    self.notify_subsystem_changed();
+                    self.finish_navigation_change();
                     return true;
                 }
             }
@@ -929,6 +921,23 @@ mod tests {
         }
     }
 
+    fn subsystem_block(name: &str, sid: Option<&str>, subsystem: System) -> Block {
+        let mut block = test_block(name, sid);
+        block.block_type = "SubSystem".to_string();
+        block.subsystem = Some(Box::new(subsystem));
+        block
+    }
+
+    fn root_with_subsystem() -> System {
+        System {
+            properties: IndexMap::new(),
+            blocks: vec![subsystem_block("Sub", Some("1"), empty_system())],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        }
+    }
+
     #[test]
     fn cache_starts_invalid() {
         let cache = ComputedViewCache::default();
@@ -1001,5 +1010,44 @@ mod tests {
             app.live_value_key_for_block(&block),
             "__block_Model/Subsystem/double_param"
         );
+    }
+
+    #[test]
+    fn navigate_to_path_resets_zoom_and_pan() {
+        let mut app = SubsystemApp::new(
+            root_with_subsystem(),
+            Vec::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
+        app.zoom = 2.5;
+        app.pan = Vec2::new(12.0, -8.0);
+
+        app.navigate_to_path(vec!["Sub".to_string()]);
+
+        assert_eq!(app.path, vec!["Sub".to_string()]);
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(app.pan, Vec2::ZERO);
+        assert!(app.reset_view);
+    }
+
+    #[test]
+    fn entering_and_leaving_subsystems_resets_zoom_and_pan() {
+        let root = root_with_subsystem();
+        let mut app = SubsystemApp::new(root.clone(), Vec::new(), BTreeMap::new(), BTreeMap::new());
+        let block = root.blocks.first().cloned().expect("subsystem block");
+
+        app.zoom = 3.0;
+        app.pan = Vec2::new(4.0, 9.0);
+        assert!(app.open_block_if_subsystem(&block));
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(app.pan, Vec2::ZERO);
+
+        app.zoom = 1.8;
+        app.pan = Vec2::new(-2.0, 5.0);
+        app.go_up();
+        assert!(app.path.is_empty());
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(app.pan, Vec2::ZERO);
     }
 }

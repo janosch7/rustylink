@@ -17,12 +17,12 @@ use crate::egui_app::render::{
     ComputedPortYCoordinates, PortLabelMaxWidths, port_label_display_name,
 };
 use crate::egui_app::render::{
-    get_block_type_cfg, get_interior_renderer, render_block_icon, render_manual_switch,
-    wrap_text_to_max_width,
+    get_interior_renderer, render_manual_switch, wrap_text_to_max_width,
 };
 use crate::egui_app::state::ViewerDragState;
 use crate::egui_app::state::{SubsystemApp, resolve_subsystem_by_vec_mut};
 use crate::egui_app::text::highlight_query_job;
+use crate::egui_app::{get_block_type_cfg, render_block_icon};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::HashMap;
 
@@ -204,6 +204,73 @@ fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
     live_mode_enabled
         && uses_live_value_text(block_type)
         && !matches!(block_type, "Scope" | "DashboardScope" | "ManualSwitch")
+}
+
+fn should_use_mask_display(block: &crate::model::Block) -> bool {
+    block.mask.is_some()
+        && block
+            .mask_display_text
+            .as_ref()
+            .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn port_has_testpoint(block: &crate::model::Block, port_type: &str, port_index: u32) -> bool {
+    block
+        .ports
+        .iter()
+        .find(|port| port.port_type == port_type && port.index.unwrap_or(0) == port_index)
+        .and_then(|port| port.properties.get("TestPoint"))
+        .is_some_and(|value| matches!(value.trim(), "on" | "true" | "1" | "On" | "True"))
+}
+
+fn line_has_testpoint(blocks: &[crate::model::Block], line: &crate::model::Line) -> bool {
+    let Some(src) = &line.src else {
+        return false;
+    };
+
+    blocks
+        .iter()
+        .find(|block| block.sid.as_deref() == Some(src.sid.as_str()))
+        .is_some_and(|block| port_has_testpoint(block, src.port_type.as_str(), src.port_index))
+}
+
+fn line_testpoint_marker_position(points: &[Pos2]) -> Option<Pos2> {
+    let start = *points.first()?;
+    for next in points.iter().skip(1) {
+        let dx = next.x - start.x;
+        let dy = next.y - start.y;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 1.0 {
+            let offset = len.min(18.0);
+            return Some(Pos2::new(
+                start.x + dx / len * offset,
+                start.y + dy / len * offset,
+            ));
+        }
+    }
+    None
+}
+
+fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Color32) {
+    let marker_rect = Rect::from_center_size(center, Vec2::new(20.0, 12.0));
+    painter.rect_filled(
+        marker_rect,
+        4.0,
+        Color32::from_rgba_unmultiplied(255, 255, 255, 224),
+    );
+    painter.rect_stroke(
+        marker_rect,
+        4.0,
+        Stroke::new(1.0, color),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        marker_rect.center(),
+        Align2::CENTER_CENTER,
+        "TP",
+        egui::FontId::proportional(9.0),
+        color,
+    );
 }
 
 fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
@@ -1536,6 +1603,7 @@ pub(crate) fn update_internal(
                 .get(*li)
                 .copied()
                 .unwrap_or(line_stroke_default.color);
+            let show_testpoint_marker = line_has_testpoint(&entities.blocks, line);
             let stroke = Stroke::new(
                 if app.selected_line_indices.contains(li) { 3.5 } else { 2.0 },
                 color,
@@ -1576,6 +1644,11 @@ pub(crate) fn update_internal(
                     &mut port_label_requests,
                     &sid_mirrored,
                 );
+            }
+            if show_testpoint_marker {
+                if let Some(marker_pos) = line_testpoint_marker_position(&draw_pts) {
+                    draw_line_testpoint_marker(&painter, marker_pos, color);
+                }
             }
             // Precise per-segment distance check.  We detect clicks via
             // pointer state instead of from the bounding-box response so that
@@ -2293,7 +2366,7 @@ pub(crate) fn update_internal(
                 }) else {
                     continue;
                 };
-                if block.mask.is_some() {
+                if should_use_mask_display(block) {
                     continue;
                 }
                 let cfg = get_block_type_cfg(block);
@@ -2610,15 +2683,14 @@ pub(crate) fn update_internal(
                     false,
                 );
                 value_tooltip = Some(label);
-            } else if b.mask.is_some() {
-                if let Some(text) = b.mask_display_text.as_ref() {
-                    let font_size = (b.font_size.unwrap_or(14) as f32) * font_scale;
-                    let font_id = egui::FontId::proportional(font_size);
-                    let color = fg;
-                    let galley = painter.layout_no_wrap(text.clone(), font_id.clone(), color);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    painter.galley(pos, galley, color);
-                }
+            } else if should_use_mask_display(b) {
+                let text = b.mask_display_text.as_ref().expect("checked above");
+                let font_size = (b.font_size.unwrap_or(14) as f32) * font_scale;
+                let font_id = egui::FontId::proportional(font_size);
+                let color = fg;
+                let galley = painter.layout_no_wrap(text.clone(), font_id.clone(), color);
+                let pos = r_screen.center() - galley.size() * 0.5;
+                painter.galley(pos, galley, color);
             } else if app.live_mode_enabled && uses_dashboard_control_widget_renderer(&b.block_type)
             {
                 let _ = render_dashboard_control_widget(app, ui, b, *r_screen, font_scale);
@@ -2951,7 +3023,7 @@ pub(crate) fn update_internal(
                 continue;
             };
             // Do not show port labels if block has a mask
-            if block.mask.is_some() {
+            if should_use_mask_display(block) {
                 continue;
             }
             let cfg = get_block_type_cfg(block);
@@ -3531,11 +3603,11 @@ fn print_line_based_connections(
 #[cfg(test)]
 mod tests {
     use super::{
-        dashboard_input_control_kind, manual_switch_setting_from_live_value,
-        should_render_live_text,
+        dashboard_input_control_kind, line_has_testpoint, line_testpoint_marker_position,
+        manual_switch_setting_from_live_value, should_render_live_text, should_use_mask_display,
     };
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
-    use crate::model::DashboardBinding;
+    use crate::model::{DashboardBinding, EndpointRef, Line, Port};
     use eframe::egui::{Pos2, Rect};
 
     #[test]
@@ -3679,5 +3751,106 @@ mod tests {
         assert_eq!(min_value, 0.0);
         assert_eq!(max_value, 2.0);
         assert_eq!(mid_value, 1.0);
+    }
+
+    #[test]
+    fn line_testpoint_follows_source_output_port() {
+        let mut source = minimal_block("Source", "1");
+        source.ports.push(Port {
+            port_type: "out".to_string(),
+            index: Some(1),
+            properties: indexmap::IndexMap::from_iter([(
+                "TestPoint".to_string(),
+                "on".to_string(),
+            )]),
+        });
+        let sink = minimal_block("Sink", "2");
+        let line = Line {
+            name: None,
+            zorder: None,
+            src: Some(EndpointRef {
+                sid: "1".to_string(),
+                port_type: "out".to_string(),
+                port_index: 1,
+            }),
+            dst: Some(EndpointRef {
+                sid: "2".to_string(),
+                port_type: "in".to_string(),
+                port_index: 1,
+            }),
+            points: Vec::new(),
+            labels: None,
+            branches: Vec::new(),
+            properties: indexmap::IndexMap::new(),
+        };
+
+        assert!(line_has_testpoint(&[source, sink], &line));
+    }
+
+    #[test]
+    fn line_testpoint_marker_uses_first_visible_segment() {
+        let marker = line_testpoint_marker_position(&[
+            Pos2::new(10.0, 10.0),
+            Pos2::new(50.0, 10.0),
+            Pos2::new(50.0, 40.0),
+        ])
+        .expect("marker position");
+
+        assert!(marker.x > 10.0);
+        assert_eq!(marker.y, 10.0);
+    }
+
+    #[test]
+    fn mask_without_display_text_falls_back_to_normal_rendering() {
+        let mut block = minimal_block("Masked", "3");
+        block.mask = Some(crate::model::Mask::default());
+
+        assert!(!should_use_mask_display(&block));
+
+        block.mask_display_text = Some(" ".to_string());
+        assert!(!should_use_mask_display(&block));
+
+        block.mask_display_text = Some("mask label".to_string());
+        assert!(should_use_mask_display(&block));
+    }
+
+    fn minimal_block(name: &str, sid: &str) -> crate::model::Block {
+        crate::model::Block {
+            block_type: "Constant".to_string(),
+            name: name.to_string(),
+            sid: Some(sid.to_string()),
+            tag_name: "Block".to_string(),
+            position: None,
+            zorder: None,
+            commented: false,
+            name_location: crate::model::NameLocation::default(),
+            is_matlab_function: false,
+            value: None,
+            value_kind: crate::model::ValueKind::default(),
+            value_rows: None,
+            value_cols: None,
+            properties: indexmap::IndexMap::new(),
+            ref_properties: std::collections::BTreeSet::new(),
+            port_counts: None,
+            ports: Vec::new(),
+            subsystem: None,
+            system_ref: None,
+            c_function: None,
+            instance_data: None,
+            link_data: None,
+            mask: None,
+            annotations: Vec::new(),
+            background_color: None,
+            show_name: None,
+            font_size: None,
+            font_weight: None,
+            mask_display_text: None,
+            current_setting: None,
+            block_mirror: None,
+            library_source: None,
+            library_block_path: None,
+            dashboard_binding: None,
+            child_order: Vec::new(),
+        }
     }
 }

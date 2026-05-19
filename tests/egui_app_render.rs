@@ -372,3 +372,49 @@ fn icon_lookup_matrix_square_newline_in_source_block() {
     let cfg = rustylink::egui_app::get_block_type_cfg(&b);
     assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_square.svg")));
 }
+
+#[test]
+fn signal_routing_blocks_have_explicit_visible_configs() {
+    for block_type in ["Mux", "Demux", "BusCreator", "BusSelector"] {
+        let block =
+            rustylink::editor::operations::create_default_block(block_type, block_type, 0, 0, 1, 1);
+        let cfg = rustylink::egui_app::get_block_type_cfg(&block);
+        assert!(cfg.known, "{block_type} should be known");
+        assert_eq!(
+            cfg.icon,
+            Some(IconSpec::Utf8("☰")),
+            "{block_type} should have a visible icon"
+        );
+        assert_ne!(
+            cfg.shape,
+            rustylink::builtin_libraries::virtual_library::BlockShape::FilledBlack
+        );
+    }
+}
+
+#[test]
+fn complex_to_real_imag_has_fixed_port_names_and_no_visible_icon() {
+    let block = rustylink::editor::operations::create_default_block(
+        "ComplexToRealImag",
+        "ComplexToRealImag",
+        0,
+        0,
+        1,
+        2,
+    );
+    let cfg = rustylink::egui_app::get_block_type_cfg(&block);
+
+    assert!(cfg.known);
+    assert_eq!(cfg.icon, Some(IconSpec::Utf8("")));
+    assert_eq!(cfg.input_port_names, vec!["Re+Im"]);
+    assert_eq!(cfg.output_port_names, vec!["Re", "Im"]);
+}
+
+#[test]
+fn display_still_hides_input_port_labels() {
+    let block =
+        rustylink::editor::operations::create_default_block("Display", "Display", 0, 0, 1, 0);
+    let cfg = rustylink::egui_app::get_block_type_cfg(&block);
+
+    assert!(!cfg.show_input_port_labels);
+}
