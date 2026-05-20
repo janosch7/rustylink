@@ -52,6 +52,46 @@ pub use ui::helpers::{block_dialog_title, clean_display_string};
 // SVG parsing helper (also needed by some tests)
 pub use render::embedded_egui_sans_fontdb;
 
+pub(crate) fn port_label_display_name(
+    block: &crate::model::Block,
+    index: u32,
+    is_input: bool,
+    cfg: &crate::block_types::BlockTypeConfig,
+) -> String {
+    let mirrored = block.block_mirror.unwrap_or(false);
+    let logical_is_input = if mirrored { !is_input } else { is_input };
+
+    let fallback_name = || {
+        let names = if logical_is_input {
+            &cfg.input_port_names
+        } else {
+            &cfg.output_port_names
+        };
+        if index > 0 && (index as usize) <= names.len() {
+            names[(index - 1) as usize].clone()
+        } else {
+            format!("{}{}", if is_input { "In" } else { "Out" }, index)
+        }
+    };
+
+    block
+        .ports
+        .iter()
+        .filter(|port| {
+            port.port_type == if logical_is_input { "in" } else { "out" }
+                && port.index.unwrap_or(0) == index
+        })
+        .find_map(|port| {
+            port.properties
+                .get("Name")
+                .cloned()
+                .or_else(|| port.properties.get("name").cloned())
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+        })
+        .unwrap_or_else(fallback_name)
+}
+
 pub fn get_block_type_cfg(block: &crate::model::Block) -> crate::block_types::BlockTypeConfig {
     viewer_block_type_override(block).unwrap_or_else(|| render::get_block_type_cfg(block))
 }
@@ -162,5 +202,47 @@ fn viewer_block_type_override(
             ..Default::default()
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::port_label_display_name;
+
+    #[test]
+    fn port_labels_do_not_fall_back_to_propagated_signals() {
+        let mut block =
+            crate::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
+        block.ports = vec![crate::model::Port {
+            port_type: "out".to_string(),
+            index: Some(1),
+            properties: indexmap::IndexMap::from_iter([(
+                "PropagatedSignals".to_string(),
+                "ConnectedSignal".to_string(),
+            )]),
+        }];
+
+        let cfg = crate::egui_app::get_block_type_cfg(&block);
+        assert_eq!(port_label_display_name(&block, 1, false, &cfg), "Out1");
+    }
+
+    #[test]
+    fn port_labels_keep_explicit_port_names() {
+        let mut block =
+            crate::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
+        block.ports = vec![crate::model::Port {
+            port_type: "out".to_string(),
+            index: Some(1),
+            properties: indexmap::IndexMap::from_iter([(
+                "Name".to_string(),
+                "SubsystemOutput".to_string(),
+            )]),
+        }];
+
+        let cfg = crate::egui_app::get_block_type_cfg(&block);
+        assert_eq!(
+            port_label_display_name(&block, 1, false, &cfg),
+            "SubsystemOutput"
+        );
     }
 }

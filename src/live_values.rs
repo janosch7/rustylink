@@ -4,6 +4,18 @@ pub const DEFAULT_LIVE_FLOAT_DECIMALS: usize = 2;
 pub const LIVE_SCIENTIFIC_LOWER_BOUND: f64 = 1e-1;
 pub const LIVE_SCIENTIFIC_UPPER_BOUND: f64 = 1e4;
 
+fn default_live_float_decimals() -> usize {
+    DEFAULT_LIVE_FLOAT_DECIMALS
+}
+
+fn default_live_scientific_lower_bound() -> f64 {
+    LIVE_SCIENTIFIC_LOWER_BOUND
+}
+
+fn default_live_scientific_upper_bound() -> f64 {
+    LIVE_SCIENTIFIC_UPPER_BOUND
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveComplex32 {
     pub re: f32,
@@ -16,10 +28,27 @@ pub struct LiveComplex64 {
     pub im: f64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveValueDisplayOptions {
+    #[serde(default = "default_live_float_decimals")]
     pub float_decimals: usize,
-    pub use_scientific: bool,
+    #[serde(default = "default_live_scientific_lower_bound")]
+    pub scientific_lower_bound: f64,
+    #[serde(default = "default_live_scientific_upper_bound")]
+    pub scientific_upper_bound: f64,
+    #[serde(default, alias = "use_scientific")]
+    pub always_scientific: bool,
+}
+
+impl Default for LiveValueDisplayOptions {
+    fn default() -> Self {
+        Self {
+            float_decimals: DEFAULT_LIVE_FLOAT_DECIMALS,
+            scientific_lower_bound: LIVE_SCIENTIFIC_LOWER_BOUND,
+            scientific_upper_bound: LIVE_SCIENTIFIC_UPPER_BOUND,
+            always_scientific: false,
+        }
+    }
 }
 
 impl LiveValueDisplayOptions {
@@ -27,6 +56,22 @@ impl LiveValueDisplayOptions {
         let mut normalized = self.clone();
         if normalized.float_decimals == 0 {
             normalized.float_decimals = DEFAULT_LIVE_FLOAT_DECIMALS;
+        }
+        if !normalized.scientific_lower_bound.is_finite()
+            || normalized.scientific_lower_bound <= 0.0
+        {
+            normalized.scientific_lower_bound = LIVE_SCIENTIFIC_LOWER_BOUND;
+        }
+        if !normalized.scientific_upper_bound.is_finite()
+            || normalized.scientific_upper_bound <= 0.0
+        {
+            normalized.scientific_upper_bound = LIVE_SCIENTIFIC_UPPER_BOUND;
+        }
+        if normalized.scientific_lower_bound > normalized.scientific_upper_bound {
+            std::mem::swap(
+                &mut normalized.scientific_lower_bound,
+                &mut normalized.scientific_upper_bound,
+            );
         }
         normalized
     }
@@ -43,10 +88,7 @@ impl LiveValueEntry {
     pub fn new(value: LiveValue) -> Self {
         Self {
             value,
-            display: LiveValueDisplayOptions {
-                float_decimals: DEFAULT_LIVE_FLOAT_DECIMALS,
-                use_scientific: false,
-            },
+            display: LiveValueDisplayOptions::default(),
         }
     }
 
@@ -81,9 +123,7 @@ impl LiveValue {
 
     pub fn format(&self, display: &LiveValueDisplayOptions) -> String {
         let display = display.normalized();
-        let values = self
-            .data
-            .as_string_vec(display.float_decimals, display.use_scientific);
+        let values = self.data.as_string_vec(&display);
         let total = values.len().max(1);
 
         let raw = match self.dims.as_slice() {
@@ -167,7 +207,7 @@ impl LiveValueList {
         }
     }
 
-    fn as_string_vec(&self, decimals: usize, force_scientific: bool) -> Vec<String> {
+    fn as_string_vec(&self, display: &LiveValueDisplayOptions) -> Vec<String> {
         match self {
             LiveValueList::Empty => Vec::new(),
             LiveValueList::Bool(values) => values.iter().map(|value| value.to_string()).collect(),
@@ -181,21 +221,19 @@ impl LiveValueList {
             LiveValueList::UInt64(values) => values.iter().map(ToString::to_string).collect(),
             LiveValueList::Float32(values) => values
                 .iter()
-                .map(|value| format_float(*value as f64, decimals, force_scientific))
+                .map(|value| format_float(*value as f64, display))
                 .collect(),
             LiveValueList::Float64(values) => values
                 .iter()
-                .map(|value| format_float(*value, decimals, force_scientific))
+                .map(|value| format_float(*value, display))
                 .collect(),
             LiveValueList::Complex32(values) => values
                 .iter()
-                .map(|value| {
-                    format_complex(value.re as f64, value.im as f64, decimals, force_scientific)
-                })
+                .map(|value| format_complex(value.re as f64, value.im as f64, display))
                 .collect(),
             LiveValueList::Complex64(values) => values
                 .iter()
-                .map(|value| format_complex(value.re, value.im, decimals, force_scientific))
+                .map(|value| format_complex(value.re, value.im, display))
                 .collect(),
             LiveValueList::Bytes(values) => values
                 .iter()
@@ -212,8 +250,20 @@ impl LiveValueList {
 }
 
 pub fn scalar_requires_scientific(value: f64) -> bool {
+    scalar_requires_scientific_with_bounds(
+        value,
+        LIVE_SCIENTIFIC_LOWER_BOUND,
+        LIVE_SCIENTIFIC_UPPER_BOUND,
+    )
+}
+
+pub fn scalar_requires_scientific_with_bounds(
+    value: f64,
+    lower_bound: f64,
+    upper_bound: f64,
+) -> bool {
     let abs = value.abs();
-    abs != 0.0 && (abs < LIVE_SCIENTIFIC_LOWER_BOUND || abs > LIVE_SCIENTIFIC_UPPER_BOUND)
+    abs != 0.0 && (abs < lower_bound || abs > upper_bound)
 }
 
 fn format_grid(values: &[String], rows: usize, cols: usize, matrix_view: bool) -> String {
@@ -241,20 +291,27 @@ fn format_grid(values: &[String], rows: usize, cols: usize, matrix_view: bool) -
     }
 }
 
-fn format_float(value: f64, decimals: usize, force_scientific: bool) -> String {
-    if force_scientific || scalar_requires_scientific(value) {
+fn format_float(value: f64, display: &LiveValueDisplayOptions) -> String {
+    let decimals = display.float_decimals;
+    if display.always_scientific
+        || scalar_requires_scientific_with_bounds(
+            value,
+            display.scientific_lower_bound,
+            display.scientific_upper_bound,
+        )
+    {
         format!("{value:.decimals$e}")
     } else {
         format!("{value:.decimals$}")
     }
 }
 
-fn format_complex(re: f64, im: f64, decimals: usize, force_scientific: bool) -> String {
-    let re = format_float(re, decimals, force_scientific);
+fn format_complex(re: f64, im: f64, display: &LiveValueDisplayOptions) -> String {
+    let re = format_float(re, display);
     let imag_value = if im < 0.0 {
-        format_float(-im, decimals, force_scientific)
+        format_float(-im, display)
     } else {
-        format_float(im, decimals, force_scientific)
+        format_float(im, display)
     };
     let sign = if im < 0.0 { '-' } else { '+' };
     format!("{re}{sign}{imag_value}i")
@@ -264,7 +321,7 @@ fn format_complex(re: f64, im: f64, decimals: usize, force_scientific: bool) -> 
 mod tests {
     use super::{
         LiveValue, LiveValueDisplayOptions, LiveValueEntry, LiveValueList,
-        scalar_requires_scientific,
+        scalar_requires_scientific, scalar_requires_scientific_with_bounds,
     };
 
     #[test]
@@ -322,9 +379,45 @@ mod tests {
         ))
         .with_display(LiveValueDisplayOptions {
             float_decimals: 4,
-            use_scientific: false,
+            scientific_lower_bound: super::LIVE_SCIENTIFIC_LOWER_BOUND,
+            scientific_upper_bound: super::LIVE_SCIENTIFIC_UPPER_BOUND,
+            always_scientific: false,
         });
 
         assert_eq!(entry.formatted_text(), "1.2346");
+    }
+
+    #[test]
+    fn custom_scientific_bounds_are_used() {
+        let entry = LiveValueEntry::new(LiveValue::new(
+            vec![2],
+            LiveValueList::Float64(vec![0.5, 20.0]),
+        ))
+        .with_display(LiveValueDisplayOptions {
+            float_decimals: 2,
+            scientific_lower_bound: 1.0,
+            scientific_upper_bound: 10.0,
+            always_scientific: false,
+        });
+
+        assert_eq!(entry.formatted_text(), "5.00e-1, 2.00e1");
+        assert!(scalar_requires_scientific_with_bounds(0.5, 1.0, 10.0));
+        assert!(scalar_requires_scientific_with_bounds(20.0, 1.0, 10.0));
+        assert!(!scalar_requires_scientific_with_bounds(5.0, 1.0, 10.0));
+    }
+
+    #[test]
+    fn always_scientific_overrides_thresholds() {
+        let entry =
+            LiveValueEntry::new(LiveValue::new(vec![1], LiveValueList::Float64(vec![12.34])))
+                .with_display(LiveValueDisplayOptions {
+                    float_decimals: 2,
+                    scientific_lower_bound: 1.0,
+                    scientific_upper_bound: 100.0,
+                    always_scientific: true,
+                });
+
+        assert_eq!(entry.formatted_text(), "1.23e1");
+        assert!(!scalar_requires_scientific(12.34));
     }
 }

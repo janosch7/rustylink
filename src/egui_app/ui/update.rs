@@ -13,16 +13,14 @@ use crate::egui_app::DashboardControlValue;
 use crate::egui_app::geometry::endpoint_pos_maybe_mirrored;
 use crate::egui_app::geometry::{parse_block_rect, parse_rect_str};
 use crate::egui_app::navigation::resolve_subsystem_by_vec;
-use crate::egui_app::render::{
-    ComputedPortYCoordinates, PortLabelMaxWidths, port_label_display_name,
-};
+use crate::egui_app::render::{ComputedPortYCoordinates, PortLabelMaxWidths};
 use crate::egui_app::render::{
     get_interior_renderer, render_manual_switch, wrap_text_to_max_width,
 };
 use crate::egui_app::state::ViewerDragState;
 use crate::egui_app::state::{SubsystemApp, resolve_subsystem_by_vec_mut};
 use crate::egui_app::text::highlight_query_job;
-use crate::egui_app::{get_block_type_cfg, render_block_icon};
+use crate::egui_app::{get_block_type_cfg, port_label_display_name, render_block_icon};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::HashMap;
 
@@ -214,24 +212,33 @@ fn should_use_mask_display(block: &crate::model::Block) -> bool {
             .is_some_and(|text| !text.trim().is_empty())
 }
 
-fn port_has_testpoint(block: &crate::model::Block, port_type: &str, port_index: u32) -> bool {
-    block
-        .ports
-        .iter()
-        .find(|port| port.port_type == port_type && port.index.unwrap_or(0) == port_index)
-        .and_then(|port| port.properties.get("TestPoint"))
-        .is_some_and(|value| matches!(value.trim(), "on" | "true" | "1" | "On" | "True"))
+fn line_has_testpoint(targets: &[crate::connection_targets::ConnectionTarget]) -> bool {
+    targets.iter().any(|target| target.testpoint)
 }
 
-fn line_has_testpoint(blocks: &[crate::model::Block], line: &crate::model::Line) -> bool {
-    let Some(src) = &line.src else {
-        return false;
-    };
+fn target_path_leaf(path: &str) -> Option<String> {
+    path.rsplit('/')
+        .next()
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+}
 
-    blocks
-        .iter()
-        .find(|block| block.sid.as_deref() == Some(src.sid.as_str()))
-        .is_some_and(|block| port_has_testpoint(block, src.port_type.as_str(), src.port_index))
+fn resolved_line_label(
+    line: &crate::model::Line,
+    targets: &[crate::connection_targets::ConnectionTarget],
+) -> Option<String> {
+    line.name
+        .as_ref()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            targets
+                .iter()
+                .filter(|target| target.signals_only)
+                .find_map(|target| target_path_leaf(&target.path))
+        })
 }
 
 fn line_testpoint_marker_position(points: &[Pos2]) -> Option<Pos2> {
@@ -1598,12 +1605,16 @@ pub(crate) fn update_internal(
             }
         }
 
+        let connection_target_resolver =
+            crate::connection_targets::ConnectionTargetResolver::new(&app.root);
+
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
+            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
             let color = line_colors
                 .get(*li)
                 .copied()
                 .unwrap_or(line_stroke_default.color);
-            let show_testpoint_marker = line_has_testpoint(&entities.blocks, line);
+            let show_testpoint_marker = line_has_testpoint(&line_targets);
             let stroke = Stroke::new(
                 if app.selected_line_indices.contains(li) { 3.5 } else { 2.0 },
                 color,
@@ -2025,7 +2036,11 @@ pub(crate) fn update_internal(
             perp_offset: 2.0,
         };
         let mut placed_label_rects: Vec<Rect> = Vec::new();
+        let connection_target_resolver =
+            crate::connection_targets::ConnectionTargetResolver::new(&app.root);
+
         let mut draw_line_labels = |line: &crate::model::Line,
+                                    line_targets: &[crate::connection_targets::ConnectionTarget],
                                     screen_pts: &Vec<Pos2>,
                                     main_anchor: Pos2,
                                     color: Color32,
@@ -2033,13 +2048,7 @@ pub(crate) fn update_internal(
             if screen_pts.len() < 2 {
                 return;
             }
-            let Some(label_text) = line
-                .name
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-            else {
+            let Some(label_text) = resolved_line_label(line, line_targets) else {
                 return;
             };
             let mut segments: Vec<(Pos2, Pos2)> = Vec::new();
@@ -2208,11 +2217,12 @@ pub(crate) fn update_internal(
         };
 
         for (line, screen_pts, main_anchor, _resp, li, _segments_all) in &line_views {
+            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
             let color = line_colors
                 .get(*li)
                 .copied()
                 .unwrap_or(line_stroke_default.color);
-            draw_line_labels(line, screen_pts, *main_anchor, color, *li);
+            draw_line_labels(line, &line_targets, screen_pts, *main_anchor, color, *li);
         }
 
         // Clickable labels
@@ -3120,17 +3130,20 @@ pub(crate) fn update_internal(
     });
 
     // After the UI closure, call open_block_if_subsystem if needed
-    if let Some(block) = block_to_open_subsystem {
+    if let Some(ref block) = block_to_open_subsystem {
         app.open_block_if_subsystem(&block);
     }
 
+    let navigated = navigate_to.is_some() || block_to_open_subsystem.is_some();
     if let Some(p) = navigate_to {
         app.navigate_to_path(p);
     }
-    app.zoom = staged_zoom;
-    app.pan = staged_pan;
-    app.reset_view = staged_reset;
-    app.view_bounds = staged_view_bounds;
+    if !navigated {
+        app.zoom = staged_zoom;
+        app.pan = staged_pan;
+        app.reset_view = staged_reset;
+        app.view_bounds = staged_view_bounds;
+    }
     if clear_search {
         app.search_query.clear();
         app.search_matches.clear();
@@ -3604,10 +3617,12 @@ fn print_line_based_connections(
 mod tests {
     use super::{
         dashboard_input_control_kind, line_has_testpoint, line_testpoint_marker_position,
-        manual_switch_setting_from_live_value, should_render_live_text, should_use_mask_display,
+        manual_switch_setting_from_live_value, resolved_line_label, should_render_live_text,
+        should_use_mask_display,
     };
+    use crate::connection_targets::ConnectionTargetResolver;
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
-    use crate::model::{DashboardBinding, EndpointRef, Line, Port};
+    use crate::model::{DashboardBinding, EndpointRef, Line, Port, System};
     use eframe::egui::{Pos2, Rect};
 
     #[test]
@@ -3784,7 +3799,64 @@ mod tests {
             properties: indexmap::IndexMap::new(),
         };
 
-        assert!(line_has_testpoint(&[source, sink], &line));
+        let system = System {
+            properties: indexmap::IndexMap::from_iter([("Name".to_string(), "Model".to_string())]),
+            blocks: vec![source, sink],
+            lines: vec![line.clone()],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &line);
+        assert!(line_has_testpoint(&targets));
+    }
+
+    #[test]
+    fn unnamed_line_label_falls_back_to_propagated_target_leaf() {
+        let mut source = minimal_block("Source Block", "1");
+        source.ports.push(Port {
+            port_type: "out".to_string(),
+            index: Some(1),
+            properties: indexmap::IndexMap::from_iter([(
+                "Name".to_string(),
+                "Shared Signal".to_string(),
+            )]),
+        });
+        let sink = minimal_block("Sink", "2");
+        let line = Line {
+            name: None,
+            zorder: None,
+            src: Some(EndpointRef {
+                sid: "1".to_string(),
+                port_type: "out".to_string(),
+                port_index: 1,
+            }),
+            dst: Some(EndpointRef {
+                sid: "2".to_string(),
+                port_type: "in".to_string(),
+                port_index: 1,
+            }),
+            points: Vec::new(),
+            labels: None,
+            branches: Vec::new(),
+            properties: indexmap::IndexMap::new(),
+        };
+
+        let system = System {
+            properties: indexmap::IndexMap::from_iter([("Name".to_string(), "Model".to_string())]),
+            blocks: vec![source, sink],
+            lines: vec![line.clone()],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &line);
+        assert_eq!(
+            resolved_line_label(&line, &targets).as_deref(),
+            Some("Shared Signal")
+        );
     }
 
     #[test]

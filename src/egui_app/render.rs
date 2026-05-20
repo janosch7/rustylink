@@ -150,6 +150,7 @@ pub struct PortLabelMaxWidths {
     pub right: f32,
 }
 
+#[allow(dead_code)]
 pub(crate) fn port_label_display_name(
     block: &Block,
     index: u32,

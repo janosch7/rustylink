@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -255,11 +255,12 @@ impl ConnectionTargetResolver {
             return Vec::new();
         };
 
+        let signal_name = resolve_line_signal_name(system, line);
         let mut target = ConnectionTarget::new(
             self.full_block_path(system_path, &block.name),
             ConnectionTargetOrigin::SourceBlock,
         );
-        target.signal_name = resolve_line_signal_name(system, line);
+        target.signal_name = signal_name;
         target.signals_only = true;
         target.testpoint = port_testpoint(block, src.port_type.as_str(), src.port_index);
         vec![target]
@@ -284,7 +285,8 @@ impl ConnectionTargetResolver {
             };
             let signal_name = routing_line_signal_name(system, incoming);
             for mut target in line_targets[line_index].clone() {
-                target.signal_name = signal_name.clone().or(target.signal_name);
+                let next_signal_name = signal_name.clone().or(target.signal_name.clone());
+                apply_signal_name(&mut target, next_signal_name);
                 target.origin = ConnectionTargetOrigin::BusCreator;
                 targets.push(target);
             }
@@ -353,7 +355,8 @@ impl ConnectionTargetResolver {
             let signal_name = routing_line_signal_name(system, incoming);
             for mut target in line_targets[line_index].clone() {
                 target.element_index = Some(input_index);
-                target.signal_name = signal_name.clone().or(target.signal_name);
+                let next_signal_name = signal_name.clone().or(target.signal_name.clone());
+                apply_signal_name(&mut target, next_signal_name);
                 target.origin = ConnectionTargetOrigin::Mux;
                 targets.push(target);
             }
@@ -392,12 +395,17 @@ impl ConnectionTargetResolver {
 
     fn full_block_path(&self, system_path: &[String], block_name: &str) -> String {
         let mut parts = Vec::new();
-        if !self.model_name.trim().is_empty() {
-            parts.push(self.model_name.trim().to_string());
+        if let Some(model_name) = normalized_path_segment(&self.model_name) {
+            parts.push(model_name);
         }
-        parts.extend(system_path.iter().cloned());
-        parts.push(block_name.trim().to_string());
-        parts.retain(|part| !part.is_empty());
+        parts.extend(
+            system_path
+                .iter()
+                .filter_map(|part| normalized_path_segment(part)),
+        );
+        if let Some(block_name) = normalized_path_segment(block_name) {
+            parts.push(block_name);
+        }
         parts.join("/")
     }
 
@@ -556,6 +564,40 @@ fn boundary_targets(targets: &[ConnectionTarget], boundary_path: String) -> Vec<
     dedup_targets(combined)
 }
 
+fn apply_signal_name(target: &mut ConnectionTarget, signal_name: Option<String>) {
+    let base_path = strip_signal_suffix(&target.path, target.signal_name.as_deref());
+    target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+    target.path = match target.signal_name.as_deref() {
+        Some(signal_name) if !base_path.is_empty() => format!("{base_path}/{signal_name}"),
+        Some(signal_name) => signal_name.to_string(),
+        None => base_path,
+    };
+}
+
+fn strip_signal_suffix(path: &str, signal_name: Option<&str>) -> String {
+    let normalized_path = normalize_path(path);
+    let Some(signal_name) = signal_name.and_then(normalized_path_segment) else {
+        return normalized_path;
+    };
+    normalized_path
+        .strip_suffix(&format!("/{signal_name}"))
+        .unwrap_or(normalized_path.as_str())
+        .to_string()
+}
+
+fn normalized_path_segment(segment: &str) -> Option<String> {
+    let normalized = segment.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn normalize_path(path: &str) -> String {
+    path.trim_matches('/')
+        .split('/')
+        .filter_map(normalized_path_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn incoming_lines_for_block<'a>(system: &'a System, block: &Block) -> Vec<&'a Line> {
     let Some(block_sid) = block.sid.as_deref() else {
         return Vec::new();
@@ -591,7 +633,7 @@ fn port_signal_name(block: &Block, port_type: &str, port_index: u32) -> Option<S
                 .or_else(|| port.properties.get("name"))
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
+                .and_then(normalized_path_segment)
         })
 }
 
@@ -630,7 +672,7 @@ fn resolve_line_signal_name(system: &System, line: &Line) -> Option<String> {
         .as_ref()
         .map(|name| name.trim())
         .filter(|name| !name.is_empty())
-        .map(str::to_string)
+        .and_then(normalized_path_segment)
 }
 
 fn routing_line_signal_name(system: &System, line: &Line) -> Option<String> {
@@ -638,7 +680,7 @@ fn routing_line_signal_name(system: &System, line: &Line) -> Option<String> {
         .as_ref()
         .map(|name| name.trim())
         .filter(|name| !name.is_empty())
-        .map(str::to_string)
+        .and_then(normalized_path_segment)
         .or_else(|| resolve_line_signal_name(system, line))
 }
 
@@ -701,15 +743,16 @@ fn same_line(left: &Line, right: &Line) -> bool {
 }
 
 fn qualify_external_path(model_name: &str, raw_path: &str) -> String {
-    let clean = raw_path.trim_matches('/');
+    let clean = normalize_path(raw_path);
+    let normalized_model = normalize_path(model_name);
     if clean.is_empty()
-        || model_name.is_empty()
-        || clean.starts_with(&format!("{model_name}/"))
-        || clean == model_name
+        || normalized_model.is_empty()
+        || clean.starts_with(&format!("{normalized_model}/"))
+        || clean == normalized_model
     {
-        clean.to_string()
+        clean
     } else {
-        format!("{model_name}/{clean}")
+        format!("{normalized_model}/{clean}")
     }
 }
 
@@ -721,8 +764,17 @@ fn dashboard_binding_block_path(binding: &DashboardBinding) -> &str {
 }
 
 fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
+    let mut seen: BTreeMap<
+        (
+            String,
+            Option<String>,
+            Option<u32>,
+            ConnectionTargetOrigin,
+            bool,
+        ),
+        usize,
+    > = BTreeMap::new();
+    let mut out: Vec<ConnectionTarget> = Vec::new();
     for target in targets {
         let key = (
             target.path.clone(),
@@ -730,9 +782,13 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
             target.element_index,
             target.origin.clone(),
             target.signals_only,
-            target.testpoint,
         );
-        if seen.insert(key) {
+        if let Some(index) = seen.get(&key).copied() {
+            if let Some(existing) = out.get_mut(index) {
+                existing.testpoint = existing.testpoint || target.testpoint;
+            }
+        } else {
+            seen.insert(key, out.len());
             out.push(target);
         }
     }
@@ -743,7 +799,7 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
 mod tests {
     use indexmap::IndexMap;
 
-    use super::{ConnectionTargetOrigin, ConnectionTargetResolver};
+    use super::{ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolver};
     use crate::model::{Block, EndpointRef, Line, NameLocation, Point, Port, System, ValueKind};
 
     #[test]
@@ -789,7 +845,7 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &system.lines[3]);
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/B");
+        assert_eq!(targets[0].path, "model/B/beta");
         assert_eq!(targets[0].signal_name.as_deref(), Some("beta"));
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::BusSelector);
     }
@@ -857,7 +913,7 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &system.lines[4]);
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/B");
+        assert_eq!(targets[0].path, "model/B/beta");
         assert_eq!(targets[0].signal_name.as_deref(), Some("beta"));
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::Demux);
     }
@@ -924,7 +980,7 @@ mod tests {
         assert!(
             targets
                 .iter()
-                .any(|target| target.path == "model/Src" && target.signals_only)
+                .any(|target| target.path == "model/Src/Src_o1" && target.signals_only)
         );
         assert!(targets.iter().any(|target| target.path == "model/Sub/Out1"));
     }
@@ -1071,6 +1127,49 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &wire);
 
         assert!(targets.iter().any(|target| target.testpoint));
+        assert!(
+            targets
+                .iter()
+                .any(|target| target.path == "model/Source/sig")
+        );
+    }
+
+    #[test]
+    fn canonical_signal_paths_strip_newlines_and_merge_testpoints() {
+        let source = block(
+            "Constant",
+            "Source\nBlock",
+            "1",
+            vec![port("out", 1, Some("sig\nname"))],
+            None,
+            &[],
+        );
+        let sink = block("Display", "Sink", "2", vec![port("in", 1, None)], None, &[]);
+        let wire = line("1", 1, "2", 1, None);
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, sink],
+            lines: vec![wire.clone()],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let mut targets = resolver.line_targets_for_line(&[], &wire);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, "model/Source Block/sig name");
+
+        targets.push(ConnectionTarget {
+            path: "model/Source Block/sig name".to_string(),
+            signal_name: Some("sig name".to_string()),
+            element_index: None,
+            origin: ConnectionTargetOrigin::SourceBlock,
+            signals_only: true,
+            testpoint: true,
+        });
+        let deduped = super::dedup_targets(targets);
+        assert_eq!(deduped.len(), 1);
+        assert!(deduped[0].testpoint);
     }
 
     fn block(

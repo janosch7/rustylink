@@ -450,7 +450,9 @@ impl SubsystemApp {
             live_block_values: HashMap::new(),
             live_display_defaults: crate::live_values::LiveValueDisplayOptions {
                 float_decimals: crate::live_values::DEFAULT_LIVE_FLOAT_DECIMALS,
-                use_scientific: false,
+                scientific_lower_bound: crate::live_values::LIVE_SCIENTIFIC_LOWER_BOUND,
+                scientific_upper_bound: crate::live_values::LIVE_SCIENTIFIC_UPPER_BOUND,
+                always_scientific: false,
             },
             layout_file_path: None,
             layout_dirty: false,
