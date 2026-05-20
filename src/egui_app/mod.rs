@@ -74,22 +74,76 @@ pub(crate) fn port_label_display_name(
         }
     };
 
-    block
-        .ports
-        .iter()
-        .filter(|port| {
-            port.port_type == if logical_is_input { "in" } else { "out" }
-                && port.index.unwrap_or(0) == index
-        })
-        .find_map(|port| {
-            port.properties
-                .get("Name")
-                .cloned()
-                .or_else(|| port.properties.get("name").cloned())
-                .map(|name| name.trim().to_string())
-                .filter(|name| !name.is_empty())
-        })
+    let explicit_port_name = || {
+        block
+            .ports
+            .iter()
+            .filter(|port| {
+                port.port_type == if logical_is_input { "in" } else { "out" }
+                    && port.index.unwrap_or(0) == index
+            })
+            .find_map(|port| {
+                port.properties
+                    .get("Name")
+                    .cloned()
+                    .or_else(|| port.properties.get("name").cloned())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+    };
+
+    subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(explicit_port_name)
         .unwrap_or_else(fallback_name)
+}
+
+fn subsystem_boundary_port_name(
+    block: &crate::model::Block,
+    index: u32,
+    logical_is_input: bool,
+) -> Option<String> {
+    let boundary_type = match block.block_type.as_str() {
+        "SubSystem" | "Reference" => {
+            if logical_is_input {
+                "Inport"
+            } else {
+                "Outport"
+            }
+        }
+        _ => return None,
+    };
+
+    block
+        .subsystem
+        .as_ref()?
+        .blocks
+        .iter()
+        .filter(|child| child.block_type == boundary_type)
+        .find(|child| subsystem_boundary_port_index(child) == index)
+        .and_then(boundary_block_display_name)
+}
+
+fn subsystem_boundary_port_index(block: &crate::model::Block) -> u32 {
+    block
+        .properties
+        .get("Port")
+        .or_else(|| block.properties.get("PortNumber"))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(1)
+}
+
+fn boundary_block_display_name(block: &crate::model::Block) -> Option<String> {
+    let name = block.name.trim();
+    if !name.is_empty() {
+        return Some(name.to_string());
+    }
+
+    block
+        .properties
+        .get("Name")
+        .or_else(|| block.properties.get("name"))
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 pub fn get_block_type_cfg(block: &crate::model::Block) -> crate::block_types::BlockTypeConfig {
@@ -208,6 +262,7 @@ fn viewer_block_type_override(
 #[cfg(test)]
 mod tests {
     use super::port_label_display_name;
+    use crate::model::System;
 
     #[test]
     fn port_labels_do_not_fall_back_to_propagated_signals() {
@@ -244,5 +299,97 @@ mod tests {
             port_label_display_name(&block, 1, false, &cfg),
             "SubsystemOutput"
         );
+    }
+
+    #[test]
+    fn subsystem_port_labels_use_internal_boundary_block_names() {
+        let mut block =
+            crate::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
+        block.subsystem = Some(Box::new(System {
+            properties: indexmap::IndexMap::new(),
+            blocks: vec![
+                crate::model::Block {
+                    name: "SubsystemInput".to_string(),
+                    properties: indexmap::IndexMap::from_iter([("Port".to_string(), "1".to_string())]),
+                    ports: vec![],
+                    block_type: "Inport".to_string(),
+                    sid: Some("10".to_string()),
+                    tag_name: "Block".to_string(),
+                    position: None,
+                    zorder: None,
+                    commented: false,
+                    name_location: crate::model::NameLocation::Bottom,
+                    is_matlab_function: false,
+                    value: None,
+                    value_kind: crate::model::ValueKind::default(),
+                    value_rows: None,
+                    value_cols: None,
+                    ref_properties: Default::default(),
+                    port_counts: None,
+                    subsystem: None,
+                    system_ref: None,
+                    c_function: None,
+                    instance_data: None,
+                    link_data: None,
+                    mask: None,
+                    annotations: Vec::new(),
+                    background_color: None,
+                    show_name: None,
+                    font_size: None,
+                    font_weight: None,
+                    mask_display_text: None,
+                    current_setting: None,
+                    block_mirror: None,
+                    library_source: None,
+                    library_block_path: None,
+                    dashboard_binding: None,
+                    child_order: Vec::new(),
+                },
+                crate::model::Block {
+                    name: "SubsystemOutput".to_string(),
+                    properties: indexmap::IndexMap::from_iter([("Port".to_string(), "1".to_string())]),
+                    ports: vec![],
+                    block_type: "Outport".to_string(),
+                    sid: Some("11".to_string()),
+                    tag_name: "Block".to_string(),
+                    position: None,
+                    zorder: None,
+                    commented: false,
+                    name_location: crate::model::NameLocation::Bottom,
+                    is_matlab_function: false,
+                    value: None,
+                    value_kind: crate::model::ValueKind::default(),
+                    value_rows: None,
+                    value_cols: None,
+                    ref_properties: Default::default(),
+                    port_counts: None,
+                    subsystem: None,
+                    system_ref: None,
+                    c_function: None,
+                    instance_data: None,
+                    link_data: None,
+                    mask: None,
+                    annotations: Vec::new(),
+                    background_color: None,
+                    show_name: None,
+                    font_size: None,
+                    font_weight: None,
+                    mask_display_text: None,
+                    current_setting: None,
+                    block_mirror: None,
+                    library_source: None,
+                    library_block_path: None,
+                    dashboard_binding: None,
+                    child_order: Vec::new(),
+                },
+            ],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        }));
+
+        let cfg = crate::egui_app::get_block_type_cfg(&block);
+        assert_eq!(port_label_display_name(&block, 1, true, &cfg), "SubsystemInput");
+        assert_eq!(port_label_display_name(&block, 1, false, &cfg), "SubsystemOutput");
     }
 }

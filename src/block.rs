@@ -587,13 +587,28 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                 child_order.push(BlockChildKind::PortCounts);
             }
             "PortProperties" => {
+                let mut next_port_indices: std::collections::HashMap<String, u32> =
+                    std::collections::HashMap::new();
                 for pnode in child
                     .children()
                     .filter(|c| c.is_element() && c.has_tag_name("Port"))
                 {
                     let mut pprops = IndexMap::new();
                     let port_type = pnode.attribute("Type").unwrap_or("").to_string();
-                    let index = pnode.attribute("Index").and_then(|s| s.parse::<u32>().ok());
+                    let parsed_index = pnode.attribute("Index").and_then(|s| s.parse::<u32>().ok());
+                    let index = Some(match parsed_index {
+                        Some(index) => {
+                            let next_index = next_port_indices.entry(port_type.clone()).or_insert(1);
+                            *next_index = (*next_index).max(index.saturating_add(1));
+                            index
+                        }
+                        None => {
+                            let next_index = next_port_indices.entry(port_type.clone()).or_insert(1);
+                            let index = *next_index;
+                            *next_index = next_index.saturating_add(1);
+                            index
+                        }
+                    });
                     for pp in pnode
                         .children()
                         .filter(|c| c.is_element() && c.has_tag_name("P"))

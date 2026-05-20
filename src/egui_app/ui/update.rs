@@ -216,14 +216,6 @@ fn line_has_testpoint(targets: &[crate::connection_targets::ConnectionTarget]) -
     targets.iter().any(|target| target.testpoint)
 }
 
-fn target_path_leaf(path: &str) -> Option<String> {
-    path.rsplit('/')
-        .next()
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .map(str::to_string)
-}
-
 fn resolved_line_label(
     line: &crate::model::Line,
     targets: &[crate::connection_targets::ConnectionTarget],
@@ -237,7 +229,7 @@ fn resolved_line_label(
             targets
                 .iter()
                 .filter(|target| target.signals_only)
-                .find_map(|target| target_path_leaf(&target.path))
+            .find_map(|target| target.signal_name.clone())
         })
 }
 
@@ -3793,7 +3785,7 @@ mod tests {
     }
 
     #[test]
-    fn unnamed_line_label_falls_back_to_propagated_target_leaf() {
+    fn unnamed_line_label_stays_empty_without_explicit_line_name() {
         let mut source = minimal_block("Source Block", "1");
         source.ports.push(Port {
             port_type: "out".to_string(),
@@ -3833,7 +3825,7 @@ mod tests {
 
         let resolver = ConnectionTargetResolver::new(&system);
         let targets = resolver.line_targets_for_line(&[], &line);
-        assert_eq!(resolved_line_label(&line, &targets).as_deref(), Some("Shared Signal"));
+        assert_eq!(resolved_line_label(&line, &targets), None);
     }
 
     #[test]

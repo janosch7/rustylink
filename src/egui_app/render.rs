@@ -176,23 +176,76 @@ pub(crate) fn port_label_display_name(
         }
     };
 
-    block
-        .ports
-        .iter()
-        .filter(|p| {
-            p.port_type == if logical_is_input { "in" } else { "out" }
-                && p.index.unwrap_or(0) == index
-        })
-        .filter_map(|p| {
-            p.properties
-                .get("Name")
-                .cloned()
-                .or_else(|| p.properties.get("PropagatedSignals").cloned())
-                .or_else(|| p.properties.get("name").cloned())
-                .or_else(|| Some(fallback_name()))
-        })
-        .next()
+    let explicit_port_name = || {
+        block
+            .ports
+            .iter()
+            .filter(|p| {
+                p.port_type == if logical_is_input { "in" } else { "out" }
+                    && p.index.unwrap_or(0) == index
+            })
+            .find_map(|p| {
+                p.properties
+                    .get("Name")
+                    .cloned()
+                    .or_else(|| p.properties.get("name").cloned())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+    };
+
+    subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(explicit_port_name)
         .unwrap_or_else(fallback_name)
+}
+
+fn subsystem_boundary_port_name(
+    block: &Block,
+    index: u32,
+    logical_is_input: bool,
+) -> Option<String> {
+    let boundary_type = match block.block_type.as_str() {
+        "SubSystem" | "Reference" => {
+            if logical_is_input {
+                "Inport"
+            } else {
+                "Outport"
+            }
+        }
+        _ => return None,
+    };
+
+    block
+        .subsystem
+        .as_ref()?
+        .blocks
+        .iter()
+        .filter(|child| child.block_type == boundary_type)
+        .find(|child| subsystem_boundary_port_index(child) == index)
+        .and_then(boundary_block_display_name)
+}
+
+fn subsystem_boundary_port_index(block: &Block) -> u32 {
+    block
+        .properties
+        .get("Port")
+        .or_else(|| block.properties.get("PortNumber"))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(1)
+}
+
+fn boundary_block_display_name(block: &Block) -> Option<String> {
+    let name = block.name.trim();
+    if !name.is_empty() {
+        return Some(name.to_string());
+    }
+
+    block
+        .properties
+        .get("Name")
+        .or_else(|| block.properties.get("name"))
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 pub fn wrap_text_to_max_width(

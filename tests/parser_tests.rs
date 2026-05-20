@@ -153,3 +153,34 @@ fn parser_strips_newlines_from_line_names() {
         Some("my signal")
     );
 }
+
+#[test]
+fn parser_assigns_missing_port_indices_per_port_type() {
+    let doc = Document::parse(
+        r#"<Block BlockType="ComplexToRealImag" Name="ComplexToRealImag" SID="1">
+            <PortProperties>
+                <Port Type="in">
+                    <P Name="Name">input</P>
+                </Port>
+                <Port Type="out">
+                    <P Name="Name">real</P>
+                </Port>
+                <Port Type="out">
+                    <P Name="Name">imag</P>
+                </Port>
+            </PortProperties>
+        </Block>"#,
+    )
+    .expect("block xml");
+
+    let block =
+        parse_block_shallow(doc.root_element(), Utf8Path::new(".")).expect("parse block shallow");
+
+    assert_eq!(block.ports.len(), 3);
+    assert_eq!(block.ports[0].port_type, "in");
+    assert_eq!(block.ports[0].index, Some(1));
+    assert_eq!(block.ports[1].port_type, "out");
+    assert_eq!(block.ports[1].index, Some(1));
+    assert_eq!(block.ports[2].port_type, "out");
+    assert_eq!(block.ports[2].index, Some(2));
+}

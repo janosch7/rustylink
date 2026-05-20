@@ -281,7 +281,7 @@ impl ConnectionTargetResolver {
         );
         target.signals_only = true;
         target.testpoint = port_testpoint(block, src.port_type.as_str(), src.port_index);
-        apply_signal_name(&mut target, signal_name);
+        set_signal_name_only(&mut target, signal_name);
         vec![target]
     }
 
@@ -583,29 +583,8 @@ fn boundary_targets(targets: &[ConnectionTarget], boundary_path: String) -> Vec<
     dedup_targets(combined)
 }
 
-fn apply_signal_name(target: &mut ConnectionTarget, signal_name: Option<String>) {
-    let base_path = strip_signal_suffix(&target.path, target.signal_name.as_deref());
-    target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
-    target.path = match target.signal_name.as_deref() {
-        Some(signal_name) if !base_path.is_empty() => format!("{base_path}/{signal_name}"),
-        Some(signal_name) => signal_name.to_string(),
-        None => base_path,
-    };
-}
-
 fn set_signal_name_only(target: &mut ConnectionTarget, signal_name: Option<String>) {
     target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
-}
-
-fn strip_signal_suffix(path: &str, signal_name: Option<&str>) -> String {
-    let normalized_path = normalize_path(path);
-    let Some(signal_name) = signal_name.and_then(normalized_path_segment) else {
-        return normalized_path;
-    };
-    normalized_path
-        .strip_suffix(&format!("/{signal_name}"))
-        .unwrap_or(normalized_path.as_str())
-        .to_string()
 }
 
 fn normalized_path_segment(segment: &str) -> Option<String> {
@@ -652,7 +631,6 @@ fn port_signal_name(block: &Block, port_type: &str, port_index: u32) -> Option<S
         .and_then(|port| {
             port.properties
                 .get("Name")
-                .or_else(|| port.properties.get("PropagatedSignals"))
                 .or_else(|| port.properties.get("name"))
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
@@ -669,35 +647,6 @@ fn port_testpoint(block: &Block, port_type: &str, port_index: u32) -> bool {
         .is_some_and(|value| matches!(value.trim(), "on" | "true" | "1" | "On" | "True"))
 }
 
-fn resolve_line_signal_name(system: &System, line: &Line) -> Option<String> {
-    if let Some(src) = &line.src {
-        if let Some(block) = system
-            .blocks
-            .iter()
-            .find(|block| block.sid.as_deref() == Some(src.sid.as_str()))
-        {
-            return port_signal_name(block, src.port_type.as_str(), src.port_index).or_else(|| {
-                if src.port_type == "out" && block.block_type == "SubSystem" {
-                    Some(format!("Port{}", src.port_index))
-                } else if src.port_type == "out" {
-                    Some(format!("{}_o{}", block.name, src.port_index))
-                } else {
-                    Some(format!(
-                        "{}_{}{}",
-                        block.name, src.port_type, src.port_index
-                    ))
-                }
-            });
-        }
-    }
-
-    line.name
-        .as_ref()
-        .map(|name| name.trim())
-        .filter(|name| !name.is_empty())
-        .and_then(normalized_path_segment)
-}
-
 fn explicit_line_signal_name(line: &Line) -> Option<String> {
     line.name
         .as_ref()
@@ -706,8 +655,8 @@ fn explicit_line_signal_name(line: &Line) -> Option<String> {
         .and_then(normalized_path_segment)
 }
 
-fn routing_line_signal_name(system: &System, line: &Line) -> Option<String> {
-    explicit_line_signal_name(line).or_else(|| resolve_line_signal_name(system, line))
+fn routing_line_signal_name(_system: &System, line: &Line) -> Option<String> {
+    explicit_line_signal_name(line)
 }
 
 fn block_cache_key(system_path: &[String], block: &Block) -> String {
@@ -871,7 +820,7 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &system.lines[3]);
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/B/beta");
+        assert_eq!(targets[0].path, "model/B");
         assert_eq!(targets[0].signal_name.as_deref(), Some("beta"));
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::BusSelector);
     }
@@ -939,7 +888,7 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &system.lines[4]);
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/B/beta");
+        assert_eq!(targets[0].path, "model/B");
         assert_eq!(targets[0].signal_name.as_deref(), Some("beta"));
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::Demux);
     }
@@ -1006,7 +955,11 @@ mod tests {
         assert!(
             targets
                 .iter()
-                .any(|target| target.path == "model/Src/input" && target.signals_only)
+                .any(|target| {
+                    target.path == "model/Src"
+                        && target.signal_name.as_deref() == Some("input")
+                        && target.signals_only
+                })
         );
         assert!(targets.iter().any(|target| target.path == "model/Sub/Out1"));
     }
@@ -1249,11 +1202,9 @@ mod tests {
         let targets = resolver.line_targets_for_line(&[], &wire);
 
         assert!(targets.iter().any(|target| target.testpoint));
-        assert!(
-            targets
-                .iter()
-                .any(|target| target.path == "model/Source/sig")
-        );
+        assert!(targets.iter().any(|target| {
+            target.path == "model/Source" && target.signal_name.as_deref() == Some("sig")
+        }));
     }
 
     #[test]
@@ -1279,11 +1230,12 @@ mod tests {
         let resolver = ConnectionTargetResolver::new(&system);
         let mut targets = resolver.line_targets_for_line(&[], &wire);
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].path, "model/Source Block/sig name");
+        assert_eq!(targets[0].path, "model/Source Block");
+        assert_eq!(targets[0].signal_name, None);
 
         targets.push(ConnectionTarget {
-            path: "model/Source Block/sig name".to_string(),
-            signal_name: Some("sig name".to_string()),
+            path: "model/Source Block".to_string(),
+            signal_name: None,
             element_index: None,
             origin: ConnectionTargetOrigin::SourceBlock,
             signals_only: true,
@@ -1292,6 +1244,79 @@ mod tests {
         let deduped = super::dedup_targets(targets);
         assert_eq!(deduped.len(), 1);
         assert!(deduped[0].testpoint);
+    }
+
+    #[test]
+    fn base_line_targets_do_not_invent_signal_names_without_explicit_line_name() {
+        let source = block(
+            "Constant",
+            "Source",
+            "1",
+            vec![port("out", 1, Some("sig name"))],
+            None,
+            &[],
+        );
+        let sink = block("Display", "Sink", "2", vec![port("in", 1, None)], None, &[]);
+        let wire = line("1", 1, "2", 1, None);
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, sink],
+            lines: vec![wire.clone()],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &wire);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, "model/Source");
+        assert_eq!(targets[0].signal_name, None);
+    }
+
+    #[test]
+    fn bus_selector_ignores_propagated_signal_fallbacks() {
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+                block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+                block(
+                    "BusCreator",
+                    "BusCreator",
+                    "3",
+                    vec![
+                        port("in", 1, None),
+                        port("in", 2, None),
+                        port("out", 1, None),
+                    ],
+                    None,
+                    &[],
+                ),
+                block(
+                    "BusSelector",
+                    "BusSelector",
+                    "4",
+                    vec![port("in", 1, None), propagated_port("out", 1, "beta")],
+                    None,
+                    &[],
+                ),
+                block("Display", "Sink", "5", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![
+                line("1", 1, "3", 1, Some("alpha")),
+                line("2", 1, "3", 2, Some("beta")),
+                line("3", 1, "4", 1, None),
+                line("4", 1, "5", 1, None),
+            ],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &system.lines[3]);
+
+        assert!(targets.is_empty(), "targets: {targets:?}");
     }
 
     fn block(
@@ -1350,6 +1375,17 @@ mod tests {
             port_type: port_type.to_string(),
             index: Some(index),
             properties,
+        }
+    }
+
+    fn propagated_port(port_type: &str, index: u32, propagated_signal: &str) -> Port {
+        Port {
+            port_type: port_type.to_string(),
+            index: Some(index),
+            properties: IndexMap::from_iter([(
+                "PropagatedSignals".to_string(),
+                propagated_signal.to_string(),
+            )]),
         }
     }
 
