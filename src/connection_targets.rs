@@ -200,7 +200,7 @@ impl ConnectionTargetResolver {
                     continue;
                 };
 
-                let new_targets = match block.block_type.as_str() {
+                let mut new_targets = match block.block_type.as_str() {
                     "BusCreator" => {
                         self.bus_creator_targets(system, system_path, block, line, line_targets)
                     }
@@ -227,6 +227,25 @@ impl ConnectionTargetResolver {
                         }),
                     _ => self.base_line_targets(system, system_path, block_lookup, line),
                 };
+
+                if matches!(
+                    block.block_type.as_str(),
+                    "BusCreator"
+                        | "BusSelector"
+                        | "Mux"
+                        | "Demux"
+                        | "Inport"
+                        | "SubSystem"
+                        | "Reference"
+                ) {
+                    let explicit_name = explicit_line_signal_name(line);
+                    for target in &mut new_targets {
+                        set_signal_name_only(
+                            target,
+                            explicit_name.clone().or(target.signal_name.clone()),
+                        );
+                    }
+                }
 
                 let deduped = dedup_targets(new_targets);
                 if deduped != line_targets[index] {
@@ -255,14 +274,14 @@ impl ConnectionTargetResolver {
             return Vec::new();
         };
 
-        let signal_name = resolve_line_signal_name(system, line);
+        let signal_name = routing_line_signal_name(system, line);
         let mut target = ConnectionTarget::new(
             self.full_block_path(system_path, &block.name),
             ConnectionTargetOrigin::SourceBlock,
         );
-        target.signal_name = signal_name;
         target.signals_only = true;
         target.testpoint = port_testpoint(block, src.port_type.as_str(), src.port_index);
+        apply_signal_name(&mut target, signal_name);
         vec![target]
     }
 
@@ -283,10 +302,10 @@ impl ConnectionTargetResolver {
             else {
                 continue;
             };
-            let signal_name = routing_line_signal_name(system, incoming);
+            let signal_name = explicit_line_signal_name(incoming);
             for mut target in line_targets[line_index].clone() {
                 let next_signal_name = signal_name.clone().or(target.signal_name.clone());
-                apply_signal_name(&mut target, next_signal_name);
+                set_signal_name_only(&mut target, next_signal_name);
                 target.origin = ConnectionTargetOrigin::BusCreator;
                 targets.push(target);
             }
@@ -352,11 +371,11 @@ impl ConnectionTargetResolver {
                 continue;
             };
             let input_index = incoming.dst.as_ref().map(|dst| dst.port_index).unwrap_or(1);
-            let signal_name = routing_line_signal_name(system, incoming);
+            let signal_name = explicit_line_signal_name(incoming);
             for mut target in line_targets[line_index].clone() {
                 target.element_index = Some(input_index);
                 let next_signal_name = signal_name.clone().or(target.signal_name.clone());
-                apply_signal_name(&mut target, next_signal_name);
+                set_signal_name_only(&mut target, next_signal_name);
                 target.origin = ConnectionTargetOrigin::Mux;
                 targets.push(target);
             }
@@ -574,6 +593,10 @@ fn apply_signal_name(target: &mut ConnectionTarget, signal_name: Option<String>)
     };
 }
 
+fn set_signal_name_only(target: &mut ConnectionTarget, signal_name: Option<String>) {
+    target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+}
+
 fn strip_signal_suffix(path: &str, signal_name: Option<&str>) -> String {
     let normalized_path = normalize_path(path);
     let Some(signal_name) = signal_name.and_then(normalized_path_segment) else {
@@ -675,13 +698,16 @@ fn resolve_line_signal_name(system: &System, line: &Line) -> Option<String> {
         .and_then(normalized_path_segment)
 }
 
-fn routing_line_signal_name(system: &System, line: &Line) -> Option<String> {
+fn explicit_line_signal_name(line: &Line) -> Option<String> {
     line.name
         .as_ref()
         .map(|name| name.trim())
         .filter(|name| !name.is_empty())
         .and_then(normalized_path_segment)
-        .or_else(|| resolve_line_signal_name(system, line))
+}
+
+fn routing_line_signal_name(system: &System, line: &Line) -> Option<String> {
+    explicit_line_signal_name(line).or_else(|| resolve_line_signal_name(system, line))
 }
 
 fn block_cache_key(system_path: &[String], block: &Block) -> String {
@@ -980,9 +1006,105 @@ mod tests {
         assert!(
             targets
                 .iter()
-                .any(|target| target.path == "model/Src/Src_o1" && target.signals_only)
+                .any(|target| target.path == "model/Src/input" && target.signals_only)
         );
         assert!(targets.iter().any(|target| target.path == "model/Sub/Out1"));
+    }
+
+    #[test]
+    fn mux_does_not_append_explicit_names_to_forwarded_boundary_paths() {
+        let child_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![
+                block(
+                    "Inport",
+                    "In1",
+                    "10",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+                block(
+                    "Outport",
+                    "Out1",
+                    "11",
+                    vec![port("in", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+            ],
+            lines: vec![line("10", 1, "11", 1, None)],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block(
+                    "Constant",
+                    "Src",
+                    "1",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block(
+                    "SubSystem",
+                    "Sub",
+                    "2",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    Some(child_system),
+                    &[],
+                ),
+                block(
+                    "Constant",
+                    "Other",
+                    "3",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block(
+                    "Mux",
+                    "Mux",
+                    "4",
+                    vec![
+                        port("in", 1, None),
+                        port("in", 2, None),
+                        port("out", 1, None),
+                    ],
+                    None,
+                    &[],
+                ),
+                block("Display", "Sink", "5", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![
+                line("1", 1, "2", 1, Some("input")),
+                line("2", 1, "4", 1, Some("alpha")),
+                line("3", 1, "4", 2, Some("beta")),
+                line("4", 1, "5", 1, None),
+            ],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &system.lines[3]);
+
+        assert!(
+            targets.iter().any(|target| {
+                target.path == "model/Sub/Out1"
+                    && target.signal_name.as_deref() == Some("alpha")
+                    && target.origin == ConnectionTargetOrigin::Mux
+            }),
+            "targets: {targets:?}"
+        );
+        assert!(
+            !targets
+                .iter()
+                .any(|target| target.path == "model/Sub/Out1/alpha")
+        );
     }
 
     #[test]

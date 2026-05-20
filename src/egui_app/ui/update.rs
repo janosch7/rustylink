@@ -452,26 +452,6 @@ pub(crate) fn update_internal(
             }
 
             ui.separator();
-            ui.checkbox(&mut app.show_block_names_default, "Block names");
-            ui.label("Name size");
-            ui.add(
-                egui::DragValue::new(&mut app.block_name_font_factor)
-                    .speed(0.05)
-                    .range(0.2..=2.0),
-            );
-            ui.label("Max char frac");
-            ui.add(
-                egui::DragValue::new(&mut app.block_name_max_char_width_factor)
-                    .speed(0.01)
-                    .range(0.05..=0.5),
-            );
-            ui.label("Value size");
-            ui.add(
-                egui::DragValue::new(&mut app.block_value_font_factor)
-                    .speed(0.05)
-                    .range(0.2..=2.0),
-            );
-            ui.separator();
             let move_label = if app.move_mode_enabled {
                 "Edit: On"
             } else {
@@ -3853,10 +3833,7 @@ mod tests {
 
         let resolver = ConnectionTargetResolver::new(&system);
         let targets = resolver.line_targets_for_line(&[], &line);
-        assert_eq!(
-            resolved_line_label(&line, &targets).as_deref(),
-            Some("Shared Signal")
-        );
+        assert_eq!(resolved_line_label(&line, &targets).as_deref(), Some("Shared Signal"));
     }
 
     #[test]

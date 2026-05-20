@@ -9,6 +9,17 @@ use camino::Utf8Path;
 use indexmap::IndexMap;
 use roxmltree::Node;
 
+fn normalize_name_value(value: &str) -> String {
+    crate::parser::helpers::clean_whitespace(value)
+}
+
+fn normalize_name_like_property(property_name: &str, value: &str) -> String {
+    match property_name {
+        "Name" | "name" | "PropagatedSignals" | "BlockName" => normalize_name_value(value),
+        _ => value.to_string(),
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Annotation
 // ────────────────────────────────────────────────────────────────────────────
@@ -123,7 +134,7 @@ fn matches_ignore_case(a: &str, b: &str) -> bool {
 }
 
 pub fn parse_mask_parameter_node(node: Node) -> MaskParameter {
-    let name = node.attribute("Name").unwrap_or("").to_string();
+    let name = normalize_name_value(node.attribute("Name").unwrap_or(""));
     let tattr = node.attribute("Type").unwrap_or("");
     let param_type = match tattr {
         t if t.eq_ignore_ascii_case("popup") => MaskParamType::Popup,
@@ -141,7 +152,10 @@ pub fn parse_mask_parameter_node(node: Node) -> MaskParameter {
     // Capture ALL attributes in their document order for round-trip generation
     let mut all_attrs = IndexMap::new();
     for attr in node.attributes() {
-        all_attrs.insert(attr.name().to_string(), attr.value().to_string());
+        all_attrs.insert(
+            attr.name().to_string(),
+            normalize_name_like_property(attr.name(), attr.value()),
+        );
     }
 
     let mut prompt: Option<String> = None;
@@ -194,7 +208,7 @@ pub fn parse_dialog_control_node(node: Node) -> DialogControl {
         t if t.eq_ignore_ascii_case("Popup") => DialogControlType::Popup,
         other => DialogControlType::Unknown(other.to_string()),
     };
-    let name = node.attribute("Name").map(|s| s.to_string());
+    let name = node.attribute("Name").map(normalize_name_value);
 
     let mut prompt: Option<String> = None;
     let mut control_options: Option<ControlOptions> = None;
@@ -356,7 +370,7 @@ pub fn parse_branch_node(node: Node) -> Result<Branch> {
         match child.tag_name().name() {
             "P" => {
                 if let Some(nm) = child.attribute("Name") {
-                    let val = child.text().unwrap_or("").to_string();
+                    let val = normalize_name_like_property(nm, child.text().unwrap_or(""));
                     properties.insert(nm.to_string(), val.clone());
                     match nm {
                         "Name" => name = Some(val),
@@ -402,7 +416,7 @@ pub fn parse_line_node(node: Node) -> Result<Line> {
         match child.tag_name().name() {
             "P" => {
                 if let Some(nm) = child.attribute("Name") {
-                    let val = child.text().unwrap_or("").to_string();
+                    let val = normalize_name_like_property(nm, child.text().unwrap_or(""));
                     properties.insert(nm.to_string(), val.clone());
                     match nm {
                         "Name" => name = Some(val),
@@ -448,7 +462,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
     if block_type.is_empty() && tag_name == "Reference" {
         block_type = "Reference".to_string();
     }
-    let name = node.attribute("Name").unwrap_or("").to_string();
+    let name = normalize_name_value(node.attribute("Name").unwrap_or(""));
     let sid = node.attribute("SID").map(|s| s.to_string());
 
     let mut properties: IndexMap<String, String> = IndexMap::new();
@@ -585,7 +599,10 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                         .filter(|c| c.is_element() && c.has_tag_name("P"))
                     {
                         if let Some(nm) = pp.attribute("Name") {
-                            pprops.insert(nm.to_string(), pp.text().unwrap_or("").to_string());
+                            pprops.insert(
+                                nm.to_string(),
+                                normalize_name_like_property(nm, pp.text().unwrap_or("")),
+                            );
                         }
                     }
                     ports.push(Port {
@@ -602,14 +619,17 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                     .children()
                     .filter(|c| c.is_element() && c.has_tag_name("DialogParameters"))
                 {
-                    let block_name = dp.attribute("BlockName").unwrap_or("").to_string();
+                    let block_name = normalize_name_value(dp.attribute("BlockName").unwrap_or(""));
                     let mut dp_props = IndexMap::new();
                     for p in dp
                         .children()
                         .filter(|c| c.is_element() && c.has_tag_name("P"))
                     {
                         if let Some(nm) = p.attribute("Name") {
-                            dp_props.insert(nm.to_string(), p.text().unwrap_or("").to_string());
+                            dp_props.insert(
+                                nm.to_string(),
+                                normalize_name_like_property(nm, p.text().unwrap_or("")),
+                            );
                         }
                     }
                     dp_entries.push(DialogParametersEntry {
@@ -852,7 +872,10 @@ pub fn parse_system_shallow(node: Node, base_dir: &Utf8Path) -> Result<System> {
         match child.tag_name().name() {
             "P" => {
                 if let Some(name) = child.attribute("Name") {
-                    properties.insert(name.to_string(), child.text().unwrap_or("").to_string());
+                    properties.insert(
+                        name.to_string(),
+                        normalize_name_like_property(name, child.text().unwrap_or("")),
+                    );
                 }
             }
             "Block" => {

@@ -1,4 +1,7 @@
+use camino::Utf8Path;
 use indexmap::IndexMap;
+use roxmltree::Document;
+use rustylink::block::{parse_block_shallow, parse_line_node};
 use rustylink::builtin_libraries::matrix_library;
 use rustylink::model::System;
 use rustylink::parser::{FsSource, SimulinkParser, is_virtual_library};
@@ -96,5 +99,57 @@ fn clean_whitespace_basic() {
     assert_eq!(
         clean_whitespace("   multiple   \n whitespace  "),
         "multiple whitespace"
+    );
+}
+
+#[test]
+fn parser_strips_newlines_from_block_and_port_signal_names() {
+    let doc = Document::parse(
+        r#"<Block BlockType="ComplexToRealImag" Name="Complex to&#10;Real-Imag" SID="1">
+            <PortProperties>
+                <Port Type="out" Index="1">
+                    <P Name="Name">sig&#10;name</P>
+                    <P Name="PropagatedSignals">prop&#10;sig</P>
+                </Port>
+            </PortProperties>
+        </Block>"#,
+    )
+    .expect("block xml");
+
+    let block =
+        parse_block_shallow(doc.root_element(), Utf8Path::new(".")).expect("parse block shallow");
+
+    assert_eq!(block.name, "Complex to Real-Imag");
+    assert_eq!(block.ports.len(), 1);
+    assert_eq!(
+        block.ports[0].properties.get("Name").map(String::as_str),
+        Some("sig name")
+    );
+    assert_eq!(
+        block.ports[0]
+            .properties
+            .get("PropagatedSignals")
+            .map(String::as_str),
+        Some("prop sig")
+    );
+}
+
+#[test]
+fn parser_strips_newlines_from_line_names() {
+    let doc = Document::parse(
+        r#"<Line>
+            <P Name="Name">my&#10;signal</P>
+            <P Name="Src">1#out:1</P>
+            <P Name="Dst">2#in:1</P>
+        </Line>"#,
+    )
+    .expect("line xml");
+
+    let line = parse_line_node(doc.root_element()).expect("parse line");
+
+    assert_eq!(line.name.as_deref(), Some("my signal"));
+    assert_eq!(
+        line.properties.get("Name").map(String::as_str),
+        Some("my signal")
     );
 }
