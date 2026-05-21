@@ -2,6 +2,27 @@
 
 use serde::{Deserialize, Serialize};
 
+fn deserialize_json_scalar_to_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringLike {
+        String(String),
+        Number(serde_json::Number),
+        Bool(bool),
+        Null,
+    }
+
+    Ok(match StringLike::deserialize(deserializer)? {
+        StringLike::String(value) => value,
+        StringLike::Number(value) => value.to_string(),
+        StringLike::Bool(value) => value.to_string(),
+        StringLike::Null => String::new(),
+    })
+}
+
 /// Type of external file reference in `graphicalInterface.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExternalFileReferenceType {
@@ -36,11 +57,23 @@ impl Serialize for ExternalFileReferenceType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ExternalFileReference {
-    #[serde(rename = "Path")]
+    #[serde(
+        rename = "Path",
+        default,
+        deserialize_with = "deserialize_json_scalar_to_string"
+    )]
     pub path: String,
-    #[serde(rename = "Reference")]
+    #[serde(
+        rename = "Reference",
+        default,
+        deserialize_with = "deserialize_json_scalar_to_string"
+    )]
     pub reference: String,
-    #[serde(rename = "SID")]
+    #[serde(
+        rename = "SID",
+        default,
+        deserialize_with = "deserialize_json_scalar_to_string"
+    )]
     pub sid: String,
     #[serde(rename = "Type")]
     pub r#type: ExternalFileReferenceType,
@@ -81,7 +114,7 @@ impl Serialize for SolverName {
 /// Parsed `graphicalInterface.json` structure.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct GraphicalInterface {
-    #[serde(rename = "ExternalFileReferences")]
+    #[serde(rename = "ExternalFileReferences", default)]
     pub external_file_references: Vec<ExternalFileReference>,
     #[serde(rename = "PreCompExecutionDomainType")]
     pub precomp_execution_domain_type: Option<String>,
