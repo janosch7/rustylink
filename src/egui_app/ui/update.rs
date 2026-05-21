@@ -50,6 +50,20 @@ fn format_constant_value_for_display(raw: &str) -> String {
 const MIN_BLOCK_NAME_FONT_FACTOR: f32 = 0.5;
 const MIN_BLOCK_VALUE_FONT_FACTOR: f32 = 0.45;
 
+fn scaled_aux_label_font_px(
+    base_font_px: f32,
+    available_width: f32,
+    font_factor: f32,
+    max_char_width_factor: f32,
+) -> f32 {
+    let mut font_px = (base_font_px * font_factor).max(1.0);
+    let max_font_px = (available_width.max(1.0) * max_char_width_factor * 2.0).max(1.0);
+    if font_px > max_font_px {
+        font_px = max_font_px;
+    }
+    font_px
+}
+
 fn ellipsize_text_to_width(
     painter: &egui::Painter,
     text: &str,
@@ -229,7 +243,7 @@ fn resolved_line_label(
             targets
                 .iter()
                 .filter(|target| target.signals_only)
-            .find_map(|target| target.signal_name.clone())
+                .find_map(|target| target.signal_name.clone())
         })
 }
 
@@ -1985,9 +1999,7 @@ pub(crate) fn update_internal(
 
         // Label placement
         let block_label_font = 14.0f32 * font_scale;
-        let signal_font = (block_label_font * 0.5 * 1.5 * 1.5)
-            .round()
-            .max(7.0 * font_scale);
+        let base_signal_font = (block_label_font * 0.5 * 1.5 * 1.5).round();
         struct EguiMeasurer<'a> {
             painter: &'a egui::Painter,
             font: egui::FontId,
@@ -2053,6 +2065,14 @@ pub(crate) fn update_internal(
             let Some((sa, sb)) = best_seg else {
                 return;
             };
+            let seg_len = ((sb.x - sa.x).powi(2) + (sb.y - sa.y).powi(2)).sqrt();
+            let signal_font = scaled_aux_label_font_px(
+                base_signal_font,
+                seg_len,
+                app.block_name_font_factor,
+                app.block_name_max_char_width_factor,
+            );
+            let min_signal_font = (signal_font * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
             let poly: Vec<crate::label_place::Vec2f> = vec![
                 crate::label_place::Vec2f { x: sa.x, y: sa.y },
                 crate::label_place::Vec2f { x: sb.x, y: sb.y },
@@ -2181,7 +2201,7 @@ pub(crate) fn update_internal(
                     tried_wrap = true;
                 } else {
                     font_size *= 0.9;
-                    if font_size < 9.0 * font_scale {
+                    if font_size < min_signal_font {
                         break;
                     }
                 }
@@ -2329,7 +2349,6 @@ pub(crate) fn update_internal(
         let mut port_label_max_widths: HashMap<String, PortLabelMaxWidths> = HashMap::new();
         {
             let mut seen: std::collections::HashSet<(String, u32, bool, i32)> = Default::default();
-            let font_id = egui::FontId::proportional(12.0 * font_scale);
             for (sid, index, is_input, y) in &port_label_requests {
                 let key = (sid.clone(), *index, *is_input, y.round() as i32);
                 if !seen.insert(key) {
@@ -2359,11 +2378,17 @@ pub(crate) fn update_internal(
                 }
 
                 let pname = port_label_display_name(block, *index, *is_input, &cfg);
+                let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
+                let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
+                    12.0 * font_scale,
+                    avail_w,
+                    app.block_name_font_factor,
+                    app.block_name_max_char_width_factor,
+                ));
                 let galley = painter.layout_no_wrap(pname, font_id.clone(), Color32::TRANSPARENT);
                 let size = galley.size();
 
                 // Match the label drawing code: skip labels that won't be drawn due to width.
-                let avail_w = brect.width() - 8.0 * font_scale;
                 if size.x > avail_w {
                     continue;
                 }
@@ -2986,7 +3011,6 @@ pub(crate) fn update_internal(
         // Draw port labels
         let mut seen_port_labels: std::collections::HashSet<(String, u32, bool, i32)> =
             Default::default();
-        let font_id = egui::FontId::proportional(12.0 * font_scale);
         for (sid, index, is_input, y) in port_label_requests {
             let key = (sid.clone(), index, is_input, y.round() as i32);
             if !seen_port_labels.insert(key) {
@@ -3016,13 +3040,19 @@ pub(crate) fn update_internal(
             }
             let mirrored = block.block_mirror.unwrap_or(false);
             let pname = port_label_display_name(block, index, is_input, &cfg);
+            let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
+            let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
+                12.0 * font_scale,
+                avail_w,
+                app.block_name_font_factor,
+                app.block_name_max_char_width_factor,
+            ));
             let galley = ui.painter().layout_no_wrap(
                 pname,
                 font_id.clone(),
                 Color32::from_rgb(40, 40, 40),
             );
             let size = galley.size();
-            let avail_w = brect.width() - 8.0 * font_scale;
             if size.x <= avail_w {
                 let half_h = size.y * 0.5;
                 let y_min = brect.top();
@@ -3589,8 +3619,8 @@ fn print_line_based_connections(
 mod tests {
     use super::{
         dashboard_input_control_kind, line_has_testpoint, line_testpoint_marker_position,
-        manual_switch_setting_from_live_value, resolved_line_label, should_render_live_text,
-        should_use_mask_display,
+        manual_switch_setting_from_live_value, resolved_line_label, scaled_aux_label_font_px,
+        should_render_live_text, should_use_mask_display,
     };
     use crate::connection_targets::ConnectionTargetResolver;
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
@@ -3853,6 +3883,15 @@ mod tests {
 
         block.mask_display_text = Some("mask label".to_string());
         assert!(should_use_mask_display(&block));
+    }
+
+    #[test]
+    fn aux_label_font_scaling_uses_name_controls() {
+        let scaled = scaled_aux_label_font_px(12.0, 20.0, 2.0, 0.1);
+        assert_eq!(scaled, 4.0);
+
+        let uncapped = scaled_aux_label_font_px(12.0, 200.0, 0.5, 0.5);
+        assert_eq!(uncapped, 6.0);
     }
 
     fn minimal_block(name: &str, sid: &str) -> crate::model::Block {

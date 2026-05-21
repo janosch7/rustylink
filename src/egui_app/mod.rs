@@ -74,27 +74,7 @@ pub(crate) fn port_label_display_name(
         }
     };
 
-    let explicit_port_name = || {
-        block
-            .ports
-            .iter()
-            .filter(|port| {
-                port.port_type == if logical_is_input { "in" } else { "out" }
-                    && port.index.unwrap_or(0) == index
-            })
-            .find_map(|port| {
-                port.properties
-                    .get("Name")
-                    .cloned()
-                    .or_else(|| port.properties.get("name").cloned())
-                    .map(|name| name.trim().to_string())
-                    .filter(|name| !name.is_empty())
-            })
-    };
-
-    subsystem_boundary_port_name(block, index, logical_is_input)
-        .or_else(explicit_port_name)
-        .unwrap_or_else(fallback_name)
+    subsystem_boundary_port_name(block, index, logical_is_input).unwrap_or_else(fallback_name)
 }
 
 fn subsystem_boundary_port_name(
@@ -282,23 +262,43 @@ mod tests {
     }
 
     #[test]
-    fn port_labels_keep_explicit_port_names() {
-        let mut block =
-            crate::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
-        block.ports = vec![crate::model::Port {
-            port_type: "out".to_string(),
-            index: Some(1),
-            properties: indexmap::IndexMap::from_iter([(
-                "Name".to_string(),
-                "SubsystemOutput".to_string(),
-            )]),
-        }];
+    fn fixed_port_labels_ignore_port_name_overrides() {
+        let mut block = crate::editor::operations::create_default_block(
+            "ComplexToRealImag",
+            "ComplexToRealImag",
+            0,
+            0,
+            1,
+            2,
+        );
+        block.ports = vec![
+            crate::model::Port {
+                port_type: "in".to_string(),
+                index: Some(1),
+                properties: Default::default(),
+            },
+            crate::model::Port {
+                port_type: "out".to_string(),
+                index: Some(1),
+                properties: indexmap::IndexMap::from_iter([(
+                    "Name".to_string(),
+                    "VisibleSignal".to_string(),
+                )]),
+            },
+            crate::model::Port {
+                port_type: "out".to_string(),
+                index: Some(2),
+                properties: indexmap::IndexMap::from_iter([(
+                    "Name".to_string(),
+                    "OtherSignal".to_string(),
+                )]),
+            },
+        ];
 
         let cfg = crate::egui_app::get_block_type_cfg(&block);
-        assert_eq!(
-            port_label_display_name(&block, 1, false, &cfg),
-            "SubsystemOutput"
-        );
+        assert_eq!(port_label_display_name(&block, 1, true, &cfg), "Re+Im");
+        assert_eq!(port_label_display_name(&block, 1, false, &cfg), "Re");
+        assert_eq!(port_label_display_name(&block, 2, false, &cfg), "Im");
     }
 
     #[test]
@@ -310,7 +310,10 @@ mod tests {
             blocks: vec![
                 crate::model::Block {
                     name: "SubsystemInput".to_string(),
-                    properties: indexmap::IndexMap::from_iter([("Port".to_string(), "1".to_string())]),
+                    properties: indexmap::IndexMap::from_iter([(
+                        "Port".to_string(),
+                        "1".to_string(),
+                    )]),
                     ports: vec![],
                     block_type: "Inport".to_string(),
                     sid: Some("10".to_string()),
@@ -347,7 +350,10 @@ mod tests {
                 },
                 crate::model::Block {
                     name: "SubsystemOutput".to_string(),
-                    properties: indexmap::IndexMap::from_iter([("Port".to_string(), "1".to_string())]),
+                    properties: indexmap::IndexMap::from_iter([(
+                        "Port".to_string(),
+                        "1".to_string(),
+                    )]),
                     ports: vec![],
                     block_type: "Outport".to_string(),
                     sid: Some("11".to_string()),
@@ -389,7 +395,13 @@ mod tests {
         }));
 
         let cfg = crate::egui_app::get_block_type_cfg(&block);
-        assert_eq!(port_label_display_name(&block, 1, true, &cfg), "SubsystemInput");
-        assert_eq!(port_label_display_name(&block, 1, false, &cfg), "SubsystemOutput");
+        assert_eq!(
+            port_label_display_name(&block, 1, true, &cfg),
+            "SubsystemInput"
+        );
+        assert_eq!(
+            port_label_display_name(&block, 1, false, &cfg),
+            "SubsystemOutput"
+        );
     }
 }
