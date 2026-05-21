@@ -9,3 +9,4 @@ simulink
 *.log
 .venv/
 Cargo.lock
+src/egui_app/ui/update.rs

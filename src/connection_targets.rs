@@ -19,10 +19,17 @@ pub enum ConnectionTargetOrigin {
     Demux,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ConnectionTargetResolve {
+    Signal(String),
+    Index(u32),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 pub struct ConnectionTarget {
     pub path: String,
     pub signal_name: Option<String>,
+    pub resolve: Option<ConnectionTargetResolve>,
     pub element_index: Option<u32>,
     pub origin: ConnectionTargetOrigin,
     pub signals_only: bool,
@@ -42,10 +49,12 @@ impl ConnectionTarget {
 #[derive(Debug, Clone, Default)]
 struct ParentSubsystemContext {
     incoming_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
+    outgoing_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct ChildSubsystemSummary {
+    incoming_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
     outgoing_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
 }
 
@@ -107,7 +116,13 @@ impl ConnectionTargetResolver {
             &HashMap::new(),
             &mut line_targets,
         );
-        self.propagate_line_metadata_upward(system, &block_lookup, &mut line_targets);
+        self.propagate_line_metadata_upward(
+            system,
+            &block_lookup,
+            parent_ctx,
+            &HashMap::new(),
+            &mut line_targets,
+        );
 
         let mut child_summaries: HashMap<String, ChildSubsystemSummary> = HashMap::new();
         for block in &system.blocks {
@@ -115,6 +130,7 @@ impl ConnectionTargetResolver {
                 let child_path = child_system_path(system_path, &block.name);
                 let parent_ctx = ParentSubsystemContext {
                     incoming_by_port: incoming_targets_by_port(system, block, &line_targets),
+                    outgoing_by_port: outgoing_targets_by_port(system, block, &line_targets),
                 };
                 let summary = self.resolve_system(subsystem, &child_path, Some(&parent_ctx));
                 if let Some(sid) = &block.sid {
@@ -131,7 +147,13 @@ impl ConnectionTargetResolver {
             &child_summaries,
             &mut line_targets,
         );
-        self.propagate_line_metadata_upward(system, &block_lookup, &mut line_targets);
+        self.propagate_line_metadata_upward(
+            system,
+            &block_lookup,
+            parent_ctx,
+            &child_summaries,
+            &mut line_targets,
+        );
 
         for (line, targets) in system.lines.iter().zip(line_targets.iter()) {
             self.line_targets.insert(
@@ -174,6 +196,7 @@ impl ConnectionTargetResolver {
         }
 
         ChildSubsystemSummary {
+            incoming_by_port: child_incoming_targets_by_port(system, &line_targets),
             outgoing_by_port: child_outgoing_targets_by_port(
                 self,
                 system,
@@ -260,6 +283,8 @@ impl ConnectionTargetResolver {
         &self,
         system: &System,
         block_lookup: &HashMap<&str, &Block>,
+        parent_ctx: Option<&ParentSubsystemContext>,
+        child_summaries: &HashMap<String, ChildSubsystemSummary>,
         line_targets: &mut [Vec<ConnectionTarget>],
     ) {
         for _ in 0..8 {
@@ -273,13 +298,27 @@ impl ConnectionTargetResolver {
                     continue;
                 };
 
-                let propagated =
-                    self.upstream_propagated_targets(system, block, line, line_targets);
+                let propagated = self.upstream_propagated_targets(
+                    system,
+                    block,
+                    line,
+                    parent_ctx,
+                    child_summaries,
+                    line_targets,
+                );
                 if propagated.is_empty() {
                     continue;
                 }
 
-                let merged = merge_upstream_metadata(line, &line_targets[index], &propagated);
+                let merged = merge_upstream_metadata(
+                    line,
+                    &line_targets[index],
+                    &propagated,
+                    matches!(
+                        block.block_type.as_str(),
+                        "SubSystem" | "Reference" | "Outport"
+                    ),
+                );
                 if merged != line_targets[index] {
                     line_targets[index] = merged;
                     changed = true;
@@ -318,6 +357,7 @@ impl ConnectionTargetResolver {
             target.element_index = Some(src.port_index);
         }
         set_signal_name_only(&mut target, signal_name);
+        apply_line_resolve_hint(line, block_lookup, &mut target);
         vec![target]
     }
 
@@ -341,7 +381,12 @@ impl ConnectionTargetResolver {
             let signal_name = explicit_line_signal_name(incoming);
             for mut target in line_targets[line_index].clone() {
                 let next_signal_name = signal_name.clone().or(target.signal_name.clone());
+                let next_resolve_signal = signal_name
+                    .clone()
+                    .or_else(|| target.signal_name.clone())
+                    .or_else(|| resolve_signal_value(&target.resolve).map(str::to_string));
                 set_signal_name_only(&mut target, next_signal_name);
+                set_signal_resolve(&mut target, next_resolve_signal);
                 target.origin = ConnectionTargetOrigin::BusCreator;
                 targets.push(target);
             }
@@ -379,10 +424,11 @@ impl ConnectionTargetResolver {
         line_targets[line_index]
             .iter()
             .filter(|target| {
-                target
-                    .signal_name
-                    .as_deref()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(&selected_name))
+                matches_resolve_signal(target, &selected_name)
+                    || target
+                        .signal_name
+                        .as_deref()
+                        .is_some_and(|name| signal_keys_match(name, &selected_name))
             })
             .cloned()
             .map(|mut target| {
@@ -410,6 +456,7 @@ impl ConnectionTargetResolver {
             let input_index = incoming.dst.as_ref().map(|dst| dst.port_index).unwrap_or(1);
             let signal_name = explicit_line_signal_name(incoming);
             for mut target in line_targets[line_index].clone() {
+                target.resolve = Some(ConnectionTargetResolve::Index(input_index));
                 target.element_index = Some(input_index);
                 let next_signal_name = signal_name.clone().or(target.signal_name.clone());
                 set_signal_name_only(&mut target, next_signal_name);
@@ -440,9 +487,13 @@ impl ConnectionTargetResolver {
 
         line_targets[line_index]
             .iter()
-            .filter(|target| target.element_index == Some(output_index))
+            .filter(|target| {
+                target.resolve == Some(ConnectionTargetResolve::Index(output_index))
+                    || target.element_index == Some(output_index)
+            })
             .cloned()
             .map(|mut target| {
+                target.resolve = None;
                 target.element_index = None;
                 target.origin = ConnectionTargetOrigin::Demux;
                 target
@@ -455,6 +506,8 @@ impl ConnectionTargetResolver {
         system: &System,
         block: &Block,
         line: &Line,
+        parent_ctx: Option<&ParentSubsystemContext>,
+        child_summaries: &HashMap<String, ChildSubsystemSummary>,
         line_targets: &[Vec<ConnectionTarget>],
     ) -> Vec<ConnectionTarget> {
         match block.block_type.as_str() {
@@ -466,6 +519,19 @@ impl ConnectionTargetResolver {
                 .into_iter()
                 .flat_map(|(line_index, _)| line_targets[line_index].clone())
                 .collect(),
+            "Outport" => parent_ctx
+                .and_then(|ctx| ctx.outgoing_by_port.get(&boundary_port_index(block)))
+                .cloned()
+                .unwrap_or_default(),
+            "SubSystem" | "Reference" => child_summaries
+                .get(block.sid.as_deref().unwrap_or_default())
+                .and_then(|summary| {
+                    line.dst
+                        .as_ref()
+                        .and_then(|dst| summary.incoming_by_port.get(&dst.port_index))
+                })
+                .cloned()
+                .unwrap_or_default(),
             _ => Vec::new(),
         }
     }
@@ -510,9 +576,13 @@ impl ConnectionTargetResolver {
             .flat_map(|(line_index, _)| {
                 line_targets[line_index]
                     .iter()
-                    .filter(move |target| target.element_index == Some(input_index))
+                    .filter(move |target| {
+                        target.resolve == Some(ConnectionTargetResolve::Index(input_index))
+                            || target.element_index == Some(input_index)
+                    })
                     .cloned()
                     .map(|mut target| {
+                        target.resolve = None;
                         target.element_index = None;
                         target
                     })
@@ -535,6 +605,7 @@ impl ConnectionTargetResolver {
                     .iter()
                     .cloned()
                     .map(move |mut target| {
+                        target.resolve = output_index.map(ConnectionTargetResolve::Index);
                         target.element_index = output_index;
                         target
                     })
@@ -604,10 +675,11 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} index={:?} signals_only={} testpoint={}",
+            "    - path='{}' origin={:?} signal={:?} resolve={:?} index={:?} signals_only={} testpoint={}",
             target.path,
             target.origin,
             target.signal_name,
+            target.resolve,
             target.element_index,
             target.signals_only,
             target.testpoint
@@ -705,6 +777,28 @@ fn child_outgoing_targets_by_port(
     by_port
 }
 
+fn child_incoming_targets_by_port(
+    system: &System,
+    line_targets: &[Vec<ConnectionTarget>],
+) -> BTreeMap<u32, Vec<ConnectionTarget>> {
+    let mut by_port = BTreeMap::new();
+    for block in &system.blocks {
+        if block.block_type != "Inport" {
+            continue;
+        }
+
+        let port_index = boundary_port_index(block);
+        let mut targets = Vec::new();
+        for (line_index, _) in outgoing_line_indices_for_block(system, block) {
+            targets.extend(line_targets[line_index].clone());
+        }
+        if !targets.is_empty() {
+            by_port.insert(port_index, dedup_targets(targets));
+        }
+    }
+    by_port
+}
+
 fn boundary_targets(targets: &[ConnectionTarget], boundary_path: String) -> Vec<ConnectionTarget> {
     let mut combined = targets.to_vec();
     combined.extend(targets.iter().cloned().map(|mut target| {
@@ -719,6 +813,9 @@ fn apply_local_line_metadata(line: &Line, targets: &mut [ConnectionTarget]) {
     let explicit_testpoint = line_testpoint(line);
     for target in targets {
         set_signal_name_only(target, explicit_name.clone().or(target.signal_name.clone()));
+        if target.resolve.is_none() {
+            set_signal_resolve(target, explicit_name.clone());
+        }
         target.testpoint = target.testpoint || explicit_testpoint;
     }
 }
@@ -727,6 +824,7 @@ fn merge_upstream_metadata(
     line: &Line,
     current_targets: &[ConnectionTarget],
     propagated_targets: &[ConnectionTarget],
+    allow_cross_path: bool,
 ) -> Vec<ConnectionTarget> {
     let explicit_name = explicit_line_signal_name(line);
     let explicit_testpoint = line_testpoint(line);
@@ -741,6 +839,7 @@ fn merge_upstream_metadata(
                     target,
                     candidate,
                     path_counts.get(target.path.as_str()).copied().unwrap_or(0),
+                    allow_cross_path,
                 )
             })
             .collect::<Vec<_>>();
@@ -778,8 +877,20 @@ fn metadata_paths_match(
     current: &ConnectionTarget,
     propagated: &ConnectionTarget,
     same_path_count: usize,
+    allow_cross_path: bool,
 ) -> bool {
+    match (&current.resolve, &propagated.resolve) {
+        (Some(current_resolve), Some(propagated_resolve)) => {
+            return current_resolve == propagated_resolve;
+        }
+        (Some(_), None) | (None, Some(_)) if !allow_cross_path => {}
+        _ => {}
+    }
+
     if current.path != propagated.path {
+        if allow_cross_path {
+            return current.resolve.is_none() || propagated.resolve.is_none();
+        }
         return false;
     }
 
@@ -792,6 +903,66 @@ fn metadata_paths_match(
 
 fn set_signal_name_only(target: &mut ConnectionTarget, signal_name: Option<String>) {
     target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+}
+
+fn set_signal_resolve(target: &mut ConnectionTarget, signal_name: Option<String>) {
+    target.resolve = signal_name
+        .and_then(|signal_name| normalize_resolve_signal(&signal_name))
+        .map(ConnectionTargetResolve::Signal);
+}
+
+fn normalize_resolve_signal(signal_name: &str) -> Option<String> {
+    let trimmed = signal_name
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>');
+    normalized_path_segment(trimmed)
+}
+
+fn resolve_signal_value(resolve: &Option<ConnectionTargetResolve>) -> Option<&str> {
+    match resolve {
+        Some(ConnectionTargetResolve::Signal(signal_name)) => Some(signal_name.as_str()),
+        _ => None,
+    }
+}
+
+fn matches_resolve_signal(target: &ConnectionTarget, selected_name: &str) -> bool {
+    resolve_signal_value(&target.resolve)
+        .is_some_and(|signal_name| signal_keys_match(signal_name, selected_name))
+}
+
+fn signal_keys_match(left: &str, right: &str) -> bool {
+    let Some(left) = normalize_resolve_signal(left) else {
+        return false;
+    };
+    let Some(right) = normalize_resolve_signal(right) else {
+        return false;
+    };
+    left.eq_ignore_ascii_case(&right)
+}
+
+fn apply_line_resolve_hint(
+    line: &Line,
+    block_lookup: &HashMap<&str, &Block>,
+    target: &mut ConnectionTarget,
+) {
+    if let Some(signal_name) = explicit_line_signal_name(line) {
+        set_signal_resolve(target, Some(signal_name));
+        return;
+    }
+
+    if let Some(dst) = &line.dst {
+        if let Some(block) = block_lookup.get(dst.sid.as_str()) {
+            if block.block_type == "Mux" {
+                target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
+                return;
+            }
+        }
+    }
+
+    if target.resolve.is_none() && target.element_index.is_some() {
+        target.resolve = target.element_index.map(ConnectionTargetResolve::Index);
+    }
 }
 
 fn normalized_path_segment(segment: &str) -> Option<String> {
@@ -832,6 +1003,27 @@ fn outgoing_line_indices_for_block<'a>(
         .enumerate()
         .filter(|(_, line)| line.src.as_ref().is_some_and(|src| src.sid == block_sid))
         .collect()
+}
+
+fn outgoing_targets_by_port(
+    system: &System,
+    block: &Block,
+    line_targets: &[Vec<ConnectionTarget>],
+) -> BTreeMap<u32, Vec<ConnectionTarget>> {
+    let mut by_port = BTreeMap::new();
+    for (line_index, line) in outgoing_line_indices_for_block(system, block) {
+        let port_index = line.src.as_ref().map(|src| src.port_index).unwrap_or(1);
+        by_port
+            .entry(port_index)
+            .or_insert_with(Vec::new)
+            .extend(line_targets[line_index].clone());
+    }
+
+    for targets in by_port.values_mut() {
+        *targets = dedup_targets(std::mem::take(targets));
+    }
+
+    by_port
 }
 
 fn line_targets_block_sid(line: &Line, block_sid: &str) -> bool {
@@ -1000,6 +1192,7 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
         (
             String,
             Option<String>,
+            Option<ConnectionTargetResolve>,
             Option<u32>,
             ConnectionTargetOrigin,
             bool,
@@ -1011,6 +1204,7 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
         let key = (
             target.path.clone(),
             target.signal_name.clone(),
+            target.resolve.clone(),
             target.element_index,
             target.origin.clone(),
             target.signals_only,
@@ -1031,7 +1225,9 @@ fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
 mod tests {
     use indexmap::IndexMap;
 
-    use super::{ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolver};
+    use super::{
+        ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
+    };
     use crate::model::{Block, EndpointRef, Line, NameLocation, Point, Port, System, ValueKind};
 
     #[test]
@@ -1520,6 +1716,7 @@ mod tests {
         targets.push(ConnectionTarget {
             path: "model/Source Block".to_string(),
             signal_name: None,
+            resolve: None,
             element_index: None,
             origin: ConnectionTargetOrigin::SourceBlock,
             signals_only: true,
@@ -1681,6 +1878,60 @@ mod tests {
         assert_eq!(targets[0].path, "model/B");
         assert_eq!(targets[0].signal_name.as_deref(), Some("beta"));
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::BusSelector);
+        assert_eq!(
+            targets[0].resolve,
+            Some(ConnectionTargetResolve::Signal("beta".to_string()))
+        );
+    }
+
+    #[test]
+    fn bus_selector_matches_angled_line_names_against_bus_creator_inputs() {
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+                block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+                block(
+                    "BusCreator",
+                    "BusCreator",
+                    "3",
+                    vec![
+                        port("in", 1, None),
+                        port("in", 2, None),
+                        port("out", 1, None),
+                    ],
+                    None,
+                    &[],
+                ),
+                block(
+                    "BusSelector",
+                    "BusSelector",
+                    "4",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block("Display", "Sink", "5", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![
+                line("1", 1, "3", 1, Some("a")),
+                line("2", 1, "3", 2, Some("signal1")),
+                line("3", 1, "4", 1, None),
+                line("4", 1, "5", 1, Some("<signal1>")),
+            ],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &system.lines[3]);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, "model/B");
+        assert_eq!(
+            targets[0].resolve,
+            Some(ConnectionTargetResolve::Signal("signal1".to_string()))
+        );
     }
 
     #[test]
@@ -1791,6 +2042,133 @@ mod tests {
 
         assert_eq!(upstream_targets.len(), 1);
         assert_eq!(upstream_targets[0].signal_name.as_deref(), Some("local"));
+    }
+
+    #[test]
+    fn subsystem_input_line_receives_child_metadata_upstream() {
+        let mut child_wire = line("10", 1, "11", 1, Some("child_name"));
+        child_wire
+            .properties
+            .insert("TestPoint".to_string(), "on".to_string());
+        let child_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![
+                block(
+                    "Inport",
+                    "In1",
+                    "10",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+                block(
+                    "Outport",
+                    "Out1",
+                    "11",
+                    vec![port("in", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+            ],
+            lines: vec![child_wire],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block(
+                    "Constant",
+                    "Src",
+                    "1",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block(
+                    "SubSystem",
+                    "Sub",
+                    "2",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    Some(child_system),
+                    &[],
+                ),
+            ],
+            lines: vec![line("1", 1, "2", 1, None)],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&[], &system.lines[0]);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].signal_name.as_deref(), Some("child_name"));
+        assert!(targets[0].testpoint);
+    }
+
+    #[test]
+    fn subsystem_output_metadata_flows_back_into_child_outport_line() {
+        let child_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![
+                block(
+                    "Inport",
+                    "In1",
+                    "10",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+                block(
+                    "Outport",
+                    "Out1",
+                    "11",
+                    vec![port("in", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+            ],
+            lines: vec![line("10", 1, "11", 1, None)],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let mut parent_output = line("2", 1, "3", 1, Some("outer_name"));
+        parent_output
+            .properties
+            .insert("TestPoint".to_string(), "on".to_string());
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block(
+                    "SubSystem",
+                    "Sub",
+                    "2",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    Some(child_system),
+                    &[],
+                ),
+                block("Display", "Sink", "3", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![parent_output],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let child_line = system.blocks[0]
+            .subsystem
+            .as_ref()
+            .and_then(|child| child.lines.first())
+            .cloned()
+            .expect("child line");
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&["Sub".to_string()], &child_line);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].signal_name.as_deref(), Some("outer_name"));
+        assert!(targets[0].testpoint);
     }
 
     fn block(

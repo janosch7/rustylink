@@ -22,7 +22,7 @@ use crate::egui_app::state::{SubsystemApp, resolve_subsystem_by_vec_mut};
 use crate::egui_app::text::highlight_query_job;
 use crate::egui_app::{get_block_type_cfg, port_label_display_name, render_block_icon};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     let mut text = format!("{value:.6}");
@@ -234,17 +234,65 @@ fn resolved_line_label(
     line: &crate::model::Line,
     targets: &[crate::connection_targets::ConnectionTarget],
 ) -> Option<String> {
-    line.name
+    let explicit_name = line
+        .name
         .as_ref()
         .map(|name| name.trim())
         .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            targets
-                .iter()
-                .filter(|target| target.signals_only)
-                .find_map(|target| target.signal_name.clone())
+        .map(str::to_string);
+    if explicit_name.is_some() {
+        return explicit_name;
+    }
+
+    if is_bus_line(targets) || is_mux_line(targets) {
+        return None;
+    }
+
+    targets
+        .iter()
+        .filter(|target| target.signals_only)
+        .filter(|target| {
+            !matches!(
+                target.origin,
+                crate::connection_targets::ConnectionTargetOrigin::Mux
+                    | crate::connection_targets::ConnectionTargetOrigin::BusCreator
+            )
         })
+        .find_map(|target| target.signal_name.clone())
+}
+
+fn is_bus_line(targets: &[crate::connection_targets::ConnectionTarget]) -> bool {
+    let signal_resolves = targets
+        .iter()
+        .filter_map(|target| match &target.resolve {
+            Some(crate::connection_targets::ConnectionTargetResolve::Signal(signal_name)) => {
+                Some(signal_name.clone())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    signal_resolves.len() > 1
+}
+
+fn is_mux_line(targets: &[crate::connection_targets::ConnectionTarget]) -> bool {
+    targets.iter().any(|target| {
+        matches!(
+            target.origin,
+            crate::connection_targets::ConnectionTargetOrigin::Mux
+        )
+    })
+}
+
+fn line_stroke_width(
+    targets: &[crate::connection_targets::ConnectionTarget],
+    is_selected: bool,
+) -> f32 {
+    let base_width = if is_bus_line(targets) { 3.25 } else { 2.0 };
+    if is_selected {
+        base_width + 1.5
+    } else {
+        base_width
+    }
 }
 
 fn line_testpoint_marker_position(points: &[Pos2]) -> Option<Pos2> {
@@ -1602,7 +1650,7 @@ pub(crate) fn update_internal(
                 .unwrap_or(line_stroke_default.color);
             let show_testpoint_marker = line_has_testpoint(&line_targets);
             let stroke = Stroke::new(
-                if app.selected_line_indices.contains(li) { 3.5 } else { 2.0 },
+                line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
                 color,
             );
             let has_in_dst = line.dst.as_ref().map_or(false, |dst| dst.port_type == "in");
@@ -3618,11 +3666,13 @@ fn print_line_based_connections(
 #[cfg(test)]
 mod tests {
     use super::{
-        dashboard_input_control_kind, line_has_testpoint, line_testpoint_marker_position,
-        manual_switch_setting_from_live_value, resolved_line_label, scaled_aux_label_font_px,
-        should_render_live_text, should_use_mask_display,
+        dashboard_input_control_kind, line_has_testpoint, line_stroke_width,
+        line_testpoint_marker_position, manual_switch_setting_from_live_value, resolved_line_label,
+        scaled_aux_label_font_px, should_render_live_text, should_use_mask_display,
     };
-    use crate::connection_targets::ConnectionTargetResolver;
+    use crate::connection_targets::{
+        ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
+    };
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
     use crate::model::{DashboardBinding, EndpointRef, Line, Port, System};
     use eframe::egui::{Pos2, Rect};
@@ -3856,6 +3906,88 @@ mod tests {
         let resolver = ConnectionTargetResolver::new(&system);
         let targets = resolver.line_targets_for_line(&[], &line);
         assert_eq!(resolved_line_label(&line, &targets), None);
+    }
+
+    #[test]
+    fn bus_and_mux_lines_do_not_draw_propagated_fallback_names() {
+        let line = Line {
+            name: None,
+            zorder: None,
+            src: None,
+            dst: None,
+            points: Vec::new(),
+            labels: None,
+            branches: Vec::new(),
+            properties: indexmap::IndexMap::new(),
+        };
+
+        let bus_targets = vec![
+            ConnectionTarget {
+                path: "Model/A".to_string(),
+                signal_name: Some("alpha".to_string()),
+                resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
+                element_index: None,
+                origin: ConnectionTargetOrigin::BusCreator,
+                signals_only: true,
+                testpoint: false,
+            },
+            ConnectionTarget {
+                path: "Model/B".to_string(),
+                signal_name: Some("beta".to_string()),
+                resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
+                element_index: None,
+                origin: ConnectionTargetOrigin::BusCreator,
+                signals_only: true,
+                testpoint: false,
+            },
+        ];
+        let mux_targets = vec![ConnectionTarget {
+            path: "Model/A".to_string(),
+            signal_name: Some("alpha".to_string()),
+            resolve: Some(ConnectionTargetResolve::Index(1)),
+            element_index: Some(1),
+            origin: ConnectionTargetOrigin::Mux,
+            signals_only: true,
+            testpoint: false,
+        }];
+
+        assert_eq!(resolved_line_label(&line, &bus_targets), None);
+        assert_eq!(resolved_line_label(&line, &mux_targets), None);
+    }
+
+    #[test]
+    fn bus_lines_draw_thicker_than_normal_lines() {
+        let normal_targets = vec![ConnectionTarget {
+            path: "Model/A".to_string(),
+            signal_name: Some("alpha".to_string()),
+            resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
+            element_index: None,
+            origin: ConnectionTargetOrigin::SourceBlock,
+            signals_only: true,
+            testpoint: false,
+        }];
+        let bus_targets = vec![
+            ConnectionTarget {
+                path: "Model/A".to_string(),
+                signal_name: Some("alpha".to_string()),
+                resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
+                element_index: None,
+                origin: ConnectionTargetOrigin::BusCreator,
+                signals_only: true,
+                testpoint: false,
+            },
+            ConnectionTarget {
+                path: "Model/B".to_string(),
+                signal_name: Some("beta".to_string()),
+                resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
+                element_index: None,
+                origin: ConnectionTargetOrigin::BusCreator,
+                signals_only: true,
+                testpoint: false,
+            },
+        ];
+
+        assert!(line_stroke_width(&bus_targets, false) > line_stroke_width(&normal_targets, false));
     }
 
     #[test]
