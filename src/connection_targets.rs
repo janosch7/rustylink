@@ -904,29 +904,13 @@ fn metadata_paths_match(
         ) => {
             return current_index == propagated_index;
         }
-        (
-            Some(ConnectionTargetResolve::Signal(current_signal)),
-            Some(ConnectionTargetResolve::Signal(propagated_signal)),
-        ) if !allow_cross_path => {
-            if !signal_keys_match(current_signal, propagated_signal) {
-                return false;
-            }
-        }
         (Some(_), None) | (None, Some(_)) if !allow_cross_path => {}
         _ => {}
     }
 
     if current.path != propagated.path {
         if allow_cross_path {
-            return current.resolve.is_none()
-                || propagated.resolve.is_none()
-                || matches!(
-                    (&current.resolve, &propagated.resolve),
-                    (
-                        Some(ConnectionTargetResolve::Signal(_)),
-                        Some(ConnectionTargetResolve::Signal(_))
-                    )
-                );
+            return true;
         }
         return false;
     }
@@ -2272,6 +2256,69 @@ mod tests {
     }
 
     #[test]
+    fn subsystem_child_line_inherits_outer_testpoint_when_outer_line_is_unnamed() {
+        let child_system = System {
+            properties: IndexMap::new(),
+            blocks: vec![
+                block(
+                    "Inport",
+                    "In1",
+                    "10",
+                    vec![port("out", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+                block(
+                    "Outport",
+                    "Out1",
+                    "11",
+                    vec![port("in", 1, None)],
+                    None,
+                    &[("Port", "1")],
+                ),
+            ],
+            lines: vec![line("10", 1, "11", 1, Some("inner_name"))],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let mut parent_output = line("2", 1, "3", 1, None);
+        parent_output
+            .properties
+            .insert("TestPoint".to_string(), "on".to_string());
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block(
+                    "SubSystem",
+                    "Sub",
+                    "2",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    Some(child_system),
+                    &[],
+                ),
+                block("Display", "Sink", "3", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![parent_output],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let child_line = system.blocks[0]
+            .subsystem
+            .as_ref()
+            .and_then(|child| child.lines.first())
+            .cloned()
+            .expect("child line");
+        let resolver = ConnectionTargetResolver::new(&system);
+        let targets = resolver.line_targets_for_line(&["Sub".to_string()], &child_line);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].signal_name.as_deref(), Some("inner_name"));
+        assert!(targets[0].testpoint);
+    }
+
+    #[test]
     fn bus_selector_uses_default_signal_name_for_unnamed_bus_input() {
         let system = System {
             properties: props(&[("Name", "model")]),
@@ -2357,6 +2404,52 @@ mod tests {
         assert_eq!(targets.len(), 1);
         assert!(targets[0].testpoint);
         assert_eq!(targets[0].origin, ConnectionTargetOrigin::BusSelector);
+    }
+
+    #[test]
+    fn bus_selector_output_testpoint_propagates_back_to_bus_creator_inputs() {
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![
+                block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+                block(
+                    "BusCreator",
+                    "BusCreator",
+                    "2",
+                    vec![port("in", 1, None), port("out", 1, None)],
+                    None,
+                    &[],
+                ),
+                block(
+                    "BusSelector",
+                    "BusSelector",
+                    "3",
+                    vec![
+                        port("in", 1, None),
+                        testpoint_port("out", 1, Some("signal1")),
+                    ],
+                    None,
+                    &[],
+                ),
+                block("Display", "Sink", "4", vec![port("in", 1, None)], None, &[]),
+            ],
+            lines: vec![
+                line("1", 1, "2", 1, None),
+                line("2", 1, "3", 1, None),
+                line("3", 1, "4", 1, None),
+            ],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let upstream_targets = resolver.line_targets_for_line(&[], &system.lines[0]);
+        let downstream_targets = resolver.line_targets_for_line(&[], &system.lines[2]);
+
+        assert_eq!(upstream_targets.len(), 1);
+        assert!(upstream_targets[0].testpoint);
+        assert_eq!(downstream_targets.len(), 1);
+        assert!(downstream_targets[0].testpoint);
     }
 
     #[test]
