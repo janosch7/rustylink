@@ -3370,6 +3370,7 @@ fn print_dashboard_connected_signals(
             block_path,
             signal_name,
             uuid,
+            ..
         }) => {
             println!(
                 "    ← reads signal '{}' from block '{}' (uuid: {})",

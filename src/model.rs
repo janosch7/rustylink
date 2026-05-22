@@ -496,6 +496,8 @@ pub enum DashboardBinding {
         block_path: String,
         /// Name of the signal (e.g. `"Edit_signal"`).
         signal_name: String,
+        /// Optional output/logical port index encoded by Simulink for this target path.
+        target_path_index: Option<u32>,
         /// Unique identifier for this binding.
         uuid: String,
     },
@@ -614,6 +616,8 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
         .map(|(_, s)| s.as_str())
         .collect();
 
+    let target_path_index = find_numeric_field_value(&strings, &["OutputPortIndex_", "LogicalPortIndex_"]);
+
     let uuid = data_strings
         .iter()
         .copied()
@@ -643,9 +647,34 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
         Some(DashboardBinding::SignalSpec {
             block_path,
             signal_name,
+            target_path_index,
             uuid: uuid.to_string(),
         })
     }
+}
+
+fn find_numeric_field_value(strings: &[(usize, String)], field_names: &[&str]) -> Option<u32> {
+    for field_name in field_names {
+        for (idx, (field_offset, text)) in strings.iter().enumerate() {
+            if text != field_name {
+                continue;
+            }
+
+            for (value_offset, value) in strings.iter().skip(idx + 1) {
+                let distance = value_offset.saturating_sub(*field_offset);
+                if distance > 256 {
+                    break;
+                }
+                if value.chars().all(|ch| ch.is_ascii_digit()) {
+                    if let Ok(parsed) = value.parse::<u32>() {
+                        return Some(parsed);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn looks_like_uuid(value: &str) -> bool {

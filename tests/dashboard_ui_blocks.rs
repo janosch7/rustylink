@@ -903,6 +903,7 @@ fn signal_spec_bindings_have_correct_fields() {
                 block_path,
                 signal_name,
                 uuid,
+                ..
             }) => {
                 assert_eq!(
                     block_path, expected_source,
@@ -971,10 +972,12 @@ fn raw_mxarray_bytes_parse_correctly() {
         DashboardBinding::SignalSpec {
             block_path,
             signal_name,
+            target_path_index,
             ..
         } => {
             assert_eq!(block_path, "Edit");
             assert_eq!(signal_name, "Edit_signal");
+            assert!(target_path_index.is_none());
         }
         other => panic!("expected SignalSpec, got {:?}", other),
     }

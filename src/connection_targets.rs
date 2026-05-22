@@ -187,6 +187,12 @@ impl ConnectionTargetResolver {
                 let mut target =
                     ConnectionTarget::new(target_path, ConnectionTargetOrigin::DashboardBinding);
                 target.signals_only = matches!(binding, DashboardBinding::SignalSpec { .. });
+                if let DashboardBinding::SignalSpec {
+                    target_path_index, ..
+                } = binding
+                {
+                    target.element_index = *target_path_index;
+                }
                 targets.push(target);
             }
 
@@ -1613,6 +1619,7 @@ mod tests {
         signal_block.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
             block_path: "Source".to_string(),
             signal_name: "sig".to_string(),
+            target_path_index: None,
             uuid: "uuid-1".to_string(),
         });
 
