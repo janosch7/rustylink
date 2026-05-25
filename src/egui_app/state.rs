@@ -19,6 +19,19 @@ struct LayoutSnapshot {
     root: System,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveTooltipKind {
+    Signal,
+    Parameter,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveTooltipEntry {
+    pub datafield_name: String,
+    pub kind: LiveTooltipKind,
+    pub formatted_value: String,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct NavigationViewState {
     pub zoom: f32,
@@ -451,10 +464,10 @@ pub struct SubsystemApp {
     pub live_block_values: HashMap<String, crate::live_values::LiveValueEntry>,
 
     /// Live tooltips for visible blocks, keyed by block SID or fallback key.
-    pub live_block_tooltips: HashMap<String, String>,
+    pub live_block_tooltips: HashMap<String, Vec<LiveTooltipEntry>>,
 
     /// Live tooltips for visible lines, keyed by line index in the current subsystem.
-    pub live_line_tooltips: HashMap<usize, String>,
+    pub live_line_tooltips: HashMap<usize, Vec<LiveTooltipEntry>>,
 
     /// Default live-value display options used when no per-value override is provided.
     pub live_display_defaults: crate::live_values::LiveValueDisplayOptions,

@@ -1296,24 +1296,49 @@ fn dashboard_binding_source_metadata(
             signal_name,
             target_path_index,
             ..
-        } => candidates.iter().cloned().max_by_key(|candidate| {
-            let mut score = 0_u8;
-            if candidate.signal_name.as_deref() == Some(signal_name.as_str()) {
-                score += 4;
-            }
-            if matches!(
-                candidate.resolve.as_ref(),
-                Some(ConnectionTargetResolve::Signal(resolved)) if resolved == signal_name
-            ) {
-                score += 2;
-            }
-            if target_path_index.is_some() && candidate.element_index == *target_path_index {
-                score += 1;
-            }
-            score
-        }),
+        } => select_dashboard_signal_candidate(candidates, signal_name, *target_path_index),
         DashboardBinding::ParamSource { .. } => candidates.first().cloned(),
     }
+}
+
+fn select_dashboard_signal_candidate(
+    candidates: &[ConnectionTarget],
+    signal_name: &str,
+    target_path_index: Option<u32>,
+) -> Option<ConnectionTarget> {
+    if let Some(target_index) = target_path_index {
+        let indexed_candidates = candidates
+            .iter()
+            .filter(|candidate| candidate.element_index == Some(target_index))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !indexed_candidates.is_empty() {
+            return select_dashboard_signal_candidate_by_name(&indexed_candidates, signal_name)
+                .or_else(|| indexed_candidates.first().cloned());
+        }
+    }
+
+    select_dashboard_signal_candidate_by_name(candidates, signal_name)
+        .or_else(|| candidates.first().cloned())
+}
+
+fn select_dashboard_signal_candidate_by_name(
+    candidates: &[ConnectionTarget],
+    signal_name: &str,
+) -> Option<ConnectionTarget> {
+    candidates.iter().cloned().max_by_key(|candidate| {
+        let mut score = 0_u8;
+        if candidate.signal_name.as_deref() == Some(signal_name) {
+            score += 2;
+        }
+        if matches!(
+            candidate.resolve.as_ref(),
+            Some(ConnectionTargetResolve::Signal(resolved)) if resolved == signal_name
+        ) {
+            score += 1;
+        }
+        score
+    })
 }
 
 fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
@@ -1851,6 +1876,46 @@ mod tests {
             Some(ConnectionTargetResolve::Signal("im".to_string()))
         );
         assert_eq!(dashboard_target.element_index, Some(2));
+        assert!(dashboard_target.signals_only);
+    }
+
+    #[test]
+    fn dashboard_binding_target_path_index_wins_over_same_path_signal_name_match() {
+        let source = block(
+            "Demux",
+            "Source",
+            "1",
+            vec![port("out", 1, Some("requested_signal")), port("out", 2, None)],
+            None,
+            &[],
+        );
+        let mut dashboard = block("DisplayBlock", "Gauge", "2", vec![], None, &[]);
+        dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
+            block_path: "Source".to_string(),
+            signal_name: "requested_signal".to_string(),
+            target_path_index: Some(2),
+            uuid: "uuid-index-wins".to_string(),
+        });
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, dashboard],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let dashboard_targets = resolver.block_targets_for_block(&[], &system.blocks[1]);
+        let dashboard_target = dashboard_targets
+            .iter()
+            .find(|target| target.origin == ConnectionTargetOrigin::DashboardBinding)
+            .expect("dashboard target");
+
+        assert_eq!(dashboard_target.path, "model/Source");
+        assert_eq!(dashboard_target.element_index, Some(2));
+        assert_eq!(dashboard_target.signal_name, None);
+        assert_eq!(dashboard_target.resolve, None);
         assert!(dashboard_target.signals_only);
     }
 

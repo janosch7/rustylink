@@ -6,6 +6,11 @@
 
 use eframe::egui::{Pos2, Rect, Vec2};
 
+#[inline]
+pub(crate) fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
+    ((10.0 + 12.0 * font_scale.max(0.0)) * font_factor).max(1.0)
+}
+
 /// Immutable snapshot of the viewer's coordinate transform for a single frame.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug)]
@@ -303,6 +308,20 @@ mod tests {
             Vec2::ZERO,
         );
         assert!(vt.font_scale() > 0.0);
+    }
+
+    #[test]
+    fn shared_canvas_text_font_px_is_continuous() {
+        let just_below = shared_canvas_text_font_px(0.37, 0.85);
+        let just_above = shared_canvas_text_font_px(0.38, 0.85);
+        assert!(just_above > just_below);
+        assert!((just_above - just_below) < 1.0);
+    }
+
+    #[test]
+    fn shared_canvas_text_font_px_matches_default_label_basis() {
+        let px = shared_canvas_text_font_px(0.5, 0.85);
+        assert!((px - 13.6).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -998,8 +998,6 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         for (b, r_screen, bg, font_scale) in deferred_block_labels {
             let scale = font_scale.max(0.2);
 
-            let chevron_h = (8.0 * scale * 4.0).max(3.0 * 4.0);
-
             let chevron_w = (6.0 * scale * 4.0).max(2.0 * 4.0);
 
             let in_count = b.port_counts.as_ref().and_then(|p| p.ins).unwrap_or(0);
@@ -1024,9 +1022,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let max_label_w = overall_w * 0.95 * state.app.block_name_extend_factor.max(0.1);
 
-            let min_font_px = (chevron_h * 0.5).max(1.0);
-
-            let font_px = (chevron_h * state.app.block_name_font_factor).max(1.0);
+            let font_px = crate::egui_app::shared_canvas_text_font_px(
+                font_scale,
+                state.app.block_name_font_factor,
+            );
 
             let fg = if b.commented {
                 Color32::GRAY
@@ -1034,39 +1033,25 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 contrast_color(bg)
             };
 
-            let mut current_font_px = font_px;
-
-            let mut best_lines = vec![];
-
-            let mut best_font_px = current_font_px;
-
-            let mut best_line_height = 0.0;
-
-            let mut best_rects = vec![];
-
             let left = r_screen.left() - left_extra;
 
             let right = r_screen.right() + right_extra;
 
             let center_x = (left + right) * 0.5;
 
-            loop {
-                let label_font = egui::FontId::proportional(current_font_px);
+            let label_font = egui::FontId::proportional(font_px);
 
-                let line_height = (current_font_px * 1.2).max(1.0);
+            let line_height = (font_px * 1.2).max(1.0);
 
-                let lines =
-                    wrap_text_to_max_width(ui.painter(), &b.name, label_font.clone(), max_label_w);
+            let best_lines =
+                wrap_text_to_max_width(ui.painter(), &b.name, label_font.clone(), max_label_w);
 
-                if lines.is_empty() {
-                    break;
-                }
-
-                let total_h = (lines.len() as f32) * line_height;
+            if !best_lines.is_empty() {
+                let total_h = (best_lines.len() as f32) * line_height;
 
                 let mut max_w = 0.0_f32;
 
-                for l in &lines {
+                for l in &best_lines {
                     let w = ui
                         .painter()
                         .layout_no_wrap(l.to_string(), label_font.clone(), fg)
@@ -1126,51 +1111,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     }
                 }
 
-                let mut collides = false;
-
-                for r in &rects {
-                    let expanded = r.expand(2.0);
-
-                    for obs in &collidable_obstacle_rects {
-                        if expanded.intersects(*obs) {
-                            collides = true;
-
-                            break;
-                        }
-                    }
-
-                    if collides {
-                        break;
-                    }
-                }
-
-                best_lines = lines;
-
-                best_font_px = current_font_px;
-
-                best_line_height = line_height;
-
-                best_rects = rects;
-
-                if !collides {
-                    break;
-                }
-
-                let next_font_px = current_font_px * 0.9;
-
-                if next_font_px < min_font_px {
-                    break;
-                }
-
-                current_font_px = next_font_px;
-            }
-
-            if !best_lines.is_empty() {
-                collidable_obstacle_rects.extend(best_rects);
-
-                let label_font = egui::FontId::proportional(best_font_px);
-
-                let line_height = best_line_height;
+                collidable_obstacle_rects.extend(rects);
 
                 match b.name_location {
                     crate::model::NameLocation::Bottom => {

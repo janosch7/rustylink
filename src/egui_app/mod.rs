@@ -35,7 +35,8 @@ pub use render::{InteriorRendererFn, get_interior_renderer};
 pub use state::ScopePopout;
 pub use state::{
     BlockContextMenuItem, BlockDialog, BlockDialogButton, ChartView, SignalContextMenuItem,
-    NavigationViewState, SignalDialog, SignalDialogButton, SubsystemApp, SubsystemEntities,
+    LiveTooltipEntry, LiveTooltipKind, NavigationViewState, SignalDialog, SignalDialogButton,
+    SubsystemApp, SubsystemEntities,
 };
 #[cfg(feature = "dashboard")]
 pub use state::{DashboardControlEvent, DashboardControlValue};
@@ -44,6 +45,7 @@ pub use ui::zoom_controls::show_zoom_controls;
 pub use ui::{
     ClickAction, UpdateResponse, apply_update_response, show_info_windows, update, update_with_info,
 };
+pub(crate) use ui::view_transform::shared_canvas_text_font_px;
 // Expose the canonical color utility module for reuse by the editor.
 pub use ui::colors;
 

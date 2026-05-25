@@ -18,7 +18,9 @@ use crate::egui_app::render::{
     get_interior_renderer, render_manual_switch, wrap_text_to_max_width,
 };
 use crate::egui_app::state::ViewerDragState;
-use crate::egui_app::state::{SubsystemApp, resolve_subsystem_by_vec_mut};
+use crate::egui_app::state::{
+    LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
+};
 use crate::egui_app::text::highlight_query_job;
 use crate::egui_app::{get_block_type_cfg, port_label_display_name, render_block_icon};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
@@ -47,15 +49,7 @@ fn format_constant_value_for_display(raw: &str) -> String {
     }
 }
 
-const MIN_BLOCK_NAME_FONT_FACTOR: f32 = 0.5;
 const MIN_BLOCK_VALUE_FONT_FACTOR: f32 = 0.45;
-
-fn scaled_aux_label_font_px(
-    base_font_px: f32,
-    font_factor: f32,
-) -> f32 {
-    (base_font_px * font_factor).max(1.0)
-}
 
 fn ellipsize_text_to_width(
     painter: &egui::Painter,
@@ -155,7 +149,7 @@ fn paint_fitted_centered_text(
     }
 }
 
-fn show_pointer_tooltip(ui: &egui::Ui, id: egui::Id, tooltip: &str) {
+fn show_pointer_tooltip_text(ui: &egui::Ui, id: egui::Id, tooltip: &str) {
     let _ = egui::Tooltip::always_open(
         ui.ctx().clone(),
         ui.layer_id(),
@@ -165,6 +159,30 @@ fn show_pointer_tooltip(ui: &egui::Ui, id: egui::Id, tooltip: &str) {
     .gap(12.0)
     .show(|ui| {
         ui.label(tooltip);
+    });
+}
+
+fn show_pointer_tooltip_entries(ui: &egui::Ui, id: egui::Id, entries: &[LiveTooltipEntry]) {
+    let _ = egui::Tooltip::always_open(
+        ui.ctx().clone(),
+        ui.layer_id(),
+        id,
+        egui::PopupAnchor::Pointer,
+    )
+    .gap(12.0)
+    .show(|ui| {
+        for entry in entries {
+            let (suffix, suffix_color) = match entry.kind {
+                LiveTooltipKind::Signal => ("S", Color32::from_rgb(80, 200, 120)),
+                LiveTooltipKind::Parameter => ("P", Color32::from_rgb(64, 140, 255)),
+            };
+            ui.horizontal(|ui| {
+                ui.label(&entry.datafield_name);
+                ui.colored_label(suffix_color, RichText::new(suffix).strong());
+                ui.label(":");
+                ui.monospace(&entry.formatted_value);
+            });
+        }
     });
 }
 
@@ -1483,13 +1501,13 @@ pub(crate) fn update_internal(
             // overlap with it.  Actual click detection is deferred to the
             // precise per-segment distance check in the second pass.
             let resp = if app.live_mode_enabled {
-                if let Some(tooltip) = app.live_line_tooltips.get(&li) {
+                if let Some(tooltip_entries) = app.live_line_tooltips.get(&li) {
                     let resp = ui.allocate_rect(hit_rect, Sense::hover());
                     if resp.hovered() {
-                        show_pointer_tooltip(
+                        show_pointer_tooltip_entries(
                             ui,
                             app.egui_id(("line_value_tooltip", li)),
-                            tooltip,
+                            tooltip_entries,
                         );
                     }
                     resp
@@ -2084,8 +2102,8 @@ pub(crate) fn update_internal(
         }
 
         // Label placement
-        let block_label_font = 14.0f32 * font_scale;
-        let base_signal_font = (block_label_font * 0.5 * 1.5 * 1.5).round();
+        let shared_label_font_px =
+            view_transform::shared_canvas_text_font_px(font_scale, app.block_name_font_factor);
         struct EguiMeasurer<'a> {
             painter: &'a egui::Painter,
             font: egui::FontId,
@@ -2148,11 +2166,6 @@ pub(crate) fn update_internal(
             let Some((sa, sb)) = best_seg else {
                 return;
             };
-            let signal_font = scaled_aux_label_font_px(
-                base_signal_font,
-                app.block_name_font_factor,
-            );
-            let min_signal_font = (signal_font * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
             let poly: Vec<crate::label_place::Vec2f> = vec![
                 crate::label_place::Vec2f { x: sa.x, y: sa.y },
                 crate::label_place::Vec2f { x: sb.x, y: sb.y },
@@ -2196,11 +2209,10 @@ pub(crate) fn update_internal(
                 ));
             }
             let mut final_drawn = false;
-            let mut font_size = signal_font;
             let mut tried_wrap = false;
             let mut wrap_text = label_text.clone();
             while !final_drawn {
-                let font_id = egui::FontId::proportional(font_size);
+                let font_id = egui::FontId::proportional(shared_label_font_px);
                 let meas = EguiMeasurer {
                     painter: ui.painter(),
                     font: font_id.clone(),
@@ -2280,10 +2292,7 @@ pub(crate) fn update_internal(
                 if !tried_wrap && label_text.contains(' ') {
                     tried_wrap = true;
                 } else {
-                    font_size *= 0.9;
-                    if font_size < min_signal_font {
-                        break;
-                    }
+                    break;
                 }
             }
         };
@@ -2459,8 +2468,8 @@ pub(crate) fn update_internal(
 
                 let pname = port_label_display_name(block, *index, *is_input, &cfg);
                 let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
-                let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
-                    12.0 * font_scale,
+                let font_id = egui::FontId::proportional(view_transform::shared_canvas_text_font_px(
+                    font_scale,
                     app.block_name_font_factor,
                 ));
                 let galley = painter.layout_no_wrap(pname, font_id.clone(), Color32::TRANSPARENT);
@@ -2906,15 +2915,12 @@ pub(crate) fn update_internal(
             }
 
             let live_hover_key = app.live_value_key_for_block(b);
-            let tooltip = if app.live_mode_enabled {
-                app.live_block_tooltips
-                    .get(&live_hover_key)
-                    .cloned()
-                    .or(value_tooltip)
+            let live_tooltip_entries = if app.live_mode_enabled {
+                app.live_block_tooltips.get(&live_hover_key)
             } else {
-                value_tooltip
+                None
             };
-            if let Some(tooltip) = tooltip {
+            if live_tooltip_entries.is_some() || value_tooltip.is_some() {
                 let hover_key = b.sid.clone().unwrap_or_else(|| b.name.clone());
                 let resp = ui.interact(
                     *r_screen,
@@ -2922,7 +2928,11 @@ pub(crate) fn update_internal(
                     Sense::hover(),
                 );
                 if resp.hovered() {
-                    show_pointer_tooltip(ui, resp.id, &tooltip);
+                    if let Some(entries) = live_tooltip_entries {
+                        show_pointer_tooltip_entries(ui, resp.id, entries);
+                    } else if let Some(tooltip) = value_tooltip.as_deref() {
+                        show_pointer_tooltip_text(ui, resp.id, tooltip);
+                    }
                 }
             }
             // Draw block name label near the block according to NameLocation.
@@ -2932,7 +2942,6 @@ pub(crate) fn update_internal(
                 let scale = font_scale.max(0.2);
 
                 // Keep name width bounded relative to (block + chevrons) width.
-                let chevron_h = (8.0 * scale * 4.0).max(3.0 * 4.0);
                 let chevron_w = (6.0 * scale * 4.0).max(2.0 * 4.0);
 
                 let in_count = b
@@ -2956,94 +2965,67 @@ pub(crate) fn update_internal(
                 let overall_w = r_screen.width() + left_extra + right_extra;
                 let max_label_w = overall_w * 0.95 * app.block_name_extend_factor.max(0.1);
 
-                let font_px = (chevron_h * app.block_name_font_factor).max(1.0);
-                let min_font_px = (chevron_h * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
+                let font_px = view_transform::shared_canvas_text_font_px(
+                    font_scale,
+                    app.block_name_font_factor,
+                );
 
                 let color = contrast_color(ui.visuals().panel_fill);
-
-                let mut current_font_px = font_px;
-                let mut best_lines = vec![];
-                let mut best_font_px = current_font_px;
-                let mut best_line_height = 0.0;
-                let mut best_rects = vec![];
 
                 let left = r_screen.left() - left_extra;
                 let right = r_screen.right() + right_extra;
                 let center_x = (left + right) * 0.5;
 
-                loop {
-                    let font = egui::FontId::proportional(current_font_px);
-                    let line_height = (current_font_px * 1.2).max(1.0);
-                    let lines = wrap_text_to_max_width(&painter, &b.name, font.clone(), max_label_w);
-                    if lines.is_empty() {
-                        break;
-                    }
-
-                    let total_h = (lines.len() as f32) * line_height;
+                let font = egui::FontId::proportional(font_px);
+                let line_height = (font_px * 1.2).max(1.0);
+                let best_lines = wrap_text_to_max_width(&painter, &b.name, font.clone(), max_label_w);
+                if !best_lines.is_empty() {
+                    let total_h = (best_lines.len() as f32) * line_height;
                     let mut max_w = 0.0_f32;
-                    for l in &lines {
+                    for l in &best_lines {
                         let w = painter.layout_no_wrap(l.to_string(), font.clone(), color).size().x;
-                        if w > max_w { max_w = w; }
+                        if w > max_w {
+                            max_w = w;
+                        }
                     }
 
                     let mut rects = Vec::new();
                     match b.name_location {
                         crate::model::NameLocation::Bottom => {
                             let top = r_screen.bottom() + 2.0 * font_scale;
-                            rects.push(Rect::from_min_size(Pos2::new(center_x - max_w * 0.5, top), eframe::egui::vec2(max_w, total_h)));
+                            rects.push(Rect::from_min_size(
+                                Pos2::new(center_x - max_w * 0.5, top),
+                                eframe::egui::vec2(max_w, total_h),
+                            ));
                         }
                         crate::model::NameLocation::Top => {
                             let bottom = r_screen.top() - 2.0 * font_scale;
-                            rects.push(Rect::from_min_size(Pos2::new(center_x - max_w * 0.5, bottom - total_h), eframe::egui::vec2(max_w, total_h)));
+                            rects.push(Rect::from_min_size(
+                                Pos2::new(center_x - max_w * 0.5, bottom - total_h),
+                                eframe::egui::vec2(max_w, total_h),
+                            ));
                         }
                         crate::model::NameLocation::Left => {
                             let y_start = r_screen.center().y - total_h * 0.5;
                             let gap = 2.0 * font_scale;
                             let x_right = r_screen.left() - gap;
-                            rects.push(Rect::from_min_size(Pos2::new(x_right - max_w, y_start), eframe::egui::vec2(max_w, total_h)));
+                            rects.push(Rect::from_min_size(
+                                Pos2::new(x_right - max_w, y_start),
+                                eframe::egui::vec2(max_w, total_h),
+                            ));
                         }
                         crate::model::NameLocation::Right => {
                             let y_start = r_screen.center().y - total_h * 0.5;
                             let gap = 2.0 * font_scale;
                             let x_left = r_screen.right() + gap;
-                            rects.push(Rect::from_min_size(Pos2::new(x_left, y_start), eframe::egui::vec2(max_w, total_h)));
+                            rects.push(Rect::from_min_size(
+                                Pos2::new(x_left, y_start),
+                                eframe::egui::vec2(max_w, total_h),
+                            ));
                         }
                     }
 
-                    let mut collides = false;
-                    for r in &rects {
-                        let expanded = r.expand(2.0);
-                        for obs in &collidable_obstacle_rects {
-                            if expanded.intersects(*obs) {
-                                collides = true;
-                                break;
-                            }
-                        }
-                        if collides {
-                            break;
-                        }
-                    }
-
-                    best_lines = lines;
-                    best_font_px = current_font_px;
-                    best_line_height = line_height;
-                    best_rects = rects;
-
-                    if !collides {
-                        break;
-                    }
-
-                    let next_font_px = current_font_px * 0.9;
-                    if next_font_px < min_font_px {
-                        break;
-                    }
-                    current_font_px = next_font_px;
-                }
-
-                if !best_lines.is_empty() {
-                    collidable_obstacle_rects.extend(best_rects);
-                    let font = egui::FontId::proportional(best_font_px);
-                    let line_height = best_line_height;
+                    collidable_obstacle_rects.extend(rects);
 
                     match b.name_location {
                         crate::model::NameLocation::Bottom => {
@@ -3125,8 +3107,8 @@ pub(crate) fn update_internal(
             let mirrored = block.block_mirror.unwrap_or(false);
             let pname = port_label_display_name(block, index, is_input, &cfg);
             let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
-            let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
-                12.0 * font_scale,
+            let font_id = egui::FontId::proportional(view_transform::shared_canvas_text_font_px(
+                font_scale,
                 app.block_name_font_factor,
             ));
             let galley = ui.painter().layout_no_wrap(
@@ -3704,11 +3686,12 @@ mod tests {
     use super::{
         dashboard_input_control_kind, line_has_testpoint, line_stroke_width,
         line_testpoint_marker_position, manual_switch_setting_from_live_value, resolved_line_label,
-        scaled_aux_label_font_px, should_render_live_text, should_use_mask_display,
+        should_render_live_text, should_use_mask_display,
     };
     use crate::connection_targets::{
         ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
     };
+    use crate::egui_app::shared_canvas_text_font_px;
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
     use crate::model::{DashboardBinding, EndpointRef, Line, Port, System};
     use eframe::egui::{Pos2, Rect};
@@ -4056,11 +4039,11 @@ mod tests {
 
     #[test]
     fn aux_label_font_scaling_uses_name_controls() {
-        let scaled = scaled_aux_label_font_px(12.0, 2.0);
-        assert_eq!(scaled, 24.0);
+        let scaled = shared_canvas_text_font_px(0.5, 2.0);
+        assert_eq!(scaled, 32.0);
 
-        let scaled_down = scaled_aux_label_font_px(12.0, 0.5);
-        assert_eq!(scaled_down, 6.0);
+        let scaled_down = shared_canvas_text_font_px(0.5, 0.5);
+        assert_eq!(scaled_down, 8.0);
     }
 
     fn minimal_block(name: &str, sid: &str) -> crate::model::Block {
