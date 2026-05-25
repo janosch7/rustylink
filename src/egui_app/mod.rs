@@ -35,7 +35,7 @@ pub use render::{InteriorRendererFn, get_interior_renderer};
 pub use state::ScopePopout;
 pub use state::{
     BlockContextMenuItem, BlockDialog, BlockDialogButton, ChartView, SignalContextMenuItem,
-    SignalDialog, SignalDialogButton, SubsystemApp, SubsystemEntities,
+    NavigationViewState, SignalDialog, SignalDialogButton, SubsystemApp, SubsystemEntities,
 };
 #[cfg(feature = "dashboard")]
 pub use state::{DashboardControlEvent, DashboardControlValue};

@@ -2069,6 +2069,7 @@ fn render_push_button_control_widget(
         &rect,
         font_scale,
         preview_value,
+        Some(&app.live_display_defaults),
     );
     let interact_id = app.egui_id(("dashboard_live_overlay", storage_key.as_str()));
     let response = ui.interact(rect.shrink(4.0), interact_id, egui::Sense::click());
@@ -2187,6 +2188,7 @@ fn render_painted_control_widget(
         &rect,
         font_scale,
         preview_value.unwrap_or(live_value),
+        Some(&app.live_display_defaults),
     );
     if !app.live_mode_enabled {
         return false;
@@ -2340,6 +2342,7 @@ pub fn render_dashboard_widget(
         rect,
         font_scale,
         default_dashboard_live_value(block),
+        None,
     );
 }
 
@@ -2349,6 +2352,7 @@ pub fn paint_live_dashboard_value_overlay(
     rect: &Rect,
     font_scale: f32,
     live_value: f64,
+    display_options: Option<&crate::live_values::LiveValueDisplayOptions>,
 ) {
     let palette = widget_palette(block);
     if should_render_dashboard_icon(rect) {
@@ -2628,7 +2632,7 @@ pub fn paint_live_dashboard_value_overlay(
             painter.text(
                 field.center(),
                 Align2::CENTER_CENTER,
-                crate::egui_app::ui::update::format_live_scalar_csv(live_value),
+                format_dashboard_scalar_with_options(live_value, display_options),
                 if block.block_type == "DisplayBlock" {
                     egui::FontId::monospace(fsz)
                 } else {
@@ -2905,4 +2909,18 @@ pub fn paint_live_dashboard_value_overlay(
         }
         _ => {}
     }
+}
+
+fn format_dashboard_scalar_with_options(
+    value: f64,
+    display_options: Option<&crate::live_values::LiveValueDisplayOptions>,
+) -> String {
+    let mut entry = crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+        vec![1],
+        crate::live_values::LiveValueList::Float64(vec![value]),
+    ));
+    if let Some(options) = display_options {
+        entry = entry.with_display(options.clone());
+    }
+    entry.formatted_text()
 }

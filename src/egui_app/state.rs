@@ -19,6 +19,112 @@ struct LayoutSnapshot {
     root: System,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct NavigationViewState {
+    pub zoom: f32,
+    pub pan: [f32; 2],
+    pub view_bounds: Option<[f32; 4]>,
+}
+
+impl NavigationViewState {
+    fn from_runtime(zoom: f32, pan: Vec2, view_bounds: Option<egui::Rect>) -> Self {
+        Self {
+            zoom,
+            pan: [pan.x, pan.y],
+            view_bounds: view_bounds.map(|r| [r.min.x, r.min.y, r.max.x, r.max.y]),
+        }
+    }
+
+    fn to_runtime(&self) -> (f32, Vec2, Option<egui::Rect>) {
+        let view_bounds = self
+            .view_bounds
+            .map(|r| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3])));
+        (self.zoom, Vec2::new(self.pan[0], self.pan[1]), view_bounds)
+    }
+}
+
+fn authored_navigation_view_states(root: &System) -> BTreeMap<String, NavigationViewState> {
+    fn walk(
+        system: &System,
+        path: &mut Vec<String>,
+        out: &mut BTreeMap<String, NavigationViewState>,
+    ) {
+        if let Some(state) = authored_navigation_view_state(system) {
+            out.insert(SubsystemApp::path_key(path), state);
+        }
+
+        for block in &system.blocks {
+            if !matches!(block.block_type.as_str(), "SubSystem" | "Reference") {
+                continue;
+            }
+            let Some(subsystem) = block.subsystem.as_ref() else {
+                continue;
+            };
+            if subsystem.chart.is_some() {
+                continue;
+            }
+
+            path.push(block.name.clone());
+            walk(subsystem, path, out);
+            let _ = path.pop();
+        }
+    }
+
+    let mut defaults = BTreeMap::new();
+    walk(root, &mut Vec::new(), &mut defaults);
+    defaults
+}
+
+fn authored_navigation_view_state(system: &System) -> Option<NavigationViewState> {
+    let zoom = system
+        .properties
+        .get("ZoomFactor")
+        .and_then(|value| parse_authored_zoom_factor(value));
+    let view_bounds = system
+        .properties
+        .get("Location")
+        .and_then(|value| parse_authored_view_bounds(value));
+
+    if zoom.is_none() && view_bounds.is_none() {
+        return None;
+    }
+
+    Some(NavigationViewState {
+        zoom: zoom.unwrap_or(1.0),
+        pan: [0.0, 0.0],
+        view_bounds,
+    })
+}
+
+fn parse_authored_zoom_factor(raw: &str) -> Option<f32> {
+    let zoom = raw.trim().parse::<f32>().ok()?;
+    (zoom > 0.0).then_some(zoom / 100.0)
+}
+
+fn parse_authored_view_bounds(raw: &str) -> Option<[f32; 4]> {
+    let values = parse_authored_number_list(raw)?;
+    let [left, top, right, bottom] = values.as_slice() else {
+        return None;
+    };
+
+    let width = (right - left).abs();
+    let height = (bottom - top).abs();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    Some([0.0, 0.0, width, height])
+}
+
+fn parse_authored_number_list(raw: &str) -> Option<Vec<f32>> {
+    let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    let values = trimmed
+        .split(',')
+        .map(|part| part.trim().parse::<f32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    (!values.is_empty()).then_some(values)
+}
+
 fn load_source_model(
     source_path: &Utf8Path,
 ) -> anyhow::Result<(System, BTreeMap<u32, Chart>, BTreeMap<String, u32>)> {
@@ -217,6 +323,9 @@ pub struct ComputedViewCache {
     pub port_counts: std::collections::HashMap<(String, u8), u32>,
     /// Set of (SID, port_index, is_input) triples that have a connected signal.
     pub connected_ports: std::collections::HashSet<(String, u32, bool)>,
+    /// Cached connection target graph reused across paint passes until invalidated.
+    pub connection_target_resolver:
+        Option<Arc<crate::connection_targets::ConnectionTargetResolver>>,
     /// The subsystem path for which this cache was computed.
     cached_path: Vec<String>,
     /// Model generation at which the cache was computed.
@@ -231,6 +340,7 @@ impl Default for ComputedViewCache {
             line_colors: Vec::new(),
             port_counts: std::collections::HashMap::new(),
             connected_ports: std::collections::HashSet::new(),
+            connection_target_resolver: None,
             cached_path: Vec::new(),
             cached_gen: 0,
         }
@@ -307,14 +417,11 @@ pub struct SubsystemApp {
     /// A value of ~1.0 makes the text approximately the same height as the chevrons.
     pub block_name_font_factor: f32,
 
+    /// Multiplier for the horizontal width available to wrapped block names.
+    pub block_name_extend_factor: f32,
+
     /// Value-text font size factor for Constant/Display block content.
     pub block_value_font_factor: f32,
-
-    /// Maximum block-name font size factor relative to block width.
-    ///
-    /// The actual font size will be bounded so that a typical character is at most
-    /// `block_width * block_name_max_char_width_factor` pixels wide.
-    pub block_name_max_char_width_factor: f32,
 
     /// Selected block SIDs in the current view (supports multi-selection).
     pub selected_block_sids: BTreeSet<String>,
@@ -343,6 +450,12 @@ pub struct SubsystemApp {
     /// Live values for visible blocks, keyed by block SID or fallback key.
     pub live_block_values: HashMap<String, crate::live_values::LiveValueEntry>,
 
+    /// Live tooltips for visible blocks, keyed by block SID or fallback key.
+    pub live_block_tooltips: HashMap<String, String>,
+
+    /// Live tooltips for visible lines, keyed by line index in the current subsystem.
+    pub live_line_tooltips: HashMap<usize, String>,
+
     /// Default live-value display options used when no per-value override is provided.
     pub live_display_defaults: crate::live_values::LiveValueDisplayOptions,
 
@@ -357,6 +470,15 @@ pub struct SubsystemApp {
     /// This avoids recomputing the fit from edited block positions every frame,
     /// which would otherwise make moved/resized blocks appear to snap back.
     pub view_bounds: Option<egui::Rect>,
+
+    /// Per-subsystem persisted navigation state.
+    pub navigation_view_states: BTreeMap<String, NavigationViewState>,
+
+    /// Authored default navigation state loaded from the source model.
+    pub default_navigation_view_states: BTreeMap<String, NavigationViewState>,
+
+    /// Optional default zoom factors per subsystem path (for initial view only).
+    pub default_zoom_by_path: BTreeMap<String, f32>,
 
     /// Active move/resize gesture in viewer move mode.
     pub viewer_drag_state: ViewerDragState,
@@ -412,7 +534,8 @@ impl SubsystemApp {
     ) -> Self {
         let all = collect_subsystems_paths(&root);
         let original_root = root.clone();
-        Self {
+        let default_navigation_view_states = authored_navigation_view_states(&root);
+        let mut app = Self {
             instance_id: NEXT_VIEWER_INSTANCE_ID.fetch_add(1, Ordering::Relaxed),
             root,
             original_root,
@@ -439,8 +562,8 @@ impl SubsystemApp {
             block_click_handler: None,
             show_block_names_default: true,
             block_name_font_factor: 0.85,
+            block_name_extend_factor: 1.0,
             block_value_font_factor: 1.0,
-            block_name_max_char_width_factor: 1.0 / 8.0,
             selected_block_sids: BTreeSet::new(),
             selected_line_indices: BTreeSet::new(),
             move_mode_enabled: false,
@@ -448,6 +571,8 @@ impl SubsystemApp {
             live_mode_enabled: false,
             live_values: HashMap::new(),
             live_block_values: HashMap::new(),
+            live_block_tooltips: HashMap::new(),
+            live_line_tooltips: HashMap::new(),
             live_display_defaults: crate::live_values::LiveValueDisplayOptions {
                 float_decimals: crate::live_values::DEFAULT_LIVE_FLOAT_DECIMALS,
                 scientific_lower_bound: crate::live_values::LIVE_SCIENTIFIC_LOWER_BOUND,
@@ -457,6 +582,9 @@ impl SubsystemApp {
             layout_file_path: None,
             layout_dirty: false,
             view_bounds: None,
+            navigation_view_states: BTreeMap::new(),
+            default_navigation_view_states,
+            default_zoom_by_path: BTreeMap::new(),
             viewer_drag_state: ViewerDragState::None,
             view_cache: ComputedViewCache::default(),
             viewer_history: EditorHistory::new(200),
@@ -472,7 +600,14 @@ impl SubsystemApp {
             dashboard_active_pulses: BTreeSet::new(),
             #[cfg(feature = "dashboard")]
             pending_dashboard_control: None,
+        };
+        if app
+            .default_navigation_view_states
+            .contains_key(&app.current_path_key())
+        {
+            app.apply_navigation_view_state_for_current_path();
         }
+        app
     }
 
     /// Return a snapshot of entities (blocks, lines, annotations) in the current subsystem.
@@ -679,6 +814,19 @@ impl SubsystemApp {
         resolve_subsystem_by_vec_mut(&mut self.root, &self.path)
     }
 
+    pub fn connection_target_resolver(
+        &self,
+    ) -> Arc<crate::connection_targets::ConnectionTargetResolver> {
+        self.view_cache
+            .connection_target_resolver
+            .clone()
+            .unwrap_or_else(|| {
+                Arc::new(crate::connection_targets::ConnectionTargetResolver::new(
+                    &self.root,
+                ))
+            })
+    }
+
     /// Configure the default layout file path from the original model path.
     pub fn set_layout_source_path(&mut self, source_path: impl Into<Utf8PathBuf>) {
         let source_path = source_path.into();
@@ -696,13 +844,22 @@ impl SubsystemApp {
         chart_map: BTreeMap<String, u32>,
     ) {
         self.root = root;
+        self.default_navigation_view_states = authored_navigation_view_states(&self.root);
         self.charts = charts;
         self.chart_map = chart_map;
         self.all_subsystems = collect_subsystems_paths(&self.root);
         if resolve_subsystem_by_vec(&self.root, &self.path).is_none() {
             self.path.clear();
         }
+        self.navigation_view_states.clear();
         self.reset_navigation_view_state();
+        if self
+            .default_navigation_view_states
+            .contains_key(&self.current_path_key())
+            || self.default_zoom_by_path.contains_key(&self.current_path_key())
+        {
+            self.apply_navigation_view_state_for_current_path();
+        }
         self.layout_dirty = false;
         self.view_cache.invalidate();
     }
@@ -714,13 +871,114 @@ impl SubsystemApp {
         self.view_bounds = None;
         self.selected_block_sids.clear();
         self.selected_line_indices.clear();
+        self.live_line_tooltips.clear();
         self.viewer_drag_state = ViewerDragState::None;
         self.viewer_history.clear();
     }
 
     fn finish_navigation_change(&mut self) {
-        self.reset_navigation_view_state();
+        self.selected_block_sids.clear();
+        self.selected_line_indices.clear();
+        self.live_line_tooltips.clear();
+        self.viewer_drag_state = ViewerDragState::None;
+        self.viewer_history.clear();
+        self.apply_navigation_view_state_for_current_path();
         self.notify_subsystem_changed();
+    }
+
+    fn path_key(path: &[String]) -> String {
+        if path.is_empty() {
+            "<root>".to_string()
+        } else {
+            path.join("/")
+        }
+    }
+
+    pub fn apply_authored_navigation_view_state_for_current_path(&mut self) -> bool {
+        let key = self.current_path_key();
+
+        if let Some(state) = self.default_navigation_view_states.get(&key) {
+            let (zoom, pan, view_bounds) = state.to_runtime();
+            self.zoom = zoom;
+            self.pan = pan;
+            self.view_bounds = view_bounds;
+            self.reset_view = false;
+            return true;
+        }
+
+        if let Some(zoom) = self.default_zoom_by_path.get(&key).copied() {
+            self.zoom = zoom;
+            self.pan = Vec2::ZERO;
+            self.view_bounds = None;
+            self.reset_view = false;
+            return true;
+        }
+
+        false
+    }
+
+    fn current_path_key(&self) -> String {
+        Self::path_key(&self.path)
+    }
+
+    fn apply_navigation_view_state_for_current_path(&mut self) {
+        let key = self.current_path_key();
+        if let Some(state) = self.navigation_view_states.get(&key) {
+            let (zoom, pan, view_bounds) = state.to_runtime();
+            self.zoom = zoom;
+            self.pan = pan;
+            self.view_bounds = view_bounds;
+            self.reset_view = false;
+            return;
+        }
+
+        if let Some(state) = self.default_navigation_view_states.get(&key) {
+            let (zoom, pan, view_bounds) = state.to_runtime();
+            self.zoom = zoom;
+            self.pan = pan;
+            self.view_bounds = view_bounds;
+            self.reset_view = false;
+            return;
+        }
+
+        self.pan = Vec2::ZERO;
+        self.view_bounds = None;
+        self.zoom = self.default_zoom_by_path.get(&key).copied().unwrap_or(1.0);
+        self.reset_view = false;
+    }
+
+    pub fn remember_current_navigation_view_state(&mut self) {
+        let key = self.current_path_key();
+        self.navigation_view_states.insert(
+            key,
+            NavigationViewState::from_runtime(self.zoom, self.pan, self.view_bounds),
+        );
+    }
+
+    pub fn export_navigation_view_states(&self) -> BTreeMap<String, NavigationViewState> {
+        self.navigation_view_states.clone()
+    }
+
+    pub fn import_navigation_view_states(&mut self, states: BTreeMap<String, NavigationViewState>) {
+        self.navigation_view_states = states;
+        self.apply_navigation_view_state_for_current_path();
+    }
+
+    pub fn set_default_zoom_by_path(&mut self, defaults: BTreeMap<String, f32>) {
+        self.default_zoom_by_path = defaults;
+    }
+
+    pub fn set_default_navigation_view_states(
+        &mut self,
+        defaults: BTreeMap<String, NavigationViewState>,
+    ) {
+        self.default_navigation_view_states = defaults;
+        if !self
+            .navigation_view_states
+            .contains_key(&self.current_path_key())
+        {
+            self.apply_navigation_view_state_for_current_path();
+        }
     }
 
     /// Save the current viewer layout to an explicit path and remember it as
@@ -788,6 +1046,7 @@ impl SubsystemApp {
     /// Navigate one level up, if possible.
     pub fn go_up(&mut self) {
         if !self.path.is_empty() {
+            self.remember_current_navigation_view_state();
             self.path.pop();
             self.finish_navigation_change();
         }
@@ -796,6 +1055,7 @@ impl SubsystemApp {
     /// Navigate to the given path, if it resolves.
     pub fn navigate_to_path(&mut self, p: Vec<String>) {
         if resolve_subsystem_by_vec(&self.root, &p).is_some() {
+            self.remember_current_navigation_view_state();
             self.path = p;
             self.finish_navigation_change();
         }
@@ -806,6 +1066,7 @@ impl SubsystemApp {
         if b.block_type == "SubSystem" || b.block_type == "Reference" {
             if let Some(sub) = &b.subsystem {
                 if sub.chart.is_none() {
+                    self.remember_current_navigation_view_state();
                     self.path.push(b.name.clone());
                     self.finish_navigation_change();
                     return true;
@@ -990,6 +1251,69 @@ mod tests {
     }
 
     #[test]
+    fn authored_navigation_view_state_uses_system_zoom_and_location() {
+        let mut root = empty_system();
+        root.properties
+            .insert("Location".to_string(), "[431, 77, 2351, 1113]".to_string());
+        root.properties
+            .insert("ZoomFactor".to_string(), "150".to_string());
+
+        let state = authored_navigation_view_states(&root)
+            .remove("<root>")
+            .expect("root state");
+
+        assert_eq!(state.zoom, 1.5);
+        assert_eq!(state.pan, [0.0, 0.0]);
+        assert_eq!(state.view_bounds, Some([0.0, 0.0, 1920.0, 1036.0]));
+    }
+
+    #[test]
+    fn subsystem_app_applies_authored_navigation_state_on_construction() {
+        let mut root = empty_system();
+        root.properties
+            .insert("Location".to_string(), "[0, 0, 2560, 1396]".to_string());
+        root.properties
+            .insert("ZoomFactor".to_string(), "200".to_string());
+
+        let app = SubsystemApp::new(root, Vec::new(), BTreeMap::new(), BTreeMap::new());
+
+        assert_eq!(app.zoom, 2.0);
+        assert_eq!(app.pan, Vec2::ZERO);
+        assert_eq!(app.view_bounds, Some(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(2560.0, 1396.0))));
+        assert!(!app.reset_view);
+    }
+
+    #[test]
+    fn authored_navigation_reset_ignores_persisted_navigation_override() {
+        let mut root = empty_system();
+        root.properties
+            .insert("Location".to_string(), "[0, 0, 2560, 1396]".to_string());
+        root.properties
+            .insert("ZoomFactor".to_string(), "200".to_string());
+
+        let mut app = SubsystemApp::new(root, Vec::new(), BTreeMap::new(), BTreeMap::new());
+        app.navigation_view_states.insert(
+            "<root>".to_string(),
+            NavigationViewState {
+                zoom: 0.5,
+                pan: [12.0, 34.0],
+                view_bounds: None,
+            },
+        );
+
+        assert!(app.apply_authored_navigation_view_state_for_current_path());
+        assert_eq!(app.zoom, 2.0);
+        assert_eq!(app.pan, Vec2::ZERO);
+        assert_eq!(
+            app.view_bounds,
+            Some(egui::Rect::from_min_max(
+                egui::pos2(0.0, 0.0),
+                egui::pos2(2560.0, 1396.0),
+            ))
+        );
+    }
+
+    #[test]
     fn live_value_key_uses_sid_when_available() {
         let mut app =
             SubsystemApp::new(empty_system(), Vec::new(), BTreeMap::new(), BTreeMap::new());
@@ -1030,11 +1354,11 @@ mod tests {
         assert_eq!(app.path, vec!["Sub".to_string()]);
         assert_eq!(app.zoom, 1.0);
         assert_eq!(app.pan, Vec2::ZERO);
-        assert!(app.reset_view);
+        assert!(!app.reset_view);
     }
 
     #[test]
-    fn entering_and_leaving_subsystems_resets_zoom_and_pan() {
+    fn entering_and_leaving_subsystems_restores_previous_view() {
         let root = root_with_subsystem();
         let mut app = SubsystemApp::new(root.clone(), Vec::new(), BTreeMap::new(), BTreeMap::new());
         let block = root.blocks.first().cloned().expect("subsystem block");
@@ -1049,7 +1373,7 @@ mod tests {
         app.pan = Vec2::new(-2.0, 5.0);
         app.go_up();
         assert!(app.path.is_empty());
-        assert_eq!(app.zoom, 1.0);
-        assert_eq!(app.pan, Vec2::ZERO);
+        assert_eq!(app.zoom, 3.0);
+        assert_eq!(app.pan, Vec2::new(4.0, 9.0));
     }
 }

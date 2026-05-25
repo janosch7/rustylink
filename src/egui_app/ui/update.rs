@@ -52,16 +52,9 @@ const MIN_BLOCK_VALUE_FONT_FACTOR: f32 = 0.45;
 
 fn scaled_aux_label_font_px(
     base_font_px: f32,
-    available_width: f32,
     font_factor: f32,
-    max_char_width_factor: f32,
 ) -> f32 {
-    let mut font_px = (base_font_px * font_factor).max(1.0);
-    let max_font_px = (available_width.max(1.0) * max_char_width_factor * 2.0).max(1.0);
-    if font_px > max_font_px {
-        font_px = max_font_px;
-    }
-    font_px
+    (base_font_px * font_factor).max(1.0)
 }
 
 fn ellipsize_text_to_width(
@@ -162,6 +155,19 @@ fn paint_fitted_centered_text(
     }
 }
 
+fn show_pointer_tooltip(ui: &egui::Ui, id: egui::Id, tooltip: &str) {
+    let _ = egui::Tooltip::always_open(
+        ui.ctx().clone(),
+        ui.layer_id(),
+        id,
+        egui::PopupAnchor::Pointer,
+    )
+    .gap(12.0)
+    .show(|ui| {
+        ui.label(tooltip);
+    });
+}
+
 fn format_block_value_for_display(block: &crate::model::Block, raw: &str) -> String {
     if block.block_type == "Constant" {
         raw.trim().to_string()
@@ -208,14 +214,11 @@ fn toggle_manual_switch_setting(
 }
 
 fn uses_live_value_text(block_type: &str) -> bool {
-    matches!(block_type, "Display")
-        || !crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(block_type)
+    matches!(block_type, "Display" | "Constant")
 }
 
 fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
-    live_mode_enabled
-        && uses_live_value_text(block_type)
-        && !matches!(block_type, "Scope" | "DashboardScope" | "ManualSwitch")
+    live_mode_enabled && uses_live_value_text(block_type)
 }
 
 fn should_use_mask_display(block: &crate::model::Block) -> bool {
@@ -845,6 +848,7 @@ pub(crate) fn update_internal(
         // Interaction space
         let margin = 20.0;
         let avail = ui.available_rect_before_wrap();
+        let viewport_rect = avail.expand(48.0);
         let avail_size = avail.size();
         let width = (bb.width()).max(1.0);
         let height = (bb.height()).max(1.0);
@@ -898,6 +902,13 @@ pub(crate) fn update_internal(
             avail.center(),
             &mut staged_reset,
         );
+
+        if staged_reset && app.apply_authored_navigation_view_state_for_current_path() {
+            staged_zoom = app.zoom;
+            staged_pan = app.pan;
+            staged_view_bounds = app.view_bounds;
+            staged_reset = false;
+        }
 
         let to_screen = |p: Pos2| -> Pos2 {
             let s = base_scale * staged_zoom;
@@ -954,6 +965,9 @@ pub(crate) fn update_internal(
             let r_screen = Rect::from_min_max(to_screen(preview_r.min), to_screen(preview_r.max));
             if let Some(sid) = &b.sid {
                 sid_screen_map.insert(sid.clone(), r_screen);
+            }
+            if !r_screen.intersects(viewport_rect) {
+                continue;
             }
 
             let block_sense = if app.move_mode_enabled {
@@ -1321,6 +1335,9 @@ pub(crate) fn update_internal(
             let line_adjacency = line_coloring::compute_line_adjacency(&entities.lines);
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
+            app.view_cache.connection_target_resolver = Some(std::sync::Arc::new(
+                crate::connection_targets::ConnectionTargetResolver::new(&app.root),
+            ));
 
             let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
@@ -1334,6 +1351,11 @@ pub(crate) fn update_internal(
         let line_colors = app.view_cache.line_colors.clone();
         let port_counts = app.view_cache.port_counts.clone();
         let connected_ports = app.view_cache.connected_ports.clone();
+        let connection_target_resolver = app
+            .view_cache
+            .connection_target_resolver
+            .clone()
+            .expect("connection target resolver cache should be populated");
 
         let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
 
@@ -1453,11 +1475,30 @@ pub(crate) fn update_internal(
                 Pos2::new(min_x - pad, min_y - pad),
                 Pos2::new(max_x + pad, max_y + pad),
             );
+            if !hit_rect.intersects(viewport_rect) {
+                continue;
+            }
             // Use Sense::hover() instead of Sense::click() so that the
             // line bounding-box does not steal click events from blocks that
             // overlap with it.  Actual click detection is deferred to the
             // precise per-segment distance check in the second pass.
-            let resp = ui.allocate_rect(hit_rect, Sense::hover());
+            let resp = if app.live_mode_enabled {
+                if let Some(tooltip) = app.live_line_tooltips.get(&li) {
+                    let resp = ui.allocate_rect(hit_rect, Sense::hover());
+                    if resp.hovered() {
+                        show_pointer_tooltip(
+                            ui,
+                            app.egui_id(("line_value_tooltip", li)),
+                            tooltip,
+                        );
+                    }
+                    resp
+                } else {
+                    ui.allocate_rect(hit_rect, Sense::hover())
+                }
+            } else {
+                ui.allocate_rect(hit_rect, Sense::hover())
+            };
             let main_anchor = *offsets_pts.last().unwrap_or(&cur);
             line_views.push((
                 line,
@@ -1638,9 +1679,6 @@ pub(crate) fn update_internal(
                 entry.outputs.insert(*idx, *y);
             }
         }
-
-        let connection_target_resolver =
-            crate::connection_targets::ConnectionTargetResolver::new(&app.root);
 
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
             let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
@@ -2068,9 +2106,6 @@ pub(crate) fn update_internal(
             perp_offset: 2.0,
         };
         let mut placed_label_rects: Vec<Rect> = Vec::new();
-        let connection_target_resolver =
-            crate::connection_targets::ConnectionTargetResolver::new(&app.root);
-
         let mut draw_line_labels = |line: &crate::model::Line,
                                     line_targets: &[crate::connection_targets::ConnectionTarget],
                                     screen_pts: &Vec<Pos2>,
@@ -2113,12 +2148,9 @@ pub(crate) fn update_internal(
             let Some((sa, sb)) = best_seg else {
                 return;
             };
-            let seg_len = ((sb.x - sa.x).powi(2) + (sb.y - sa.y).powi(2)).sqrt();
             let signal_font = scaled_aux_label_font_px(
                 base_signal_font,
-                seg_len,
                 app.block_name_font_factor,
-                app.block_name_max_char_width_factor,
             );
             let min_signal_font = (signal_font * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
             let poly: Vec<crate::label_place::Vec2f> = vec![
@@ -2429,9 +2461,7 @@ pub(crate) fn update_internal(
                 let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
                 let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
                     12.0 * font_scale,
-                    avail_w,
                     app.block_name_font_factor,
-                    app.block_name_max_char_width_factor,
                 ));
                 let galley = painter.layout_no_wrap(pname, font_id.clone(), Color32::TRANSPARENT);
                 let size = galley.size();
@@ -2839,6 +2869,7 @@ pub(crate) fn update_internal(
                         r_screen,
                         font_scale,
                         live_val,
+                        Some(&app.live_display_defaults),
                     );
                 } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
                     renderer(&painter, b, r_screen, font_scale);
@@ -2874,14 +2905,25 @@ pub(crate) fn update_internal(
                 );
             }
 
-            if let Some(tooltip) = value_tooltip {
+            let live_hover_key = app.live_value_key_for_block(b);
+            let tooltip = if app.live_mode_enabled {
+                app.live_block_tooltips
+                    .get(&live_hover_key)
+                    .cloned()
+                    .or(value_tooltip)
+            } else {
+                value_tooltip
+            };
+            if let Some(tooltip) = tooltip {
                 let hover_key = b.sid.clone().unwrap_or_else(|| b.name.clone());
                 let resp = ui.interact(
                     *r_screen,
                     app.egui_id(("block_value_tooltip", hover_key)),
                     Sense::hover(),
                 );
-                resp.on_hover_text(tooltip);
+                if resp.hovered() {
+                    show_pointer_tooltip(ui, resp.id, &tooltip);
+                }
             }
             // Draw block name label near the block according to NameLocation.
             // Global default can be toggled; per-block override uses `Block::show_name`.
@@ -2912,15 +2954,9 @@ pub(crate) fn update_internal(
                 let left_extra = if has_left { chevron_w } else { 0.0 };
                 let right_extra = if has_right { chevron_w } else { 0.0 };
                 let overall_w = r_screen.width() + left_extra + right_extra;
-                let max_label_w = overall_w * 0.95;
+                let max_label_w = overall_w * 0.95 * app.block_name_extend_factor.max(0.1);
 
-                let mut font_px = (chevron_h * app.block_name_font_factor).max(1.0);
-
-                // Typical character width is roughly font_px * 0.5 for a proportional font.
-                let max_font_px = r_screen.width() * app.block_name_max_char_width_factor * 2.0;
-                if font_px > max_font_px {
-                    font_px = max_font_px.max(1.0);
-                }
+                let font_px = (chevron_h * app.block_name_font_factor).max(1.0);
                 let min_font_px = (chevron_h * MIN_BLOCK_NAME_FONT_FACTOR).max(1.0);
 
                 let color = contrast_color(ui.visuals().panel_fill);
@@ -3091,9 +3127,7 @@ pub(crate) fn update_internal(
             let avail_w = (brect.width() - 8.0 * font_scale).max(1.0);
             let font_id = egui::FontId::proportional(scaled_aux_label_font_px(
                 12.0 * font_scale,
-                avail_w,
                 app.block_name_font_factor,
-                app.block_name_max_char_width_factor,
             ));
             let galley = ui.painter().layout_no_wrap(
                 pname,
@@ -3193,6 +3227,7 @@ pub(crate) fn update_internal(
         app.pan = staged_pan;
         app.reset_view = staged_reset;
         app.view_bounds = staged_view_bounds;
+        app.remember_current_navigation_view_state();
     }
     if clear_search {
         app.search_query.clear();
@@ -3687,9 +3722,10 @@ mod tests {
 
     #[test]
     fn non_dashboard_display_blocks_keep_live_text() {
-        assert!(should_render_live_text(true, "Gain"));
+        assert!(!should_render_live_text(true, "Gain"));
+        assert!(should_render_live_text(true, "Constant"));
         assert!(should_render_live_text(true, "Display"));
-        assert!(!should_render_live_text(false, "Gain"));
+        assert!(!should_render_live_text(false, "Display"));
         assert!(!should_render_live_text(true, "ManualSwitch"));
     }
 
@@ -4020,11 +4056,11 @@ mod tests {
 
     #[test]
     fn aux_label_font_scaling_uses_name_controls() {
-        let scaled = scaled_aux_label_font_px(12.0, 20.0, 2.0, 0.1);
-        assert_eq!(scaled, 4.0);
+        let scaled = scaled_aux_label_font_px(12.0, 2.0);
+        assert_eq!(scaled, 24.0);
 
-        let uncapped = scaled_aux_label_font_px(12.0, 200.0, 0.5, 0.5);
-        assert_eq!(uncapped, 6.0);
+        let scaled_down = scaled_aux_label_font_px(12.0, 0.5);
+        assert_eq!(scaled_down, 6.0);
     }
 
     fn minimal_block(name: &str, sid: &str) -> crate::model::Block {

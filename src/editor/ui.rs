@@ -159,6 +159,12 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     .speed(0.05)
                     .range(0.2..=2.0),
             );
+            ui.label("Name extend");
+            ui.add(
+                egui::DragValue::new(&mut state.app.block_name_extend_factor)
+                    .speed(0.05)
+                    .range(0.2..=4.0),
+            );
 
             // Modified indicator
             if state.dirty {
@@ -1016,7 +1022,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let overall_w = r_screen.width() + left_extra + right_extra;
 
-            let max_label_w = overall_w * state.app.block_name_max_char_width_factor;
+            let max_label_w = overall_w * 0.95 * state.app.block_name_extend_factor.max(0.1);
 
             let min_font_px = (chevron_h * 0.5).max(1.0);
 

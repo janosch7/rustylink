@@ -162,6 +162,8 @@ impl ConnectionTargetResolver {
             );
         }
 
+        let mut non_dashboard_targets_by_path = index_non_dashboard_targets_by_path(&line_targets);
+
         for block in &system.blocks {
             let mut targets = Vec::new();
             targets.push(ConnectionTarget::new(
@@ -181,11 +183,29 @@ impl ConnectionTargetResolver {
                 }
             }
 
+            extend_non_dashboard_targets_by_path(&mut non_dashboard_targets_by_path, &targets);
+            extend_non_dashboard_targets_by_path(
+                &mut non_dashboard_targets_by_path,
+                &block_source_metadata_targets(self.full_block_path(system_path, &block.name), block),
+            );
+
             if let Some(binding) = &block.dashboard_binding {
                 let target_path =
                     qualify_external_path(&self.model_name, dashboard_binding_block_path(binding));
                 let mut target =
                     ConnectionTarget::new(target_path, ConnectionTargetOrigin::DashboardBinding);
+                if let Some(source_metadata) = dashboard_binding_source_metadata(
+                    binding,
+                    &target.path,
+                    &non_dashboard_targets_by_path,
+                )
+                {
+                    target.signal_name = source_metadata.signal_name;
+                    target.resolve = source_metadata.resolve;
+                    target.element_index = source_metadata.element_index;
+                    target.testpoint = source_metadata.testpoint;
+                    target.signals_only = source_metadata.signals_only;
+                }
                 target.signals_only = matches!(binding, DashboardBinding::SignalSpec { .. });
                 if let DashboardBinding::SignalSpec {
                     target_path_index, ..
@@ -1214,6 +1234,88 @@ fn dashboard_binding_block_path(binding: &DashboardBinding) -> &str {
     }
 }
 
+fn index_non_dashboard_targets_by_path(
+    line_targets: &[Vec<ConnectionTarget>],
+) -> BTreeMap<String, Vec<ConnectionTarget>> {
+    let mut by_path = BTreeMap::new();
+
+    for targets in line_targets {
+        extend_non_dashboard_targets_by_path(&mut by_path, targets);
+    }
+
+    by_path
+}
+
+fn extend_non_dashboard_targets_by_path(
+    by_path: &mut BTreeMap<String, Vec<ConnectionTarget>>,
+    targets: &[ConnectionTarget],
+) {
+    for target in targets {
+        if target.origin == ConnectionTargetOrigin::DashboardBinding {
+            continue;
+        }
+        by_path
+            .entry(target.path.clone())
+            .or_insert_with(Vec::new)
+            .push(target.clone());
+    }
+}
+
+fn block_source_metadata_targets(block_path: String, block: &Block) -> Vec<ConnectionTarget> {
+    let output_count = output_port_count(block);
+    block
+        .ports
+        .iter()
+        .filter(|port| port.port_type == "out")
+        .map(|port| {
+            let port_index = port.index.unwrap_or(1);
+            let mut target =
+                ConnectionTarget::new(block_path.clone(), ConnectionTargetOrigin::SourceBlock);
+            target.signals_only = true;
+            target.testpoint = port_testpoint(block, "out", port_index);
+            if output_count > 1 {
+                target.element_index = Some(port_index);
+            }
+            let signal_name = port_signal_name(block, "out", port_index);
+            set_signal_name_only(&mut target, signal_name.clone());
+            set_signal_resolve(&mut target, signal_name);
+            target
+        })
+        .collect()
+}
+
+fn dashboard_binding_source_metadata(
+    binding: &DashboardBinding,
+    target_path: &str,
+    targets_by_path: &BTreeMap<String, Vec<ConnectionTarget>>,
+) -> Option<ConnectionTarget> {
+    let candidates = targets_by_path.get(target_path)?;
+
+    match binding {
+        DashboardBinding::SignalSpec {
+            signal_name,
+            target_path_index,
+            ..
+        } => candidates.iter().cloned().max_by_key(|candidate| {
+            let mut score = 0_u8;
+            if candidate.signal_name.as_deref() == Some(signal_name.as_str()) {
+                score += 4;
+            }
+            if matches!(
+                candidate.resolve.as_ref(),
+                Some(ConnectionTargetResolve::Signal(resolved)) if resolved == signal_name
+            ) {
+                score += 2;
+            }
+            if target_path_index.is_some() && candidate.element_index == *target_path_index {
+                score += 1;
+            }
+            score
+        }),
+        DashboardBinding::ParamSource { .. } => candidates.first().cloned(),
+    }
+}
+
 fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
     let mut seen: BTreeMap<
         (
@@ -1652,6 +1754,104 @@ mod tests {
                 && target.path == "model/ParamBlock"
                 && !target.signals_only
         }));
+    }
+
+    #[test]
+    fn dashboard_binding_target_propagates_source_metadata() {
+        let source = block(
+            "Gain",
+            "Source",
+            "1",
+            vec![port("out", 1, Some("other")), port("out", 2, Some("src_signal"))],
+            None,
+            &[],
+        );
+        let sink = block(
+            "Terminator",
+            "Sink",
+            "2",
+            vec![port("in", 1, None)],
+            None,
+            &[],
+        );
+        let mut dashboard = block("DisplayBlock", "Gauge", "3", vec![], None, &[]);
+        dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
+            block_path: "Source".to_string(),
+            signal_name: "src_signal".to_string(),
+            target_path_index: Some(2),
+            uuid: "uuid-propagate".to_string(),
+        });
+
+        let mut line = line("1", 2, "2", 1, Some("src_signal"));
+        line.properties.insert("TestPoint".to_string(), "on".to_string());
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, sink, dashboard],
+            lines: vec![line],
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let dashboard_targets = resolver.block_targets_for_block(&[], &system.blocks[2]);
+        let dashboard_target = dashboard_targets
+            .iter()
+            .find(|target| target.origin == ConnectionTargetOrigin::DashboardBinding)
+            .expect("dashboard target");
+
+        assert_eq!(dashboard_target.path, "model/Source");
+        assert_eq!(dashboard_target.signal_name.as_deref(), Some("src_signal"));
+        assert_eq!(
+            dashboard_target.resolve,
+            Some(ConnectionTargetResolve::Signal("src_signal".to_string()))
+        );
+        assert_eq!(dashboard_target.element_index, Some(2));
+        assert!(dashboard_target.testpoint);
+        assert!(dashboard_target.signals_only);
+    }
+
+    #[test]
+    fn dashboard_binding_target_propagates_source_index_without_incoming_line() {
+        let source = block(
+            "ComplexToRealImag",
+            "Complex to Real-Imag1",
+            "1",
+            vec![port("out", 1, Some("re")), port("out", 2, Some("im"))],
+            None,
+            &[],
+        );
+        let mut dashboard = block("DisplayBlock", "Gauge", "2", vec![], None, &[]);
+        dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
+            block_path: "Complex to Real-Imag1".to_string(),
+            signal_name: "im".to_string(),
+            target_path_index: Some(2),
+            uuid: "uuid-dashboard-only".to_string(),
+        });
+
+        let system = System {
+            properties: props(&[("Name", "model")]),
+            blocks: vec![source, dashboard],
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+
+        let resolver = ConnectionTargetResolver::new(&system);
+        let dashboard_targets = resolver.block_targets_for_block(&[], &system.blocks[1]);
+        let dashboard_target = dashboard_targets
+            .iter()
+            .find(|target| target.origin == ConnectionTargetOrigin::DashboardBinding)
+            .expect("dashboard target");
+
+        assert_eq!(dashboard_target.path, "model/Complex to Real-Imag1");
+        assert_eq!(dashboard_target.signal_name.as_deref(), Some("im"));
+        assert_eq!(
+            dashboard_target.resolve,
+            Some(ConnectionTargetResolve::Signal("im".to_string()))
+        );
+        assert_eq!(dashboard_target.element_index, Some(2));
+        assert!(dashboard_target.signals_only);
     }
 
     #[test]
