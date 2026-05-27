@@ -1026,7 +1026,8 @@ fn duplicat_signal_spec_bindings_preserve_output_port_index() {
     let first_raw = archive
         .resolve_binding_persistence("bdmxdata:BindingPersistence_234")
         .expect("should resolve BindingPersistence_234");
-    let first_binding = parse_mxarray_binding(first_raw).expect("should parse first display binding");
+    let first_binding =
+        parse_mxarray_binding(first_raw).expect("should parse first display binding");
     match first_binding {
         DashboardBinding::SignalSpec {
             block_path,

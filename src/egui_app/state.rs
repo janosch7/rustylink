@@ -869,7 +869,9 @@ impl SubsystemApp {
         if self
             .default_navigation_view_states
             .contains_key(&self.current_path_key())
-            || self.default_zoom_by_path.contains_key(&self.current_path_key())
+            || self
+                .default_zoom_by_path
+                .contains_key(&self.current_path_key())
         {
             self.apply_navigation_view_state_for_current_path();
         }
@@ -1292,7 +1294,13 @@ mod tests {
 
         assert_eq!(app.zoom, 2.0);
         assert_eq!(app.pan, Vec2::ZERO);
-        assert_eq!(app.view_bounds, Some(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(2560.0, 1396.0))));
+        assert_eq!(
+            app.view_bounds,
+            Some(egui::Rect::from_min_max(
+                egui::pos2(0.0, 0.0),
+                egui::pos2(2560.0, 1396.0)
+            ))
+        );
         assert!(!app.reset_view);
     }
 

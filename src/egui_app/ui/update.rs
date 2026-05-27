@@ -3497,11 +3497,19 @@ fn is_dashboard_debug_property(name: &str) -> bool {
 
 #[cfg(feature = "dashboard")]
 fn dashboard_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
-    block
-        .dashboard_binding
-        .as_ref()
-        .and_then(|binding| app.live_values.get(binding.uuid()))
-        .and_then(crate::live_values::LiveValueEntry::first_f64)
+    let binding = block.dashboard_binding.as_ref()?;
+    let entry = app.live_values.get(binding.uuid())?;
+    let selector_index = match binding {
+        crate::model::DashboardBinding::ParamSource { target_path, .. } => {
+            target_path.element_index_zero_based()
+        }
+        crate::model::DashboardBinding::SignalSpec { .. } => None,
+    };
+
+    selector_index
+        .filter(|_| entry.value.data.len() > 1)
+        .and_then(|index| entry.f64_at(index))
+        .or_else(|| entry.first_f64())
 }
 
 #[cfg(feature = "dashboard")]
@@ -3526,7 +3534,14 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
 
 #[cfg(feature = "dashboard")]
 fn dashboard_widget_value(app: &SubsystemApp, block: &crate::model::Block) -> f64 {
-    block_live_value(app, block)
+    let dashboard_value = dashboard_live_value(app, block);
+    let block_value = app
+        .live_block_values
+        .get(&app.live_value_key_for_block(block))
+        .and_then(crate::live_values::LiveValueEntry::first_f64);
+
+    dashboard_value
+        .or(block_value)
         .or_else(|| block_live_text(app, block).and_then(|value| value.trim().parse::<f64>().ok()))
         .or_else(|| {
             block
@@ -3685,17 +3700,20 @@ fn print_line_based_connections(
 #[cfg(test)]
 mod tests {
     use super::{
-        dashboard_input_control_kind, line_has_testpoint, line_stroke_width,
-        line_testpoint_marker_position, manual_switch_setting_from_live_value, resolved_line_label,
-        should_render_live_text, should_use_mask_display,
+        dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,
+        line_has_testpoint, line_stroke_width, line_testpoint_marker_position,
+        manual_switch_setting_from_live_value, resolved_line_label, should_render_live_text,
+        should_use_mask_display,
     };
     use crate::connection_targets::{
         ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
     };
-    use crate::egui_app::shared_canvas_text_font_px;
+    use crate::egui_app::SubsystemApp;
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
+    use crate::egui_app::shared_canvas_text_font_px;
     use crate::model::{DashboardBinding, DashboardTargetPath, EndpointRef, Line, Port, System};
     use eframe::egui::{Pos2, Rect};
+    use std::collections::BTreeMap;
 
     #[test]
     fn dashboard_blocks_do_not_fall_back_to_live_text() {
@@ -3719,6 +3737,82 @@ mod tests {
         assert_eq!(manual_switch_setting_from_live_value(0.49), "0");
         assert_eq!(manual_switch_setting_from_live_value(0.5), "1");
         assert_eq!(manual_switch_setting_from_live_value(1.0), "1");
+    }
+
+    #[test]
+    fn dashboard_param_source_uses_selected_vector_element_for_live_value() {
+        let root = System {
+            properties: indexmap::IndexMap::new(),
+            blocks: Vec::new(),
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+        let mut app = SubsystemApp::new(root, Vec::new(), BTreeMap::new(), BTreeMap::new());
+        let mut block = minimal_block("Slider2", "42");
+        block.block_type = "SliderBlock".to_string();
+        block.dashboard_binding = Some(DashboardBinding::ParamSource {
+            block_path: "Model/Slider_Vector".to_string(),
+            param_name: "Value".to_string(),
+            target_path: DashboardTargetPath {
+                port_index: None,
+                sub_path: None,
+                element: None,
+                element_raw_input: Some("(2)".to_string()),
+            },
+            uuid: "uuid-slider-2".to_string(),
+        });
+        app.live_values.insert(
+            "uuid-slider-2".to_string(),
+            crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+                vec![3],
+                crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            )),
+        );
+
+        assert_eq!(dashboard_live_value(&app, &block), Some(20.0));
+        assert_eq!(dashboard_widget_value(&app, &block), 20.0);
+    }
+
+    #[test]
+    fn dashboard_widget_value_prefers_selector_aware_binding_over_block_live_value() {
+        let root = System {
+            properties: indexmap::IndexMap::new(),
+            blocks: Vec::new(),
+            lines: Vec::new(),
+            annotations: Vec::new(),
+            chart: None,
+        };
+        let mut app = SubsystemApp::new(root, Vec::new(), BTreeMap::new(), BTreeMap::new());
+        let mut block = minimal_block("Slider3", "43");
+        block.block_type = "SliderBlock".to_string();
+        block.dashboard_binding = Some(DashboardBinding::ParamSource {
+            block_path: "Model/Slider_Vector".to_string(),
+            param_name: "Value".to_string(),
+            target_path: DashboardTargetPath {
+                port_index: None,
+                sub_path: None,
+                element: None,
+                element_raw_input: Some("(3)".to_string()),
+            },
+            uuid: "uuid-slider-3".to_string(),
+        });
+        app.live_values.insert(
+            "uuid-slider-3".to_string(),
+            crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+                vec![3],
+                crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            )),
+        );
+        app.live_block_values.insert(
+            app.live_value_key_for_block(&block),
+            crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+                vec![3],
+                crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            )),
+        );
+
+        assert_eq!(dashboard_widget_value(&app, &block), 30.0);
     }
 
     #[test]

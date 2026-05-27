@@ -191,10 +191,7 @@ impl ConnectionTargetResolver {
                     set_signal_name_only(&mut target, Some(signal_name.clone()));
                 }
                 target.signals_only = matches!(binding, DashboardBinding::SignalSpec { .. });
-                if let DashboardBinding::SignalSpec {
-                    target_path, ..
-                } = binding
-                {
+                if let DashboardBinding::SignalSpec { target_path, .. } = binding {
                     target.element_index = target_path.port_index;
                 }
                 let binding_target_path = dashboard_binding_target_path(binding);
@@ -1686,7 +1683,10 @@ mod tests {
             "Gain",
             "Source",
             "1",
-            vec![port("out", 1, Some("other")), port("out", 2, Some("src_signal"))],
+            vec![
+                port("out", 1, Some("other")),
+                port("out", 2, Some("src_signal")),
+            ],
             None,
             &[],
         );
@@ -1710,7 +1710,8 @@ mod tests {
         });
 
         let mut line = line("1", 2, "2", 1, Some("src_signal"));
-        line.properties.insert("TestPoint".to_string(), "on".to_string());
+        line.properties
+            .insert("TestPoint".to_string(), "on".to_string());
 
         let system = System {
             properties: props(&[("Name", "model")]),
@@ -1800,7 +1801,10 @@ mod tests {
             "Demux",
             "Source",
             "1",
-            vec![port("out", 1, Some("requested_signal")), port("out", 2, None)],
+            vec![
+                port("out", 1, Some("requested_signal")),
+                port("out", 2, None),
+            ],
             None,
             &[],
         );
@@ -1832,7 +1836,10 @@ mod tests {
 
         assert_eq!(dashboard_target.path, "model/Source");
         assert_eq!(dashboard_target.element_index, Some(2));
-        assert_eq!(dashboard_target.signal_name.as_deref(), Some("requested_signal"));
+        assert_eq!(
+            dashboard_target.signal_name.as_deref(),
+            Some("requested_signal")
+        );
         assert_eq!(
             dashboard_target.resolve,
             Some(ConnectionTargetResolve::TargetPath(

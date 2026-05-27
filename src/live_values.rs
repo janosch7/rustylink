@@ -101,6 +101,10 @@ impl LiveValueEntry {
         self.value.first_f64()
     }
 
+    pub fn f64_at(&self, index: usize) -> Option<f64> {
+        self.value.f64_at(index)
+    }
+
     pub fn formatted_text(&self) -> String {
         self.value.format(&self.display)
     }
@@ -119,6 +123,10 @@ impl LiveValue {
 
     pub fn first_f64(&self) -> Option<f64> {
         self.data.first_f64()
+    }
+
+    pub fn f64_at(&self, index: usize) -> Option<f64> {
+        self.data.f64_at(index)
     }
 
     pub fn format(&self, display: &LiveValueDisplayOptions) -> String {
@@ -200,6 +208,29 @@ impl LiveValueList {
             LiveValueList::UInt64(values) => values.first().map(|value| *value as f64),
             LiveValueList::Float32(values) => values.first().map(|value| *value as f64),
             LiveValueList::Float64(values) => values.first().copied(),
+            LiveValueList::Complex32(_)
+            | LiveValueList::Complex64(_)
+            | LiveValueList::Bytes(_)
+            | LiveValueList::String(_) => None,
+        }
+    }
+
+    pub fn f64_at(&self, index: usize) -> Option<f64> {
+        match self {
+            LiveValueList::Empty => None,
+            LiveValueList::Bool(values) => values
+                .get(index)
+                .map(|value| if *value { 1.0 } else { 0.0 }),
+            LiveValueList::Int8(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::Int16(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::Int32(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::Int64(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::UInt8(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::UInt16(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::UInt32(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::UInt64(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::Float32(values) => values.get(index).map(|value| *value as f64),
+            LiveValueList::Float64(values) => values.get(index).copied(),
             LiveValueList::Complex32(_)
             | LiveValueList::Complex64(_)
             | LiveValueList::Bytes(_)

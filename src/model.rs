@@ -471,9 +471,7 @@ pub struct Annotation {
 /// a `BindingPersistence` property whose `Ref` attribute points to a binary
 /// `.mxarray` file inside the SLX archive. This struct holds the information
 /// extracted from that file.
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct DashboardTargetPath {
     /// Optional output/logical port index encoded by Simulink for this target path.
     pub port_index: Option<u32>,
@@ -491,6 +489,24 @@ impl DashboardTargetPath {
             && self.sub_path.is_none()
             && self.element.is_none()
             && self.element_raw_input.is_none()
+    }
+
+    pub fn element_index_zero_based(&self) -> Option<usize> {
+        if let Some(element) = self.element.as_deref() {
+            if let Ok(index) = element.trim().parse::<usize>() {
+                return Some(index);
+            }
+        }
+
+        let raw = self.element_raw_input.as_deref()?.trim();
+        let inner = raw
+            .strip_prefix('(')
+            .and_then(|value| value.strip_suffix(')'))
+            .or_else(|| {
+                raw.strip_prefix('[')
+                    .and_then(|value| value.strip_suffix(']'))
+            })?;
+        inner.trim().parse::<usize>().ok()?.checked_sub(1)
     }
 }
 
@@ -667,13 +683,17 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
 
     let target_path = DashboardTargetPath {
         port_index: None,
-        sub_path: named_text_values.get(2).map(|(_, value)| (*value).to_string()),
+        sub_path: named_text_values
+            .get(2)
+            .map(|(_, value)| (*value).to_string()),
         element: None,
         element_raw_input: None,
     };
 
     if is_param {
-        let block_path = named_text_values.first().map(|(_, value)| (*value).to_string())?;
+        let block_path = named_text_values
+            .first()
+            .map(|(_, value)| (*value).to_string())?;
         let param_name = named_text_values
             .get(1)
             .map(|(_, value)| (*value).to_string())
@@ -731,8 +751,7 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
 }
 
 fn is_meaningful_binding_text_value(value: &str) -> bool {
-    looks_like_uuid(value)
-        || (value.len() > 1 && value.chars().any(|ch| ch.is_ascii_alphabetic()))
+    looks_like_uuid(value) || (value.len() > 1 && value.chars().any(|ch| ch.is_ascii_alphabetic()))
 }
 
 fn is_meaningful_binding_selector_value(value: &str) -> bool {
@@ -799,11 +818,7 @@ fn find_binary_signal_port_index(
         let value_bytes = data.get(offset + scalar_header.len()..offset + 16)?;
         let value = f64::from_le_bytes(value_bytes.try_into().ok()?);
         let rounded = value.round();
-        if value.is_finite()
-            && value >= 1.0
-            && value <= 64.0
-            && (value - rounded).abs() <= 1e-9
-        {
+        if value.is_finite() && value >= 1.0 && value <= 64.0 && (value - rounded).abs() <= 1e-9 {
             return Some(rounded as u32 - 1);
         }
     }
