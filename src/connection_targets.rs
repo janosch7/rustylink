@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Block, Branch, DashboardBinding, Line, System};
+use crate::model::{Block, Branch, DashboardBinding, DashboardTargetPath, Line, System};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
@@ -23,6 +23,7 @@ pub enum ConnectionTargetOrigin {
 pub enum ConnectionTargetResolve {
     Signal(String),
     Index(u32),
+    TargetPath(DashboardTargetPath),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
@@ -162,8 +163,6 @@ impl ConnectionTargetResolver {
             );
         }
 
-        let mut non_dashboard_targets_by_path = index_non_dashboard_targets_by_path(&line_targets);
-
         for block in &system.blocks {
             let mut targets = Vec::new();
             targets.push(ConnectionTarget::new(
@@ -183,35 +182,26 @@ impl ConnectionTargetResolver {
                 }
             }
 
-            extend_non_dashboard_targets_by_path(&mut non_dashboard_targets_by_path, &targets);
-            extend_non_dashboard_targets_by_path(
-                &mut non_dashboard_targets_by_path,
-                &block_source_metadata_targets(self.full_block_path(system_path, &block.name), block),
-            );
-
             if let Some(binding) = &block.dashboard_binding {
                 let target_path =
                     qualify_external_path(&self.model_name, dashboard_binding_block_path(binding));
                 let mut target =
                     ConnectionTarget::new(target_path, ConnectionTargetOrigin::DashboardBinding);
-                if let Some(source_metadata) = dashboard_binding_source_metadata(
-                    binding,
-                    &target.path,
-                    &non_dashboard_targets_by_path,
-                )
-                {
-                    target.signal_name = source_metadata.signal_name;
-                    target.resolve = source_metadata.resolve;
-                    target.element_index = source_metadata.element_index;
-                    target.testpoint = source_metadata.testpoint;
-                    target.signals_only = source_metadata.signals_only;
+                if let DashboardBinding::SignalSpec { signal_name, .. } = binding {
+                    set_signal_name_only(&mut target, Some(signal_name.clone()));
                 }
                 target.signals_only = matches!(binding, DashboardBinding::SignalSpec { .. });
                 if let DashboardBinding::SignalSpec {
-                    target_path_index, ..
+                    target_path, ..
                 } = binding
                 {
-                    target.element_index = *target_path_index;
+                    target.element_index = target_path.port_index;
+                }
+                let binding_target_path = dashboard_binding_target_path(binding);
+                if !binding_target_path.is_empty() {
+                    target.resolve = Some(ConnectionTargetResolve::TargetPath(
+                        binding_target_path.clone(),
+                    ));
                 }
                 targets.push(target);
             }
@@ -923,11 +913,11 @@ fn metadata_paths_match(
     same_path_count: usize,
     allow_cross_path: bool,
 ) -> bool {
-    match (&current.resolve, &propagated.resolve) {
-        (
-            Some(ConnectionTargetResolve::Index(current_index)),
-            Some(ConnectionTargetResolve::Index(propagated_index)),
-        ) => {
+    match (
+        resolve_index_value(&current.resolve),
+        resolve_index_value(&propagated.resolve),
+    ) {
+        (Some(current_index), Some(propagated_index)) => {
             return current_index == propagated_index;
         }
         (Some(_), None) | (None, Some(_)) if !allow_cross_path => {}
@@ -969,6 +959,14 @@ fn normalize_resolve_signal(signal_name: &str) -> Option<String> {
 fn resolve_signal_value(resolve: &Option<ConnectionTargetResolve>) -> Option<&str> {
     match resolve {
         Some(ConnectionTargetResolve::Signal(signal_name)) => Some(signal_name.as_str()),
+        _ => None,
+    }
+}
+
+fn resolve_index_value(resolve: &Option<ConnectionTargetResolve>) -> Option<u32> {
+    match resolve {
+        Some(ConnectionTargetResolve::Index(index)) => Some(*index),
+        Some(ConnectionTargetResolve::TargetPath(target_path)) => target_path.port_index,
         _ => None,
     }
 }
@@ -1234,111 +1232,11 @@ fn dashboard_binding_block_path(binding: &DashboardBinding) -> &str {
     }
 }
 
-fn index_non_dashboard_targets_by_path(
-    line_targets: &[Vec<ConnectionTarget>],
-) -> BTreeMap<String, Vec<ConnectionTarget>> {
-    let mut by_path = BTreeMap::new();
-
-    for targets in line_targets {
-        extend_non_dashboard_targets_by_path(&mut by_path, targets);
-    }
-
-    by_path
-}
-
-fn extend_non_dashboard_targets_by_path(
-    by_path: &mut BTreeMap<String, Vec<ConnectionTarget>>,
-    targets: &[ConnectionTarget],
-) {
-    for target in targets {
-        if target.origin == ConnectionTargetOrigin::DashboardBinding {
-            continue;
-        }
-        by_path
-            .entry(target.path.clone())
-            .or_insert_with(Vec::new)
-            .push(target.clone());
-    }
-}
-
-fn block_source_metadata_targets(block_path: String, block: &Block) -> Vec<ConnectionTarget> {
-    let output_count = output_port_count(block);
-    block
-        .ports
-        .iter()
-        .filter(|port| port.port_type == "out")
-        .map(|port| {
-            let port_index = port.index.unwrap_or(1);
-            let mut target =
-                ConnectionTarget::new(block_path.clone(), ConnectionTargetOrigin::SourceBlock);
-            target.signals_only = true;
-            target.testpoint = port_testpoint(block, "out", port_index);
-            if output_count > 1 {
-                target.element_index = Some(port_index);
-            }
-            let signal_name = port_signal_name(block, "out", port_index);
-            set_signal_name_only(&mut target, signal_name.clone());
-            set_signal_resolve(&mut target, signal_name);
-            target
-        })
-        .collect()
-}
-
-fn dashboard_binding_source_metadata(
-    binding: &DashboardBinding,
-    target_path: &str,
-    targets_by_path: &BTreeMap<String, Vec<ConnectionTarget>>,
-) -> Option<ConnectionTarget> {
-    let candidates = targets_by_path.get(target_path)?;
-
+fn dashboard_binding_target_path(binding: &DashboardBinding) -> &DashboardTargetPath {
     match binding {
-        DashboardBinding::SignalSpec {
-            signal_name,
-            target_path_index,
-            ..
-        } => select_dashboard_signal_candidate(candidates, signal_name, *target_path_index),
-        DashboardBinding::ParamSource { .. } => candidates.first().cloned(),
+        DashboardBinding::ParamSource { target_path, .. } => target_path,
+        DashboardBinding::SignalSpec { target_path, .. } => target_path,
     }
-}
-
-fn select_dashboard_signal_candidate(
-    candidates: &[ConnectionTarget],
-    signal_name: &str,
-    target_path_index: Option<u32>,
-) -> Option<ConnectionTarget> {
-    if let Some(target_index) = target_path_index {
-        let indexed_candidates = candidates
-            .iter()
-            .filter(|candidate| candidate.element_index == Some(target_index))
-            .cloned()
-            .collect::<Vec<_>>();
-        if !indexed_candidates.is_empty() {
-            return select_dashboard_signal_candidate_by_name(&indexed_candidates, signal_name)
-                .or_else(|| indexed_candidates.first().cloned());
-        }
-    }
-
-    select_dashboard_signal_candidate_by_name(candidates, signal_name)
-        .or_else(|| candidates.first().cloned())
-}
-
-fn select_dashboard_signal_candidate_by_name(
-    candidates: &[ConnectionTarget],
-    signal_name: &str,
-) -> Option<ConnectionTarget> {
-    candidates.iter().cloned().max_by_key(|candidate| {
-        let mut score = 0_u8;
-        if candidate.signal_name.as_deref() == Some(signal_name) {
-            score += 2;
-        }
-        if matches!(
-            candidate.resolve.as_ref(),
-            Some(ConnectionTargetResolve::Signal(resolved)) if resolved == signal_name
-        ) {
-            score += 1;
-        }
-        score
-    })
 }
 
 fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
@@ -1746,7 +1644,7 @@ mod tests {
         signal_block.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
             block_path: "Source".to_string(),
             signal_name: "sig".to_string(),
-            target_path_index: None,
+            target_path: crate::model::DashboardTargetPath::default(),
             uuid: "uuid-1".to_string(),
         });
 
@@ -1754,6 +1652,7 @@ mod tests {
         param_block.dashboard_binding = Some(crate::model::DashboardBinding::ParamSource {
             block_path: "ParamBlock".to_string(),
             param_name: "Value".to_string(),
+            target_path: crate::model::DashboardTargetPath::default(),
             uuid: "uuid-2".to_string(),
         });
 
@@ -1782,7 +1681,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_binding_target_propagates_source_metadata() {
+    fn dashboard_binding_target_uses_binding_payload() {
         let source = block(
             "Gain",
             "Source",
@@ -1803,7 +1702,10 @@ mod tests {
         dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
             block_path: "Source".to_string(),
             signal_name: "src_signal".to_string(),
-            target_path_index: Some(2),
+            target_path: crate::model::DashboardTargetPath {
+                port_index: Some(2),
+                ..Default::default()
+            },
             uuid: "uuid-propagate".to_string(),
         });
 
@@ -1829,10 +1731,15 @@ mod tests {
         assert_eq!(dashboard_target.signal_name.as_deref(), Some("src_signal"));
         assert_eq!(
             dashboard_target.resolve,
-            Some(ConnectionTargetResolve::Signal("src_signal".to_string()))
+            Some(ConnectionTargetResolve::TargetPath(
+                crate::model::DashboardTargetPath {
+                    port_index: Some(2),
+                    ..Default::default()
+                }
+            ))
         );
         assert_eq!(dashboard_target.element_index, Some(2));
-        assert!(dashboard_target.testpoint);
+        assert!(!dashboard_target.testpoint);
         assert!(dashboard_target.signals_only);
     }
 
@@ -1850,7 +1757,10 @@ mod tests {
         dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
             block_path: "Complex to Real-Imag1".to_string(),
             signal_name: "im".to_string(),
-            target_path_index: Some(2),
+            target_path: crate::model::DashboardTargetPath {
+                port_index: Some(2),
+                ..Default::default()
+            },
             uuid: "uuid-dashboard-only".to_string(),
         });
 
@@ -1873,7 +1783,12 @@ mod tests {
         assert_eq!(dashboard_target.signal_name.as_deref(), Some("im"));
         assert_eq!(
             dashboard_target.resolve,
-            Some(ConnectionTargetResolve::Signal("im".to_string()))
+            Some(ConnectionTargetResolve::TargetPath(
+                crate::model::DashboardTargetPath {
+                    port_index: Some(2),
+                    ..Default::default()
+                }
+            ))
         );
         assert_eq!(dashboard_target.element_index, Some(2));
         assert!(dashboard_target.signals_only);
@@ -1893,7 +1808,10 @@ mod tests {
         dashboard.dashboard_binding = Some(crate::model::DashboardBinding::SignalSpec {
             block_path: "Source".to_string(),
             signal_name: "requested_signal".to_string(),
-            target_path_index: Some(2),
+            target_path: crate::model::DashboardTargetPath {
+                port_index: Some(2),
+                ..Default::default()
+            },
             uuid: "uuid-index-wins".to_string(),
         });
 
@@ -1914,8 +1832,16 @@ mod tests {
 
         assert_eq!(dashboard_target.path, "model/Source");
         assert_eq!(dashboard_target.element_index, Some(2));
-        assert_eq!(dashboard_target.signal_name, None);
-        assert_eq!(dashboard_target.resolve, None);
+        assert_eq!(dashboard_target.signal_name.as_deref(), Some("requested_signal"));
+        assert_eq!(
+            dashboard_target.resolve,
+            Some(ConnectionTargetResolve::TargetPath(
+                crate::model::DashboardTargetPath {
+                    port_index: Some(2),
+                    ..Default::default()
+                }
+            ))
+        );
         assert!(dashboard_target.signals_only);
     }
 

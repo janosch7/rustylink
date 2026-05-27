@@ -10,7 +10,9 @@
 use rustylink::builtin_libraries::simulink_dashboard::{
     DASHBOARD_BLOCK_TYPES, is_dashboard_block_type, is_simulink_dashboard_name,
 };
-use rustylink::model::{DashboardBinding, SlxArchive, parse_mxarray_binding, parse_rels_xml};
+use rustylink::model::{
+    DashboardBinding, DashboardTargetPath, SlxArchive, parse_mxarray_binding, parse_rels_xml,
+};
 use rustylink::parser::{SimulinkParser, ZipSource};
 
 // ── is_dashboard_block_type ────────────────────────────────────────────────
@@ -845,6 +847,7 @@ fn param_source_bindings_have_correct_fields() {
                 block_path,
                 param_name,
                 uuid,
+                ..
             }) => {
                 assert_eq!(
                     block_path, expected_target,
@@ -972,14 +975,43 @@ fn raw_mxarray_bytes_parse_correctly() {
         DashboardBinding::SignalSpec {
             block_path,
             signal_name,
-            target_path_index,
+            target_path,
             ..
         } => {
             assert_eq!(block_path, "Edit");
             assert_eq!(signal_name, "Edit_signal");
-            assert!(target_path_index.is_none());
+            assert_eq!(target_path, DashboardTargetPath::default());
         }
         other => panic!("expected SignalSpec, got {:?}", other),
+    }
+}
+
+#[test]
+fn real_checkbox_binding_preserves_partial_element_selector() {
+    let path = std::path::Path::new("Simulink_UI_Test.slx");
+    if !path.exists() {
+        return;
+    }
+    let archive = SlxArchive::from_file(path).expect("failed to load SLX");
+
+    let raw = archive
+        .resolve_binding_persistence("bdmxdata:BindingPersistence_205")
+        .expect("should resolve BindingPersistence_205");
+    let binding = parse_mxarray_binding(raw).expect("should parse partial checkbox binding");
+
+    match binding {
+        DashboardBinding::ParamSource {
+            block_path,
+            param_name,
+            target_path,
+            ..
+        } => {
+            assert_eq!(block_path, "Constant");
+            assert_eq!(param_name, "Value");
+            assert_eq!(target_path.element.as_deref(), Some("0"));
+            assert_eq!(target_path.element_raw_input.as_deref(), Some("(2)"));
+        }
+        other => panic!("expected ParamSource, got {:?}", other),
     }
 }
 
@@ -1003,13 +1035,59 @@ fn short_param_source_layout_parses_correctly() {
         DashboardBinding::ParamSource {
             block_path,
             param_name,
+            target_path,
             uuid,
         } => {
             assert_eq!(block_path, "Knob");
             assert_eq!(param_name, "Value");
+            assert_eq!(target_path, DashboardTargetPath::default());
             assert_eq!(uuid, "076029b3-3965-448f-85fd-7ebfe7ef9d37");
         }
         other => panic!("expected ParamSource, got {:?}", other),
+    }
+}
+
+#[test]
+fn signal_spec_target_path_metadata_is_preserved() {
+    let mut raw = vec![0_u8; 1700];
+    for (offset, text) in [
+        (104_usize, "Simulink.HMI.SignalSpecification"),
+        (560, "UUID"),
+        (565, "BlockPath_"),
+        (581, "SignalName_"),
+        (626, "SubPath_"),
+        (635, "OutputPortIndex_"),
+        (1048, "7fa7aff0-85ea-442c-a32f-7881a454f46d"),
+        (1140, "Edit"),
+        (1256, "Edit_signal"),
+        (1360, "vector[3]"),
+        (1450, "4"),
+    ] {
+        raw[offset..offset + text.len()].copy_from_slice(text.as_bytes());
+    }
+
+    let binding = parse_mxarray_binding(&raw).expect("should parse SignalSpecification layout");
+    match binding {
+        DashboardBinding::SignalSpec {
+            block_path,
+            signal_name,
+            target_path,
+            uuid,
+        } => {
+            assert_eq!(block_path, "Edit");
+            assert_eq!(signal_name, "Edit_signal");
+            assert_eq!(uuid, "7fa7aff0-85ea-442c-a32f-7881a454f46d");
+            assert_eq!(
+                target_path,
+                DashboardTargetPath {
+                    port_index: Some(4),
+                    sub_path: Some("vector[3]".to_string()),
+                    element: None,
+                    element_raw_input: None,
+                }
+            );
+        }
+        other => panic!("expected SignalSpec, got {:?}", other),
     }
 }
 

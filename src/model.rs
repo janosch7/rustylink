@@ -471,6 +471,29 @@ pub struct Annotation {
 /// a `BindingPersistence` property whose `Ref` attribute points to a binary
 /// `.mxarray` file inside the SLX archive. This struct holds the information
 /// extracted from that file.
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct DashboardTargetPath {
+    /// Optional output/logical port index encoded by Simulink for this target path.
+    pub port_index: Option<u32>,
+    /// Optional nested path or member selector stored by Simulink.
+    pub sub_path: Option<String>,
+    /// Optional element selector for parameter bindings.
+    pub element: Option<String>,
+    /// Optional raw array/vector selector string as stored by Simulink.
+    pub element_raw_input: Option<String>,
+}
+
+impl DashboardTargetPath {
+    pub fn is_empty(&self) -> bool {
+        self.port_index.is_none()
+            && self.sub_path.is_none()
+            && self.element.is_none()
+            && self.element_raw_input.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DashboardBinding {
     /// The dashboard block **writes** to a block parameter (input widget).
@@ -483,6 +506,8 @@ pub enum DashboardBinding {
         block_path: String,
         /// Parameter name that is written (typically `"Value"`).
         param_name: String,
+        /// Structured target-path metadata extracted from the mxarray payload.
+        target_path: DashboardTargetPath,
         /// Unique identifier for this binding.
         uuid: String,
     },
@@ -496,8 +521,8 @@ pub enum DashboardBinding {
         block_path: String,
         /// Name of the signal (e.g. `"Edit_signal"`).
         signal_name: String,
-        /// Optional output/logical port index encoded by Simulink for this target path.
-        target_path_index: Option<u32>,
+        /// Structured target-path metadata extracted from the mxarray payload.
+        target_path: DashboardTargetPath,
         /// Unique identifier for this binding.
         uuid: String,
     },
@@ -591,6 +616,7 @@ const MXARRAY_FIELD_NAMES: &[&str] = &[
 /// Returns `None` if the data does not contain a recognised binding pattern.
 pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
     let strings = extract_ascii_strings(data, 3);
+    let raw_strings = extract_ascii_strings(data, 1);
 
     // Determine binding type from class name.
     let is_param = strings
@@ -610,47 +636,108 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
     // that second copy by limiting offset.
     let field_set: std::collections::HashSet<&str> = MXARRAY_FIELD_NAMES.iter().copied().collect();
 
-    let data_strings: Vec<&str> = strings
+    let data_strings: Vec<(usize, &str)> = raw_strings
         .iter()
         .filter(|(offset, s)| *offset > 900 && *offset < 1800 && !field_set.contains(s.as_str()))
-        .map(|(_, s)| s.as_str())
+        .map(|(offset, s)| (*offset, s.as_str()))
         .collect();
 
-    let target_path_index = find_numeric_field_value(&strings, &["OutputPortIndex_", "LogicalPortIndex_"]);
+    let meaningful_text_values = data_strings
+        .iter()
+        .copied()
+        .filter(|(_, value)| is_meaningful_binding_text_value(value))
+        .collect::<Vec<_>>();
+    let selector_values = data_strings
+        .iter()
+        .copied()
+        .filter(|(_, value)| is_meaningful_binding_selector_value(value))
+        .collect::<Vec<_>>();
 
-    let uuid = data_strings
+    let uuid = meaningful_text_values
+        .iter()
+        .find_map(|(_, value)| looks_like_uuid(value).then(|| (*value).to_string()))
+        .unwrap_or_default();
+    let named_text_values = meaningful_text_values
         .iter()
         .copied()
-        .find(|value| looks_like_uuid(value))
-        .unwrap_or("");
-    let meaningful_strings: Vec<&str> = data_strings
-        .iter()
-        .copied()
-        .filter(|value| *value != uuid && !looks_like_sid_token(value))
-        .collect();
+        .filter(|(_, value)| !looks_like_uuid(value))
+        .collect::<Vec<_>>();
+
+    let target_path = DashboardTargetPath {
+        port_index: find_numeric_field_value(&raw_strings, &["OutputPortIndex_", "LogicalPortIndex_"]),
+        sub_path: named_text_values.get(2).map(|(_, value)| (*value).to_string()),
+        element: None,
+        element_raw_input: None,
+    };
 
     if is_param {
-        let block_path = meaningful_strings.first()?.to_string();
-        let param_name = meaningful_strings
+        let block_path = named_text_values.first().map(|(_, value)| (*value).to_string())?;
+        let param_name = named_text_values
             .get(1)
+            .map(|(_, value)| (*value).to_string())
+            .unwrap_or_else(|| "Value".to_string());
+        let selector_start_offset = named_text_values
+            .get(1)
+            .map(|(offset, _)| *offset)
+            .or_else(|| named_text_values.first().map(|(offset, _)| *offset))
+            .unwrap_or(0);
+        let selector_end_offset = meaningful_text_values
+            .iter()
+            .find_map(|(offset, value)| looks_like_uuid(value).then_some(*offset))
+            .unwrap_or(usize::MAX);
+        let selector_values = selector_values
+            .iter()
             .copied()
-            .unwrap_or("Value")
-            .to_string();
+            .filter(|(offset, _)| *offset > selector_start_offset && *offset < selector_end_offset)
+            .collect::<Vec<_>>();
+        let target_path = DashboardTargetPath {
+            element: selector_values
+                .iter()
+                .find(|(_, value)| value.chars().all(|ch| ch.is_ascii_digit()))
+                .map(|(_, value)| (*value).to_string()),
+            element_raw_input: selector_values
+                .iter()
+                .find(|(_, value)| looks_like_selector_expression(value))
+                .map(|(_, value)| (*value).to_string()),
+            ..target_path
+        };
         Some(DashboardBinding::ParamSource {
             block_path,
             param_name,
-            uuid: uuid.to_string(),
+            target_path,
+            uuid,
         })
     } else {
-        let block_path = meaningful_strings.first()?.to_string();
-        let signal_name = meaningful_strings.get(1).copied().unwrap_or("").to_string();
+        let block_path = named_text_values.first().map(|(_, value)| (*value).to_string())?;
+        let signal_name = named_text_values
+            .get(1)
+            .map(|(_, value)| (*value).to_string())
+            .unwrap_or_default();
         Some(DashboardBinding::SignalSpec {
             block_path,
             signal_name,
-            target_path_index,
-            uuid: uuid.to_string(),
+            target_path,
+            uuid,
         })
     }
+}
+
+fn is_meaningful_binding_text_value(value: &str) -> bool {
+    looks_like_uuid(value)
+        || (value.len() > 1 && value.chars().any(|ch| ch.is_ascii_alphabetic()))
+}
+
+fn is_meaningful_binding_selector_value(value: &str) -> bool {
+    !looks_like_uuid(value)
+        && !looks_like_sid_token(value)
+        && (value.chars().all(|ch| ch.is_ascii_digit()) || looks_like_selector_expression(value))
+}
+
+fn looks_like_selector_expression(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .any(|ch| matches!(ch, '[' | ']' | '(' | ')' | '.' | ':' | '/' | ','))
 }
 
 fn find_numeric_field_value(strings: &[(usize, String)], field_names: &[&str]) -> Option<u32> {
@@ -662,7 +749,7 @@ fn find_numeric_field_value(strings: &[(usize, String)], field_names: &[&str]) -
 
             for (value_offset, value) in strings.iter().skip(idx + 1) {
                 let distance = value_offset.saturating_sub(*field_offset);
-                if distance > 256 {
+                if distance > 1024 {
                     break;
                 }
                 if value.chars().all(|ch| ch.is_ascii_digit()) {

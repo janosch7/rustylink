@@ -3377,6 +3377,7 @@ fn print_dashboard_connected_signals(
             block_path,
             param_name,
             uuid,
+            ..
         }) => {
             println!(
                 "    → writes param '{}' on block '{}' (uuid: {})",
@@ -3693,7 +3694,7 @@ mod tests {
     };
     use crate::egui_app::shared_canvas_text_font_px;
     use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
-    use crate::model::{DashboardBinding, EndpointRef, Line, Port, System};
+    use crate::model::{DashboardBinding, DashboardTargetPath, EndpointRef, Line, Port, System};
     use eframe::egui::{Pos2, Rect};
 
     #[test]
@@ -3759,6 +3760,7 @@ mod tests {
             dashboard_binding: Some(DashboardBinding::ParamSource {
                 block_path: "Model/Combo".to_string(),
                 param_name: "Value".to_string(),
+                target_path: DashboardTargetPath::default(),
                 uuid: "uuid-combo".to_string(),
             }),
             child_order: Vec::new(),
