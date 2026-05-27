@@ -662,9 +662,11 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
         .copied()
         .filter(|(_, value)| !looks_like_uuid(value))
         .collect::<Vec<_>>();
+    let ascii_port_index =
+        find_numeric_field_value(&raw_strings, &["OutputPortIndex_", "LogicalPortIndex_"]);
 
     let target_path = DashboardTargetPath {
-        port_index: find_numeric_field_value(&raw_strings, &["OutputPortIndex_", "LogicalPortIndex_"]),
+        port_index: None,
         sub_path: named_text_values.get(2).map(|(_, value)| (*value).to_string()),
         element: None,
         element_raw_input: None,
@@ -708,11 +710,17 @@ pub fn parse_mxarray_binding(data: &[u8]) -> Option<DashboardBinding> {
             uuid,
         })
     } else {
-        let block_path = named_text_values.first().map(|(_, value)| (*value).to_string())?;
+        let (block_path_offset, block_path_value) = named_text_values.first().copied()?;
+        let block_path = block_path_value.to_string();
         let signal_name = named_text_values
             .get(1)
             .map(|(_, value)| (*value).to_string())
             .unwrap_or_default();
+        let target_path = DashboardTargetPath {
+            port_index: find_binary_signal_port_index(data, &raw_strings, block_path_offset)
+                .or(ascii_port_index),
+            ..target_path
+        };
         Some(DashboardBinding::SignalSpec {
             block_path,
             signal_name,
@@ -758,6 +766,45 @@ fn find_numeric_field_value(strings: &[(usize, String)], field_names: &[&str]) -
                     }
                 }
             }
+        }
+    }
+
+    None
+}
+
+fn find_binary_signal_port_index(
+    data: &[u8],
+    strings: &[(usize, String)],
+    block_path_offset: usize,
+) -> Option<u32> {
+    let repeated_field_offset = strings
+        .iter()
+        .filter(|(_, text)| text == "BlockPath_")
+        .nth(1)
+        .map(|(offset, _)| *offset)?;
+    let sid_end_offset = strings
+        .iter()
+        .filter(|(offset, value)| {
+            *offset > block_path_offset && *offset < repeated_field_offset && value.len() > 1
+        })
+        .find(|(_, value)| looks_like_sid_token(value))
+        .map(|(offset, value)| *offset + value.len())?;
+
+    let scalar_header = [0x09, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00];
+    for offset in sid_end_offset..repeated_field_offset.saturating_sub(16) {
+        if data.get(offset..offset + scalar_header.len()) != Some(scalar_header.as_slice()) {
+            continue;
+        }
+
+        let value_bytes = data.get(offset + scalar_header.len()..offset + 16)?;
+        let value = f64::from_le_bytes(value_bytes.try_into().ok()?);
+        let rounded = value.round();
+        if value.is_finite()
+            && value >= 1.0
+            && value <= 64.0
+            && (value - rounded).abs() <= 1e-9
+        {
+            return Some(rounded as u32 - 1);
         }
     }
 

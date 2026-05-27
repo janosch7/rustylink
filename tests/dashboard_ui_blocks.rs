@@ -1016,6 +1016,52 @@ fn real_checkbox_binding_preserves_partial_element_selector() {
 }
 
 #[test]
+fn duplicat_signal_spec_bindings_preserve_output_port_index() {
+    let path = std::path::Path::new("Duplicat_Test.slx");
+    if !path.exists() {
+        return;
+    }
+    let archive = SlxArchive::from_file(path).expect("failed to load SLX");
+
+    let first_raw = archive
+        .resolve_binding_persistence("bdmxdata:BindingPersistence_234")
+        .expect("should resolve BindingPersistence_234");
+    let first_binding = parse_mxarray_binding(first_raw).expect("should parse first display binding");
+    match first_binding {
+        DashboardBinding::SignalSpec {
+            block_path,
+            signal_name,
+            target_path,
+            ..
+        } => {
+            assert_eq!(block_path, "Complex to Real-Imag");
+            assert_eq!(signal_name, "");
+            assert_eq!(target_path.port_index, Some(0));
+        }
+        other => panic!("expected SignalSpec, got {:?}", other),
+    }
+
+    let second_raw = archive
+        .resolve_binding_persistence("bdmxdata:BindingPersistence_235")
+        .expect("should resolve BindingPersistence_235");
+    let second_binding =
+        parse_mxarray_binding(second_raw).expect("should parse second display binding");
+    match second_binding {
+        DashboardBinding::SignalSpec {
+            block_path,
+            signal_name,
+            target_path,
+            ..
+        } => {
+            assert_eq!(block_path, "Complex to Real-Imag");
+            assert_eq!(signal_name, "");
+            assert_eq!(target_path.port_index, Some(1));
+        }
+        other => panic!("expected SignalSpec, got {:?}", other),
+    }
+}
+
+#[test]
 fn short_param_source_layout_parses_correctly() {
     let mut raw = vec![0_u8; 1500];
     for (offset, text) in [
