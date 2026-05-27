@@ -2007,35 +2007,34 @@ fn render_edit_field_control_widget(
     }
     let mut submitted = None;
     paint_dashboard_widget_background(ui, rect, palette);
-    ui.scope_builder(
-        egui::UiBuilder::new().max_rect(rect.shrink(6.0)),
-        |child_ui| {
-            let edit_body_size = (rect.height() * 0.44 * font_scale)
-                .min(rect.width() * 0.22)
-                .clamp(7.0, rect.height() * 0.58);
-            apply_dashboard_widget_style_with_body_size(child_ui, edit_body_size, palette);
-            child_ui.add_enabled_ui(app.live_mode_enabled, |child_ui| {
-                let response = child_ui.add_sized(
-                    rect.shrink(6.0).size(),
-                    egui::TextEdit::singleline(buffer)
-                        .id(edit_id)
-                        .horizontal_align(egui::Align::Center)
-                        .frame(egui::Frame::NONE),
-                );
-                child_ui.painter().rect_stroke(
-                    response.rect,
-                    3.0,
-                    Stroke::new(1.0, palette.border),
-                    egui::StrokeKind::Inside,
-                );
-                if response.lost_focus()
-                    && child_ui.input(|input| input.key_pressed(egui::Key::Enter))
-                {
-                    submitted = buffer.trim().parse::<f64>().ok();
-                }
-            });
-        },
-    );
+    let content_margin = 6.0_f32.min(rect.width() * 0.5).min(rect.height() * 0.5);
+    let content_rect = rect.shrink(content_margin);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |child_ui| {
+        let max_body_size = (rect.height() * 0.58).max(7.0);
+        let edit_body_size = (rect.height() * 0.44 * font_scale)
+            .min(rect.width() * 0.22)
+            .clamp(7.0, max_body_size);
+        apply_dashboard_widget_style_with_body_size(child_ui, edit_body_size, palette);
+        child_ui.add_enabled_ui(app.live_mode_enabled, |child_ui| {
+            let response = child_ui.add_sized(
+                content_rect.size(),
+                egui::TextEdit::singleline(buffer)
+                    .id(edit_id)
+                    .horizontal_align(egui::Align::Center)
+                    .frame(egui::Frame::NONE),
+            );
+            child_ui.painter().rect_stroke(
+                response.rect,
+                3.0,
+                Stroke::new(1.0, palette.border),
+                egui::StrokeKind::Inside,
+            );
+            if response.lost_focus() && child_ui.input(|input| input.key_pressed(egui::Key::Enter))
+            {
+                submitted = buffer.trim().parse::<f64>().ok();
+            }
+        });
+    });
     if app.live_mode_enabled {
         if let Some(value) = submitted {
             app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
