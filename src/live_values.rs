@@ -168,6 +168,7 @@ pub enum LiveValueList {
     Complex64(Vec<LiveComplex64>),
     Bytes(Vec<Vec<u8>>),
     String(Vec<String>),
+    Enum(Vec<u64>),
 }
 
 impl LiveValueList {
@@ -189,6 +190,7 @@ impl LiveValueList {
             LiveValueList::Complex64(values) => values.len(),
             LiveValueList::Bytes(values) => values.len(),
             LiveValueList::String(values) => values.len(),
+            LiveValueList::Enum(values) => values.len(),
         }
     }
 
@@ -211,7 +213,8 @@ impl LiveValueList {
             LiveValueList::Complex32(_)
             | LiveValueList::Complex64(_)
             | LiveValueList::Bytes(_)
-            | LiveValueList::String(_) => None,
+            | LiveValueList::String(_)
+            | LiveValueList::Enum(_) => None,
         }
     }
 
@@ -234,7 +237,8 @@ impl LiveValueList {
             LiveValueList::Complex32(_)
             | LiveValueList::Complex64(_)
             | LiveValueList::Bytes(_)
-            | LiveValueList::String(_) => None,
+            | LiveValueList::String(_)
+            | LiveValueList::Enum(_) => None,
         }
     }
 
@@ -276,6 +280,7 @@ impl LiveValueList {
                 })
                 .collect(),
             LiveValueList::String(values) => values.clone(),
+            LiveValueList::Enum(values) => values.iter().map(ToString::to_string).collect(),
         }
     }
 }
