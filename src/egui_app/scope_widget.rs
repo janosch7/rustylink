@@ -7,7 +7,7 @@
 #![cfg(feature = "egui")]
 
 use egui::{Align2, Color32, Pos2, Rect, Stroke, Ui, Vec2};
-use liveplot::data::scope::{AxisType, ScopeType};
+use liveplot::data::scope::{AxisType, ScopeType, ValueFormat};
 use liveplot::{LivePlotPanel, PlotPoint, PlotSink, Trace, channel_plot};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -75,7 +75,7 @@ fn configure_panel(
         scope.show_legend = !compact;
         scope.show_info_in_legend = false;
         scope.force_hide_legend = compact;
-        scope.x_axis.axis_type = AxisType::Value(None);
+        scope.x_axis.axis_type = AxisType::Value(ValueFormat::default());
         let show_axis_names = size
             .map(|size| size.x >= 250.0 && size.y >= 150.0)
             .unwrap_or(true);

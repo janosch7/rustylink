@@ -77,7 +77,7 @@ features = ["compression"]
 [dependencies.liveplot]
 #git = "https://github.com/ulikoehler/liveplot-rs"
 #branch = "master"
-version = "2.0.2"
+version = "2.0.3"
 optional = true
 default-features = false
 features = ["tiles", "fft", "parquet"]
