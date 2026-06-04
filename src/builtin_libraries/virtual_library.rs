@@ -26,6 +26,10 @@ pub enum BlockShape {
     Circle,
     /// Solid black rectangle with no interior label (e.g. Bus Creator/Selector).
     FilledBlack,
+    /// Rectangle with a triangular tab pointing left (Goto blocks).
+    Goto,
+    /// Rectangle with a triangular tab pointing right (From blocks).
+    From,
 }
 
 /// Side of a block where a port can be placed.

@@ -633,6 +633,21 @@ pub fn render_block_icon(
                     port_label_widths,
                 );
             }
+            block_types::IconSpec::Phosphor(name) => {
+                let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
+                let avail_points = avail_rect.size();
+                if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
+                    return;
+                }
+                let font_id = egui::FontId::proportional(avail_points.y * 0.7);
+                painter.text(
+                    avail_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    name,
+                    font_id,
+                    dark_icon,
+                );
+            }
             block_types::IconSpec::Svg(path) => {
                 let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
                 let avail_points = avail_rect.size();
@@ -908,7 +923,7 @@ pub fn render_manual_switch(
 ///
 /// A renderer receives the egui painter, the block data, the block's screen
 /// rectangle, and the current font scale factor.
-pub type InteriorRendererFn = fn(&egui::Painter, &Block, &Rect, f32);
+pub type InteriorRendererFn = fn(&egui::Painter, &Block, &Rect, f32, f32);
 
 fn interior_renderer_registry()
 -> &'static std::collections::HashMap<&'static str, InteriorRendererFn> {
@@ -918,6 +933,8 @@ fn interior_renderer_registry()
         let mut m: std::collections::HashMap<&'static str, InteriorRendererFn> =
             std::collections::HashMap::new();
         m.insert("Sum", render_sum_block);
+        m.insert("Goto", render_goto_from_block);
+        m.insert("From", render_goto_from_block);
         // Register dashboard / UI block renderers for all egui builds so
         // non-dashboard mode still shows the same visuals, only without the
         // interactive/editable behavior.
@@ -946,7 +963,7 @@ pub fn get_interior_renderer(block_type: &str) -> Option<InteriorRendererFn> {
 /// The `Inputs` property format used by Simulink is e.g. `|++`: the first
 /// character is an ignored spacer, the subsequent characters are the per-port
 /// operators in order ('+' or '-').
-pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     let operators: Vec<char> = block
         .properties
         .get("Inputs")
@@ -975,6 +992,28 @@ pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, fon
         bottom_pos,
         egui::Align2::CENTER_CENTER,
         bottom_op.to_string(),
+        font_id,
+        color,
+    );
+}
+
+/// Render Goto/From blocks with their GotoTag label instead of port labels
+pub fn render_goto_from_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, name_font_factor: f32) {
+    let label = block
+        .properties
+        .get("GotoTag")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("A");
+
+    let font_size = (rect.height() * 0.6).clamp(10.0, 24.0) * font_scale * name_font_factor;
+    let color = Color32::from_rgb(32, 32, 32);
+    let font_id = egui::FontId::proportional(font_size);
+
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
         font_id,
         color,
     );

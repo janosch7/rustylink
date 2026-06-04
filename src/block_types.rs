@@ -22,6 +22,7 @@ pub struct Rgb(pub u8, pub u8, pub u8);
 pub enum IconSpec {
     Utf8(&'static str),
     Svg(&'static str),
+    Phosphor(&'static str),
 }
 
 /// Configuration for a specific block type.
@@ -230,7 +231,6 @@ fn default_registry() -> HashMap<String, BlockTypeConfig> {
             ..Default::default()
         },
     );
-
     // ── Dashboard / UI blocks ──────────────────────────────────────────
     m.insert(
         "Display".to_string(),

@@ -167,6 +167,21 @@ pub fn render_block_icon(
                 color,
             );
         }
+        crate::block_types::IconSpec::Phosphor(name) => {
+            let avail = compute_icon_available_rect(rect, font_scale, port_label_widths);
+            if avail.width() <= 1.0 || avail.height() <= 1.0 {
+                return;
+            }
+            let color = ui::colors::contrast_color(ui::colors::block_base_color(block, &cfg));
+            let font_px = avail.width().min(avail.height()).max(1.0);
+            painter.text(
+                avail.center(),
+                Align2::CENTER_CENTER,
+                name,
+                egui::FontId::proportional(font_px),
+                color,
+            );
+        }
         crate::block_types::IconSpec::Svg(_) => {
             render::render_block_icon(painter, block, rect, font_scale, port_label_widths);
         }
@@ -235,6 +250,26 @@ fn viewer_block_type_override(
             default_outs: 2,
             input_port_names: vec!["Re+Im".to_string()],
             output_port_names: vec!["Re".to_string(), "Im".to_string()],
+            ..Default::default()
+        }),
+        "Goto" => Some(crate::block_types::BlockTypeConfig {
+            icon: Some(crate::block_types::IconSpec::Phosphor(egui_phosphor::regular::ARROW_RIGHT)),
+            known: true,
+            default_ins: 1,
+            default_outs: 0,
+            show_input_port_labels: false,
+            show_output_port_labels: false,
+            shape: crate::builtin_libraries::virtual_library::BlockShape::Goto,
+            ..Default::default()
+        }),
+        "From" => Some(crate::block_types::BlockTypeConfig {
+            icon: Some(crate::block_types::IconSpec::Phosphor(egui_phosphor::regular::ARROW_LEFT)),
+            known: true,
+            default_ins: 0,
+            default_outs: 1,
+            show_input_port_labels: false,
+            show_output_port_labels: false,
+            shape: crate::builtin_libraries::virtual_library::BlockShape::From,
             ..Default::default()
         }),
         _ => None,

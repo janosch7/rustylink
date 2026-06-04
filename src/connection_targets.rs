@@ -119,6 +119,7 @@ impl ConnectionTargetResolver {
         );
         self.propagate_line_metadata_upward(
             system,
+            system_path,
             &block_lookup,
             parent_ctx,
             &HashMap::new(),
@@ -150,6 +151,7 @@ impl ConnectionTargetResolver {
         );
         self.propagate_line_metadata_upward(
             system,
+            system_path,
             &block_lookup,
             parent_ctx,
             &child_summaries,
@@ -259,10 +261,16 @@ impl ConnectionTargetResolver {
                     "SubSystem" | "Reference" => child_summaries
                         .get(&src.sid)
                         .and_then(|summary| summary.outgoing_by_port.get(&src.port_index))
-                        .map(|targets| targets.clone())
+                        .map(|targets| {
+                            boundary_targets(
+                                targets,
+                                self.full_block_path(system_path, &block.name),
+                            )
+                        })
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
+                    "From" => self.from_block_targets(system, block, line_targets),
                     _ => self.base_line_targets(system, system_path, block_lookup, line),
                 };
 
@@ -275,6 +283,7 @@ impl ConnectionTargetResolver {
                         | "Inport"
                         | "SubSystem"
                         | "Reference"
+                        | "From"
                 ) {
                     apply_local_line_metadata(line, &mut new_targets);
                     apply_source_port_testpoint(block, line, &mut new_targets);
@@ -296,6 +305,7 @@ impl ConnectionTargetResolver {
     fn propagate_line_metadata_upward(
         &self,
         system: &System,
+        system_path: &[String],
         block_lookup: &HashMap<&str, &Block>,
         parent_ctx: Option<&ParentSubsystemContext>,
         child_summaries: &HashMap<String, ChildSubsystemSummary>,
@@ -314,6 +324,7 @@ impl ConnectionTargetResolver {
 
                 let propagated = self.upstream_propagated_targets(
                     system,
+                    system_path,
                     block,
                     line,
                     parent_ctx,
@@ -520,9 +531,51 @@ impl ConnectionTargetResolver {
             .collect()
     }
 
+    fn from_block_targets(
+        &self,
+        system: &System,
+        block: &Block,
+        line_targets: &[Vec<ConnectionTarget>],
+    ) -> Vec<ConnectionTarget> {
+        let tag = block
+            .properties
+            .get("GotoTag")
+            .map(|s| s.trim())
+            .unwrap_or("A");
+
+        let goto_blocks: Vec<&Block> = system
+            .blocks
+            .iter()
+            .filter(|b| b.block_type == "Goto")
+            .filter(|b| {
+                b.properties
+                    .get("GotoTag")
+                    .map(|s| s.trim())
+                    .unwrap_or("A")
+                    == tag
+            })
+            .collect();
+
+        let mut targets = Vec::new();
+        for goto in goto_blocks {
+            for incoming in incoming_lines_for_block(system, goto) {
+                let Some(line_index) = system
+                    .lines
+                    .iter()
+                    .position(|candidate| same_line(candidate, incoming))
+                else {
+                    continue;
+                };
+                targets.extend(line_targets[line_index].clone());
+            }
+        }
+        targets
+    }
+
     fn upstream_propagated_targets(
         &self,
         system: &System,
+        system_path: &[String],
         block: &Block,
         line: &Line,
         parent_ctx: Option<&ParentSubsystemContext>,
@@ -549,7 +602,12 @@ impl ConnectionTargetResolver {
                         .as_ref()
                         .and_then(|dst| summary.incoming_by_port.get(&dst.port_index))
                 })
-                .cloned()
+                .map(|targets| {
+                    boundary_targets(
+                        targets,
+                        self.full_block_path(system_path, &block.name),
+                    )
+                })
                 .unwrap_or_default(),
             _ => Vec::new(),
         }

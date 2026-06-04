@@ -1161,6 +1161,32 @@ pub(crate) fn update_internal(
                 BlockShape::FilledBlack => {
                     ui.painter().rect_filled(r_screen, 0.0, Color32::BLACK);
                 }
+                BlockShape::Goto => {
+                    let tab = r_screen.height() * 0.25;
+                    let pts = vec![
+                        egui::pos2(r_screen.left(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.bottom()),
+                        egui::pos2(r_screen.left(), r_screen.bottom()),
+                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
+                    ];
+                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+                    path.fill = bg;
+                    ui.painter().add(egui::Shape::Path(path));
+                }
+                BlockShape::From => {
+                    let tab = r_screen.height() * 0.25;
+                    let pts = vec![
+                        egui::pos2(r_screen.left(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.top()),
+                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
+                        egui::pos2(r_screen.right(), r_screen.bottom()),
+                        egui::pos2(r_screen.left(), r_screen.bottom()),
+                    ];
+                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+                    path.fill = bg;
+                    ui.painter().add(egui::Shape::Path(path));
+                }
                 BlockShape::Rectangle => {
                     if b.commented {
                         let commented_bg = Color32::from_rgb(230, 230, 230);
@@ -2536,6 +2562,32 @@ pub(crate) fn update_internal(
                 BlockShape::FilledBlack => {
                     // No separate border — the filled black rect is sufficient.
                 }
+                BlockShape::Goto => {
+                    let tab = r_screen.height() * 0.25;
+                    let pts = vec![
+                        egui::pos2(r_screen.left(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.bottom()),
+                        egui::pos2(r_screen.left(), r_screen.bottom()),
+                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
+                    ];
+                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                        pts, stroke,
+                    )));
+                }
+                BlockShape::From => {
+                    let tab = r_screen.height() * 0.25;
+                    let pts = vec![
+                        egui::pos2(r_screen.left(), r_screen.top()),
+                        egui::pos2(r_screen.right(), r_screen.top()),
+                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
+                        egui::pos2(r_screen.right(), r_screen.bottom()),
+                        egui::pos2(r_screen.left(), r_screen.bottom()),
+                    ];
+                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                        pts, stroke,
+                    )));
+                }
                 BlockShape::Rectangle => {
                     painter.rect_stroke(*r_screen, 4.0, stroke, egui::StrokeKind::Inside);
                 }
@@ -2881,12 +2933,12 @@ pub(crate) fn update_internal(
                         Some(&app.live_display_defaults),
                     );
                 } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                    renderer(&painter, b, r_screen, font_scale);
+                    renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
                 } else if cfg.shape != BlockShape::FilledBlack {
                     render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
                 }
             } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                renderer(&painter, b, r_screen, font_scale);
+                renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
             } else if app.live_mode_enabled && uses_live_value_text(&b.block_type)
             {
                 // Live mode: show the current value for dashboard-bound blocks.
@@ -3583,6 +3635,7 @@ fn render_dashboard_control_widget(
         block,
         rect,
         font_scale,
+        app.block_name_font_factor,
         live_value,
         live_text.as_deref(),
     )

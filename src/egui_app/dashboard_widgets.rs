@@ -812,7 +812,7 @@ fn lamp_color_for_value(block: &Block, value: Option<f64>) -> Color32 {
 // ─── PushButton ─────────────────────────────────────────────────────────
 
 /// Draws a push button like Simulink's Dashboard PushButton.
-pub fn render_push_button(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_push_button(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -840,7 +840,7 @@ pub fn render_push_button(painter: &egui::Painter, block: &Block, rect: &Rect, f
 // ─── SliderSwitch ───────────────────────────────────────────────────────
 
 /// Draws a vertical slider switch with Off/On labels.
-pub fn render_slider_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_slider_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, _block, rect, widget_palette(_block));
         return;
@@ -858,7 +858,7 @@ pub fn render_slider_switch(painter: &egui::Painter, _block: &Block, rect: &Rect
 // ─── RadioButton ────────────────────────────────────────────────────────
 
 /// Draws a radio button group with 3 labelled options.
-pub fn render_radio_button(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_radio_button(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -902,7 +902,7 @@ pub fn render_radio_button(painter: &egui::Painter, block: &Block, rect: &Rect, 
 // ─── ComboBox ───────────────────────────────────────────────────────────
 
 /// Draws a combo box / dropdown with a triangle indicator.
-pub fn render_combo_box(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_combo_box(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -950,7 +950,7 @@ pub fn render_combo_box(painter: &egui::Painter, block: &Block, rect: &Rect, fon
 // ─── CheckBox ───────────────────────────────────────────────────────────
 
 /// Draws a checkbox with a label.
-pub fn render_checkbox(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_checkbox(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -986,7 +986,7 @@ pub fn render_checkbox(painter: &egui::Painter, block: &Block, rect: &Rect, font
 // ─── Slider ─────────────────────────────────────────────────────────────
 
 /// Draws a horizontal slider with tick marks and scale.
-pub fn render_slider(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_slider(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -997,7 +997,7 @@ pub fn render_slider(painter: &egui::Painter, block: &Block, rect: &Rect, font_s
 // ─── EditField ──────────────────────────────────────────────────────────
 
 /// Draws a text edit field.
-pub fn render_edit_field(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_edit_field(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1062,7 +1062,7 @@ pub fn render_edit_field(painter: &egui::Painter, block: &Block, rect: &Rect, fo
 // ─── ToggleSwitch ───────────────────────────────────────────────────────
 
 /// Draws a horizontal toggle switch (Off / On).
-pub fn render_toggle_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_toggle_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, _block, rect, widget_palette(_block));
         return;
@@ -1080,7 +1080,7 @@ pub fn render_toggle_switch(painter: &egui::Painter, _block: &Block, rect: &Rect
 // ─── Knob ───────────────────────────────────────────────────────────────
 
 /// Draws a circular knob with tick marks (like Simulink's Knob).
-pub fn render_knob(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_knob(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, _block, rect, widget_palette(_block));
         return;
@@ -1161,7 +1161,7 @@ pub fn render_knob(painter: &egui::Painter, _block: &Block, rect: &Rect, font_sc
 // ─── RockerSwitch ───────────────────────────────────────────────────────
 
 /// Draws a rocker switch (On/Off toggle with a rocker shape).
-pub fn render_rocker_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_rocker_switch(painter: &egui::Painter, _block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, _block, rect, widget_palette(_block));
         return;
@@ -1172,7 +1172,7 @@ pub fn render_rocker_switch(painter: &egui::Painter, _block: &Block, rect: &Rect
 // ─── RotarySwitch ───────────────────────────────────────────────────────
 
 /// Draws a rotary switch with discrete positions.
-pub fn render_rotary_switch(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_rotary_switch(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1229,7 +1229,7 @@ pub fn render_rotary_switch(painter: &egui::Painter, block: &Block, rect: &Rect,
 // ─── Circular Gauge (full 270°) ─────────────────────────────────────────
 
 /// Draws a full circular gauge (≈270° arc) like Simulink's Gauge block.
-pub fn render_circular_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_circular_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1299,6 +1299,7 @@ pub fn render_semi_circular_gauge(
     block: &Block,
     rect: &Rect,
     font_scale: f32,
+    _name_font_factor: f32,
 ) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
@@ -1366,7 +1367,7 @@ pub fn render_semi_circular_gauge(
 // ─── Quarter Gauge ──────────────────────────────────────────────────────
 
 /// Draws a quarter-circle (90°) gauge.
-pub fn render_quarter_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_quarter_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1422,7 +1423,7 @@ pub fn render_quarter_gauge(painter: &egui::Painter, block: &Block, rect: &Rect,
 // ─── Linear Gauge ───────────────────────────────────────────────────────
 
 /// Draws a horizontal linear gauge (bar-style).
-pub fn render_linear_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_linear_gauge(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1501,6 +1502,7 @@ pub fn render_dashboard_scope(
     block: &Block,
     rect: &Rect,
     font_scale: f32,
+    _name_font_factor: f32,
 ) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
@@ -1602,7 +1604,7 @@ pub fn render_dashboard_scope(
 // ─── Display (Dashboard) ────────────────────────────────────────────────
 
 /// Draws a digital display block (value readout).
-pub fn render_display_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32) {
+pub fn render_display_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -1637,7 +1639,7 @@ pub fn render_display_block(painter: &egui::Painter, block: &Block, rect: &Rect,
 // ─── Lamp ───────────────────────────────────────────────────────────────
 
 /// Draws a circular lamp indicator (green by default).
-pub fn render_lamp(painter: &egui::Painter, block: &Block, rect: &Rect, _font_scale: f32) {
+pub fn render_lamp(painter: &egui::Painter, block: &Block, rect: &Rect, _font_scale: f32, _name_font_factor: f32) {
     if should_render_dashboard_icon(rect) {
         paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
         return;
@@ -2230,6 +2232,7 @@ pub fn render_dashboard_control_widget(
     block: &Block,
     rect: Rect,
     font_scale: f32,
+    _name_font_factor: f32,
     live_value: f64,
     live_text: Option<&str>,
 ) -> bool {
@@ -2334,6 +2337,7 @@ pub fn render_dashboard_widget(
     block: &Block,
     rect: &Rect,
     font_scale: f32,
+    _name_font_factor: f32,
 ) {
     paint_live_dashboard_value_overlay(
         painter,
