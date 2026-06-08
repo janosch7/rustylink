@@ -31,6 +31,11 @@ pub mod egui_app;
 #[cfg(feature = "egui")]
 pub mod block_types;
 
+// Unified Simulink block-definition catalog (egui feature). Single source of
+// truth for block metadata, icons, labels, shapes and renderers.
+#[cfg(feature = "egui")]
+pub mod simulink_libraries;
+
 // Comprehensive model editor (egui feature)
 #[cfg(feature = "egui")]
 pub mod editor;

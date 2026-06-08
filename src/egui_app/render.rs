@@ -617,10 +617,13 @@ pub fn render_block_icon(
     font_scale: f32,
     port_label_widths: Option<PortLabelMaxWidths>,
 ) {
-    let dark_icon = Color32::from_rgb(40, 40, 40); // dark color for icons
     // Always prefer library-specific identifiers (library path / SourceBlock)
     // over generic `block_type` mappings.
     let cfg = get_block_type_cfg(block);
+    // Glyph icons adapt to the block's background for contrast (SVGs keep their
+    // own colors).
+    let dark_icon =
+        super::ui::colors::contrast_color(super::ui::colors::block_base_color(block, &cfg));
     if let Some(icon) = cfg.icon {
         match icon {
             block_types::IconSpec::Utf8(glyph) => {
@@ -963,7 +966,13 @@ pub fn get_interior_renderer(block_type: &str) -> Option<InteriorRendererFn> {
 /// The `Inputs` property format used by Simulink is e.g. `|++`: the first
 /// character is an ignored spacer, the subsequent characters are the per-port
 /// operators in order ('+' or '-').
-pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
+pub fn render_sum_block(
+    painter: &egui::Painter,
+    block: &Block,
+    rect: &Rect,
+    font_scale: f32,
+    _name_font_factor: f32,
+) {
     let operators: Vec<char> = block
         .properties
         .get("Inputs")
@@ -998,7 +1007,13 @@ pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, fon
 }
 
 /// Render Goto/From blocks with their GotoTag label instead of port labels
-pub fn render_goto_from_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, name_font_factor: f32) {
+pub fn render_goto_from_block(
+    painter: &egui::Painter,
+    block: &Block,
+    rect: &Rect,
+    font_scale: f32,
+    name_font_factor: f32,
+) {
     let label = block
         .properties
         .get("GotoTag")

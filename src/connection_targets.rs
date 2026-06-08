@@ -570,13 +570,7 @@ impl ConnectionTargetResolver {
             .blocks
             .iter()
             .filter(|b| b.block_type == "Goto")
-            .filter(|b| {
-                b.properties
-                    .get("GotoTag")
-                    .map(|s| s.trim())
-                    .unwrap_or("A")
-                    == tag
-            })
+            .filter(|b| b.properties.get("GotoTag").map(|s| s.trim()).unwrap_or("A") == tag)
             .collect();
 
         let mut targets = Vec::new();
@@ -626,10 +620,8 @@ impl ConnectionTargetResolver {
                         .and_then(|dst| summary.incoming_by_port.get(&dst.port_index))
                 })
                 .map(|targets| {
-                    let mut propagated = boundary_targets(
-                        targets,
-                        self.full_block_path(system_path, &block.name),
-                    );
+                    let mut propagated =
+                        boundary_targets(targets, self.full_block_path(system_path, &block.name));
                     if block.block_type == "Reference" {
                         for t in &mut propagated {
                             t.block_type = Some("Reference".to_string());
@@ -1358,4 +1350,3 @@ pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
     }
     out
 }
-

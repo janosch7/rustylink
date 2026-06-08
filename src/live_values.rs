@@ -352,4 +352,3 @@ fn format_complex(re: f64, im: f64, display: &LiveValueDisplayOptions) -> String
     let sign = if im < 0.0 { '-' } else { '+' };
     format!("{re}{sign}{imag_value}i")
 }
-

@@ -6,14 +6,8 @@ use rustylink::model::System;
 
 #[test]
 fn port_labels_do_not_fall_back_to_propagated_signals() {
-    let mut block = rustylink::editor::operations::create_default_block(
-        "SubSystem",
-        "SubSystem",
-        0,
-        0,
-        1,
-        1,
-    );
+    let mut block =
+        rustylink::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
     block.ports = vec![rustylink::model::Port {
         port_type: "out".to_string(),
         index: Some(1),
@@ -46,18 +40,12 @@ fn fixed_port_labels_ignore_port_name_overrides() {
         rustylink::model::Port {
             port_type: "out".to_string(),
             index: Some(1),
-            properties: IndexMap::from_iter([(
-                "Name".to_string(),
-                "VisibleSignal".to_string(),
-            )]),
+            properties: IndexMap::from_iter([("Name".to_string(), "VisibleSignal".to_string())]),
         },
         rustylink::model::Port {
             port_type: "out".to_string(),
             index: Some(2),
-            properties: IndexMap::from_iter([(
-                "Name".to_string(),
-                "OtherSignal".to_string(),
-            )]),
+            properties: IndexMap::from_iter([("Name".to_string(), "OtherSignal".to_string())]),
         },
     ];
 
@@ -69,14 +57,8 @@ fn fixed_port_labels_ignore_port_name_overrides() {
 
 #[test]
 fn subsystem_port_labels_use_internal_boundary_block_names() {
-    let mut block = rustylink::editor::operations::create_default_block(
-        "SubSystem",
-        "SubSystem",
-        0,
-        0,
-        1,
-        1,
-    );
+    let mut block =
+        rustylink::editor::operations::create_default_block("SubSystem", "SubSystem", 0, 0, 1, 1);
     block.subsystem = Some(Box::new(System {
         properties: IndexMap::new(),
         blocks: vec![

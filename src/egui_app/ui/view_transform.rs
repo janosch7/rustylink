@@ -7,7 +7,7 @@
 use eframe::egui::{Pos2, Rect, Vec2};
 
 #[inline]
-pub(crate) fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
+pub fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
     ((10.0 + 12.0 * font_scale.max(0.0)) * font_factor).max(1.0)
 }
 

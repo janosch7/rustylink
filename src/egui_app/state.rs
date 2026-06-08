@@ -1142,4 +1142,3 @@ pub(crate) fn resolve_subsystem_by_vec_mut<'a>(
     }
     Some(current)
 }
-

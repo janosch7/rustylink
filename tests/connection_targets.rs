@@ -81,13 +81,7 @@ fn testpoint_port(port_type: &str, index: u32, name: Option<&str>) -> Port {
     port
 }
 
-fn line(
-    src_sid: &str,
-    src_port: u32,
-    dst_sid: &str,
-    dst_port: u32,
-    name: Option<&str>,
-) -> Line {
+fn line(src_sid: &str, src_port: u32, dst_sid: &str, dst_port: u32, name: Option<&str>) -> Line {
     Line {
         name: name.map(str::to_string),
         zorder: None,
@@ -459,8 +453,7 @@ fn subsystem_block_includes_direct_internal_block_targets_only() {
     let targets = resolver.block_targets_for_block(&[], &system.blocks[0]);
 
     assert!(targets.iter().any(|target| {
-        target.path == "model/Sub/InnerDirect"
-            && target.origin == ConnectionTargetOrigin::Internal
+        target.path == "model/Sub/InnerDirect" && target.origin == ConnectionTargetOrigin::Internal
     }));
     assert!(targets.iter().any(|target| {
         target.path == "model/Sub/Nested" && target.origin == ConnectionTargetOrigin::Internal

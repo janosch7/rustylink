@@ -1,8 +1,10 @@
 #![cfg(feature = "egui")]
 
 use eframe::egui::{Pos2, Rect, Vec2};
-use rustylink::egui_app::ui::view_transform::{preview_block_rect, shared_canvas_text_font_px, ViewTransform};
 use rustylink::egui_app::state::ViewerDragState;
+use rustylink::egui_app::ui::view_transform::{
+    ViewTransform, preview_block_rect, shared_canvas_text_font_px,
+};
 
 fn make_transform() -> ViewTransform {
     let bb = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0));

@@ -13,16 +13,14 @@ use crate::egui_app::DashboardControlValue;
 use crate::egui_app::geometry::endpoint_pos_maybe_mirrored;
 use crate::egui_app::geometry::{parse_block_rect, parse_rect_str};
 use crate::egui_app::navigation::resolve_subsystem_by_vec;
+use crate::egui_app::render::wrap_text_to_max_width;
 use crate::egui_app::render::{ComputedPortYCoordinates, PortLabelMaxWidths};
-use crate::egui_app::render::{
-    get_interior_renderer, render_manual_switch, wrap_text_to_max_width,
-};
 use crate::egui_app::state::ViewerDragState;
 use crate::egui_app::state::{
     LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
 };
 use crate::egui_app::text::highlight_query_job;
-use crate::egui_app::{get_block_type_cfg, port_label_display_name, render_block_icon};
+use crate::egui_app::{get_block_type_cfg, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::{BTreeSet, HashMap};
 
@@ -381,7 +379,7 @@ fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
     }
 }
 
-fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
+pub(crate) fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
     if value >= 0.5 { "1" } else { "0" }
 }
 
@@ -2875,41 +2873,24 @@ pub(crate) fn update_internal(
                 let galley = painter.layout_no_wrap(instance_label, font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
-            } else if b.block_type == "ManualSwitch" {
-                let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
-                if app.live_mode_enabled {
-                    if let Some(live_value) = block_live_value(app, b) {
-                        let mut live_block = (*b).clone();
-                        live_block.current_setting = Some(
-                            manual_switch_setting_from_live_value(live_value).to_string(),
-                        );
-                        render_manual_switch(
-                            &painter,
-                            &live_block,
-                            r_screen,
-                            font_scale,
-                            coords_ref,
-                        );
-                    } else {
-                        render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
-                    }
-                } else {
-                    render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
-                }
-            } else if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
-                // With the `dashboard` feature: interactive liveplot scope.
-                // Without: simple static waveform glyph.
+            } else if app.live_mode_enabled
+                && matches!(b.block_type.as_str(), "Scope" | "DashboardScope")
+            {
+                // The live scope view is an interactive liveplot tile that needs
+                // `ui`/app state, so it cannot be a pure painter renderer and is
+                // the one block kind kept special-cased here.  The static
+                // waveform glyph (non-live / too-small) is handled by the general
+                // renderer's static renderer.
                 #[cfg(feature = "dashboard")]
                 {
-                    if app.live_mode_enabled {
-                        let scope_rect = r_screen.shrink(4.0);
-                        if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
-                            let key = app.scope_key_for_block(b);
-                            deferred_scope_rects.push((key, scope_title_for_block(b, entities), scope_rect));
-                        } else {
-                            // Too small for liveplot — draw a simple waveform glyph
-                            paint_scope_glyph(&painter, r_screen);
-                        }
+                    let scope_rect = r_screen.shrink(4.0);
+                    if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
+                        let key = app.scope_key_for_block(b);
+                        deferred_scope_rects.push((
+                            key,
+                            scope_title_for_block(b, entities),
+                            scope_rect,
+                        ));
                     } else {
                         paint_scope_glyph(&painter, r_screen);
                     }
@@ -2918,51 +2899,30 @@ pub(crate) fn update_internal(
                 {
                     paint_scope_glyph(&painter, r_screen);
                 }
-            } else if app.live_mode_enabled
-                && crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
-                    &b.block_type,
-                )
-            {
-                if let Some(live_val) = block_live_value(app, b) {
-                    crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
-                        &painter,
-                        b,
-                        r_screen,
-                        font_scale,
-                        live_val,
-                        Some(&app.live_display_defaults),
-                    );
-                } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                    renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
-                } else if cfg.shape != BlockShape::FilledBlack {
-                    render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
-                }
-            } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
-            } else if app.live_mode_enabled && uses_live_value_text(&b.block_type)
-            {
-                // Live mode: show the current value for dashboard-bound blocks.
-                let live_val = block_live_value(app, b);
-                if let Some(val) = live_val {
-                    let font_id = egui::FontId::proportional(12.0 * font_scale);
-                    let text = format_live_scalar_csv(val);
-                    let galley = painter.layout_no_wrap(text, font_id, fg);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    painter.galley(pos, galley, fg);
-                } else if cfg.shape == BlockShape::FilledBlack {
-                    // Solid-fill blocks need no interior rendering.
-                } else {
-                    render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
-                }
-            } else if cfg.shape == BlockShape::FilledBlack {
-                // Solid-fill blocks (e.g. BusCreator/BusSelector) need no interior rendering.
             } else {
-                render_block_icon(
-                    &painter,
-                    b,
-                    r_screen,
+                // General, definition-driven interior renderer.  There is no
+                // block-type-specific code here: the block's resolved
+                // `SimulinkBlockDefinition` selects the static/live renderer,
+                // block label and icon.
+                let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
+                let live_value = if app.live_mode_enabled {
+                    block_live_value(app, b)
+                } else {
+                    None
+                };
+                let params = crate::simulink_libraries::render::InteriorParams {
+                    live_mode: app.live_mode_enabled,
                     font_scale,
-                    icon_port_label_widths,
+                    name_font_factor: app.block_name_font_factor,
+                    live_value,
+                    live_text: None,
+                    live_display_options: Some(&app.live_display_defaults),
+                    port_y: coords_ref,
+                    port_label_widths: icon_port_label_widths,
+                    text_color: fg,
+                };
+                crate::simulink_libraries::render::render_block_interior(
+                    &painter, b, r_screen, &params,
                 );
             }
 
@@ -3381,7 +3341,7 @@ fn draw_viewer_resize_handles(
 }
 
 /// Draw a lightweight static sine waveform glyph inside a block rectangle.
-fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
+pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
     let inner = rect.shrink(6.0);
     if inner.width() < 10.0 || inner.height() < 10.0 {
         return;
@@ -4099,6 +4059,7 @@ mod tests {
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
             ConnectionTarget {
                 path: "Model/B".to_string(),
@@ -4108,6 +4069,7 @@ mod tests {
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
         ];
         let mux_targets = vec![ConnectionTarget {
@@ -4118,6 +4080,7 @@ mod tests {
             origin: ConnectionTargetOrigin::Mux,
             signals_only: true,
             testpoint: false,
+            block_type: None,
         }];
 
         assert_eq!(resolved_line_label(&line, &bus_targets), None);
@@ -4134,6 +4097,7 @@ mod tests {
             origin: ConnectionTargetOrigin::SourceBlock,
             signals_only: true,
             testpoint: false,
+            block_type: None,
         }];
         let bus_targets = vec![
             ConnectionTarget {
@@ -4144,6 +4108,7 @@ mod tests {
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
             ConnectionTarget {
                 path: "Model/B".to_string(),
@@ -4153,6 +4118,7 @@ mod tests {
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
         ];
 

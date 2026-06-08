@@ -921,4 +921,3 @@ pub fn parse_system_shallow(node: Node, base_dir: &Utf8Path) -> Result<System> {
         chart: None,
     })
 }
-

@@ -152,4 +152,3 @@ pub fn assign_line_colors(adjacency: &[Vec<usize>], background_luminance: f32) -
         })
         .collect()
 }
-
