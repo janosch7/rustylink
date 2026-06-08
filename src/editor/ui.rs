@@ -444,15 +444,16 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let is_selected = state.selection.is_block_selected(block_idx);
 
-            // Render block.  The interior (icon / in-block label / static
-            // glyph) is drawn by the single general renderer shared with the
-            // viewer; no block-type-specific code lives here.
-            let (rounding, body_bg) = if b.commented {
-                (0.0, Color32::from_rgb(230, 230, 230))
-            } else {
-                (6.0, bg)
-            };
-            ui.painter().rect_filled(r_screen, rounding, body_bg);
+            // Render block.  The body shape and the interior (icon / in-block
+            // label / static glyph) are drawn by the single general renderer
+            // shared with the viewer; no block-type-specific code lives here.
+            let body_bg = crate::egui_app::render::fill_block_body(
+                ui.painter(),
+                r_screen,
+                cfg.shape,
+                bg,
+                b.commented,
+            );
             let fg = contrast_color(body_bg);
             let params = crate::simulink_libraries::render::InteriorParams {
                 live_mode: false,
@@ -471,6 +472,20 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 &r_screen,
                 &params,
             );
+
+            // Body outline (shape-aware, shared with the viewer).
+            if !b.commented {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                crate::egui_app::render::stroke_block_body(
+                    ui.painter(),
+                    r_screen,
+                    cfg.shape,
+                    Stroke::new(
+                        1.5,
+                        Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
+                    ),
+                );
+            }
 
             // Selection highlight
             if is_selected {

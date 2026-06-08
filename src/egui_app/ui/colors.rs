@@ -15,11 +15,25 @@ pub fn luminance(c: Color32) -> f32 {
 }
 
 pub fn contrast_color(bg: Color32) -> Color32 {
-    let lum = luminance(bg);
-    if lum > 0.6 {
-        Color32::from_rgb(25, 35, 45)
+    let bg_lum = luminance(bg);
+    let dark = Color32::from_rgb(25, 35, 45);
+    let light = Color32::from_rgb(235, 245, 245);
+    // Pick whichever foreground yields the higher WCAG contrast ratio against
+    // the background, so mid-tone block colors (e.g. salmon Gain blocks) get
+    // legible dark text instead of a faint light glyph.
+    let ratio = |fg: Color32| {
+        let fg_lum = luminance(fg);
+        let (hi, lo) = if fg_lum > bg_lum {
+            (fg_lum, bg_lum)
+        } else {
+            (bg_lum, fg_lum)
+        };
+        (hi + 0.05) / (lo + 0.05)
+    };
+    if ratio(dark) >= ratio(light) {
+        dark
     } else {
-        Color32::from_rgb(235, 245, 245)
+        light
     }
 }
 

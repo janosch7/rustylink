@@ -40,6 +40,132 @@ fn normalize_library_block_path(path: &str) -> Option<String> {
     Some(format!("{lib_norm}/{rest}"))
 }
 
+/// Fill a block body according to its [`BlockShape`], returning the background
+/// color actually painted (commented blocks use a fixed grey).  Shared by the
+/// editor and the viewer so both render identical block bodies — there is no
+/// per-block-type body-drawing code in either UI.
+pub fn fill_block_body(
+    painter: &egui::Painter,
+    rect: Rect,
+    shape: block_types::BlockShape,
+    bg: Color32,
+    commented: bool,
+) -> Color32 {
+    use block_types::BlockShape;
+    if commented {
+        let commented_bg = Color32::from_rgb(230, 230, 230);
+        painter.rect_filled(rect, 0.0, commented_bg);
+        return commented_bg;
+    }
+    match shape {
+        BlockShape::Triangle => {
+            // Gain-style: right-pointing triangle (left-top, right-center, left-bottom).
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.center().y),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            let mut tri = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            tri.fill = bg;
+            painter.add(egui::Shape::Path(tri));
+        }
+        BlockShape::Circle => {
+            let radius = rect.size().min_elem() / 2.0;
+            painter.circle_filled(rect.center(), radius, bg);
+        }
+        BlockShape::FilledBlack => {
+            painter.rect_filled(rect, 0.0, Color32::BLACK);
+        }
+        BlockShape::Goto => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+                egui::pos2(rect.left() - tab, rect.center().y),
+            ];
+            let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            path.fill = bg;
+            painter.add(egui::Shape::Path(path));
+        }
+        BlockShape::From => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right() + tab, rect.center().y),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            path.fill = bg;
+            painter.add(egui::Shape::Path(path));
+        }
+        BlockShape::Rectangle => {
+            painter.rect_filled(rect, 6.0, bg);
+        }
+    }
+    bg
+}
+
+/// Stroke a block body's outline according to its [`BlockShape`].  Shared by the
+/// editor and the viewer.
+pub fn stroke_block_body(
+    painter: &egui::Painter,
+    rect: Rect,
+    shape: block_types::BlockShape,
+    stroke: Stroke,
+) {
+    use block_types::BlockShape;
+    match shape {
+        BlockShape::Triangle => {
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.center().y),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::Circle => {
+            let radius = rect.size().min_elem() / 2.0;
+            painter.circle_stroke(rect.center(), radius, stroke);
+        }
+        BlockShape::FilledBlack => {}
+        BlockShape::Goto => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+                egui::pos2(rect.left() - tab, rect.center().y),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::From => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right() + tab, rect.center().y),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::Rectangle => {
+            painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+        }
+    }
+}
+
 pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
     let map = block_types::get_block_type_config_map();
     let Ok(g) = map.read() else {

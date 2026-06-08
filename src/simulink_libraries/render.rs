@@ -93,9 +93,16 @@ pub fn render_block_interior(
         return;
     }
 
-    // 5. Icon / default.  The existing icon path is the single place that
-    // rasterises every icon kind (UTF-8 glyph, Phosphor, SVG) and emits the
-    // `?` fallback (plus a one-time warning) for unknown blocks.
+    // 5. Icon / default.  A non-rectangular body (e.g. the Gain triangle)
+    // already conveys the block's identity, so an iconless shaped block is left
+    // empty rather than stamped with a noisy `?` placeholder.
+    if def.icon.is_none() && def.shape != SimulinkShape::Rectangle {
+        return;
+    }
+
+    // The existing icon path is the single place that rasterises every icon kind
+    // (UTF-8 glyph, Phosphor, SVG) and emits the `?` fallback (plus a one-time
+    // warning) for unknown rectangular blocks.
     crate::egui_app::render::render_block_icon(
         painter,
         block,

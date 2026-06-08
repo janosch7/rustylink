@@ -6,7 +6,6 @@ use super::signal_routing;
 use super::types::{ClickAction, UpdateResponse};
 use super::view_transform;
 use super::zoom_controls::show_zoom_controls;
-use crate::block_types::BlockShape;
 use crate::editor::operations;
 #[cfg(feature = "dashboard")]
 use crate::egui_app::DashboardControlValue;
@@ -986,7 +985,6 @@ pub(crate) fn update_internal(
             let resp = ui.allocate_rect(r_screen, block_sense);
             let cfg = get_block_type_cfg(b);
             let bg = block_base_color(b, &cfg);
-            let mut effective_bg = bg;
 
             if app.move_mode_enabled && resp.drag_started()
                 && let Some(sid) = &b.sid {
@@ -1127,63 +1125,13 @@ pub(crate) fn update_internal(
                     }
             }
 
-            match cfg.shape {
-                BlockShape::Triangle => {
-                    // Gain-style: right-pointing triangle fill.
-                    // Vertices: left-top, right-center, left-bottom.
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.center().y),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    let mut tri = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    tri.fill = bg;
-                    ui.painter().add(egui::Shape::Path(tri));
-                }
-                BlockShape::Circle => {
-                    let center = r_screen.center();
-                    let radius = r_screen.size().min_elem() / 2.0;
-                    ui.painter().circle_filled(center, radius, bg);
-                }
-                BlockShape::FilledBlack => {
-                    ui.painter().rect_filled(r_screen, 0.0, Color32::BLACK);
-                }
-                BlockShape::Goto => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
-                    ];
-                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    path.fill = bg;
-                    ui.painter().add(egui::Shape::Path(path));
-                }
-                BlockShape::From => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    path.fill = bg;
-                    ui.painter().add(egui::Shape::Path(path));
-                }
-                BlockShape::Rectangle => {
-                    if b.commented {
-                        let commented_bg = Color32::from_rgb(230, 230, 230);
-                        effective_bg = commented_bg;
-                        ui.painter().rect_filled(r_screen, 0.0, commented_bg);
-                    } else {
-                        ui.painter().rect_filled(r_screen, 6.0, bg);
-                    }
-                }
-            }
+            let effective_bg = crate::egui_app::render::fill_block_body(
+                ui.painter(),
+                r_screen,
+                cfg.shape,
+                bg,
+                b.commented,
+            );
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
@@ -2509,55 +2457,7 @@ pub(crate) fn update_internal(
                 2.0,
                 Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
             );
-            match cfg.shape {
-                BlockShape::Triangle => {
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.center().y),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::Circle => {
-                    let center = r_screen.center();
-                    let radius = r_screen.size().min_elem() / 2.0;
-                    painter.circle_stroke(center, radius, stroke);
-                }
-                BlockShape::FilledBlack => {
-                    // No separate border — the filled black rect is sufficient.
-                }
-                BlockShape::Goto => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::From => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::Rectangle => {
-                    painter.rect_stroke(*r_screen, 4.0, stroke, egui::StrokeKind::Inside);
-                }
-            }
+            crate::egui_app::render::stroke_block_body(&painter, *r_screen, cfg.shape, stroke);
 
             fn paint_port_chevron_placed(
                 painter: &egui::Painter,
