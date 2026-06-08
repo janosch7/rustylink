@@ -339,6 +339,11 @@ pub struct ComputedViewCache {
     /// Cached connection target graph reused across paint passes until invalidated.
     pub connection_target_resolver:
         Option<Arc<crate::connection_targets::ConnectionTargetResolver>>,
+    /// Topology signature the cached resolver was built from.  The resolver
+    /// depends only on model topology (not geometry) and spans the whole tree,
+    /// so it is reused across subsystem navigation and layout-only edits and is
+    /// rebuilt only when this signature changes.
+    cached_resolver_sig: Option<u64>,
     /// The subsystem path for which this cache was computed.
     cached_path: Vec<String>,
     /// Model generation at which the cache was computed.
@@ -354,6 +359,7 @@ impl Default for ComputedViewCache {
             port_counts: std::collections::HashMap::new(),
             connected_ports: std::collections::HashSet::new(),
             connection_target_resolver: None,
+            cached_resolver_sig: None,
             cached_path: Vec::new(),
             cached_gen: 0,
         }
@@ -377,6 +383,28 @@ impl ComputedViewCache {
     /// Bump the generation counter, invalidating the cache.
     pub fn invalidate(&mut self) {
         self.generation += 1;
+    }
+
+    /// Ensure the cached connection-target resolver is up to date for `root`,
+    /// rebuilding it only when the model topology signature has changed.
+    ///
+    /// This is independent of the path/generation validity used for the
+    /// geometry-sensitive caches: navigating subsystems or moving blocks does
+    /// not rebuild the (whole-tree, topology-only) resolver.
+    pub fn ensure_resolver(
+        &mut self,
+        root: &System,
+    ) -> Arc<crate::connection_targets::ConnectionTargetResolver> {
+        let sig = crate::connection_targets::model_topology_signature(root);
+        if self.connection_target_resolver.is_none() || self.cached_resolver_sig != Some(sig) {
+            self.connection_target_resolver = Some(Arc::new(
+                crate::connection_targets::ConnectionTargetResolver::new(root),
+            ));
+            self.cached_resolver_sig = Some(sig);
+        }
+        self.connection_target_resolver
+            .clone()
+            .expect("resolver just populated")
     }
 }
 

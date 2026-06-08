@@ -1566,3 +1566,52 @@ fn mux_targets_use_resolve_without_element_index() {
     assert_eq!(targets[0].element_index, None);
     assert_eq!(targets[0].origin, ConnectionTargetOrigin::Mux);
 }
+
+#[test]
+fn topology_signature_ignores_geometry_but_tracks_topology() {
+    use rustylink::connection_targets::model_topology_signature;
+    use rustylink::model::Point;
+
+    let make = || System {
+        properties: props(&[("Name", "m")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Display", "Sink", "2", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![line("1", 1, "2", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let base = make();
+    let base_sig = model_topology_signature(&base);
+
+    // Geometry-only edits (block Position/ZOrder, line waypoints) must not
+    // change the signature.
+    let mut geom = make();
+    geom.blocks[0]
+        .properties
+        .insert("Position".to_string(), "[1, 2, 3, 4]".to_string());
+    geom.blocks[0]
+        .properties
+        .insert("ZOrder".to_string(), "99".to_string());
+    geom.lines[0].points = vec![Point { x: 5, y: 5 }, Point { x: 50, y: 50 }];
+    assert_eq!(
+        base_sig,
+        model_topology_signature(&geom),
+        "geometry-only edits should not change the topology signature"
+    );
+
+    // Topology edits must change the signature.
+    let mut renamed = make();
+    renamed.blocks[0].name = "A2".to_string();
+    assert_ne!(base_sig, model_topology_signature(&renamed));
+
+    let mut rewired = make();
+    rewired.lines[0] = line("1", 1, "2", 2, None);
+    assert_ne!(base_sig, model_topology_signature(&rewired));
+
+    let mut retyped = make();
+    retyped.blocks[0].block_type = "Gain".to_string();
+    assert_ne!(base_sig, model_topology_signature(&retyped));
+}

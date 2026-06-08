@@ -1371,15 +1371,16 @@ pub(crate) fn update_internal(
             }
         }
 
+        // The connection-target resolver depends only on model topology and is
+        // rebuilt only when that changes (not on navigation or layout drags).
+        let connection_target_resolver = app.view_cache.ensure_resolver(&app.root);
+
         // Use cached line colors and port info when possible; recompute on model change.
         let cache_gen = app.view_cache.generation;
         if !app.view_cache.is_valid(&app.path, cache_gen) {
             let line_adjacency = line_coloring::compute_line_adjacency(&entities.lines);
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
-            app.view_cache.connection_target_resolver = Some(std::sync::Arc::new(
-                crate::connection_targets::ConnectionTargetResolver::new(&app.root),
-            ));
 
             let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
@@ -1393,11 +1394,6 @@ pub(crate) fn update_internal(
         let line_colors = app.view_cache.line_colors.clone();
         let port_counts = app.view_cache.port_counts.clone();
         let connected_ports = app.view_cache.connected_ports.clone();
-        let connection_target_resolver = app
-            .view_cache
-            .connection_target_resolver
-            .clone()
-            .expect("connection target resolver cache should be populated");
 
         let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
 
