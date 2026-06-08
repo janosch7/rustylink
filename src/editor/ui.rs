@@ -22,7 +22,7 @@ use crate::model::EndpointRef;
 
 use crate::egui_app::{
     BlockDialog, SignalDialog, endpoint_pos_maybe_mirrored, get_block_type_cfg,
-    highlight_query_job, parse_block_rect, parse_rect_str, render_block_icon, show_zoom_controls,
+    highlight_query_job, parse_block_rect, parse_rect_str, show_zoom_controls,
     wrap_text_to_max_width,
 };
 
@@ -444,31 +444,33 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let is_selected = state.selection.is_block_selected(block_idx);
 
-            // Render block
-            if b.commented {
-                let commented_bg = Color32::from_rgb(230, 230, 230);
-                ui.painter().rect_filled(r_screen, 0.0, commented_bg);
-                let fg = contrast_color(commented_bg);
-                if let Some(lbl) = crate::builtin_libraries::compute_block_instance_label(b) {
-                    let font_id = egui::FontId::proportional(12.0 * font_scale);
-                    let galley = ui.painter().layout_no_wrap(lbl, font_id, fg);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    ui.painter().galley(pos, galley, fg);
-                } else {
-                    render_block_icon(ui.painter(), b, &r_screen, font_scale, None);
-                }
+            // Render block.  The interior (icon / in-block label / static
+            // glyph) is drawn by the single general renderer shared with the
+            // viewer; no block-type-specific code lives here.
+            let (rounding, body_bg) = if b.commented {
+                (0.0, Color32::from_rgb(230, 230, 230))
             } else {
-                ui.painter().rect_filled(r_screen, 6.0, bg);
-                let fg = contrast_color(bg);
-                if let Some(lbl) = crate::builtin_libraries::compute_block_instance_label(b) {
-                    let font_id = egui::FontId::proportional(12.0 * font_scale);
-                    let galley = ui.painter().layout_no_wrap(lbl, font_id, fg);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    ui.painter().galley(pos, galley, fg);
-                } else {
-                    render_block_icon(ui.painter(), b, &r_screen, font_scale, None);
-                }
-            }
+                (6.0, bg)
+            };
+            ui.painter().rect_filled(r_screen, rounding, body_bg);
+            let fg = contrast_color(body_bg);
+            let params = crate::simulink_libraries::render::InteriorParams {
+                live_mode: false,
+                font_scale,
+                name_font_factor: state.app.block_name_font_factor,
+                live_value: None,
+                live_text: None,
+                live_display_options: None,
+                port_y: None,
+                port_label_widths: None,
+                text_color: fg,
+            };
+            crate::simulink_libraries::render::render_block_interior(
+                ui.painter(),
+                b,
+                &r_screen,
+                &params,
+            );
 
             // Selection highlight
             if is_selected {
