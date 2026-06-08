@@ -197,6 +197,8 @@ pub struct SimulinkBlockDefinition {
     pub aliases: &'static [&'static str],
     /// Catalog category (used by the block browser).
     pub category: &'static str,
+    /// Human-readable browser display name. Empty falls back to `block_type`.
+    pub display_name: &'static str,
     /// Short human description (block browser tooltip).
     pub description: &'static str,
     /// Input port count policy.
@@ -255,6 +257,7 @@ impl SimulinkBlockDefinition {
             block_type,
             aliases: &[],
             category,
+            display_name: "",
             description: "",
             inputs: IOPorts::None,
             outputs: IOPorts::None,
@@ -274,6 +277,11 @@ impl SimulinkBlockDefinition {
 
     pub const fn with_aliases(mut self, aliases: &'static [&'static str]) -> Self {
         self.aliases = aliases;
+        self
+    }
+
+    pub const fn with_display_name(mut self, display_name: &'static str) -> Self {
+        self.display_name = display_name;
         self
     }
 
@@ -341,6 +349,15 @@ impl SimulinkBlockDefinition {
     pub const fn with_instance_label(mut self, f: fn(&Block) -> Option<String>) -> Self {
         self.compute_instance_label = Some(f);
         self
+    }
+
+    /// Browser display name, falling back to the canonical block type.
+    pub fn display_name(&self) -> &'static str {
+        if self.display_name.is_empty() {
+            self.block_type
+        } else {
+            self.display_name
+        }
     }
 }
 

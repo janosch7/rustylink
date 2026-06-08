@@ -7,12 +7,14 @@
 
 #![cfg(feature = "egui")]
 
+pub mod catalog;
 pub mod core;
 pub mod dashboard;
 
 use crate::simulink_libraries::types::SimulinkLibrary;
 
-/// Every library that contributes definitions to the unified catalog.
+/// Hand-written libraries with full rendering metadata (icons, shapes, custom
+/// static/live renderers).  Registered first so they win on key collisions.
 pub static ALL_LIBRARIES: &[SimulinkLibrary] = &[
     SimulinkLibrary {
         name: "simulink",
@@ -23,3 +25,9 @@ pub static ALL_LIBRARIES: &[SimulinkLibrary] = &[
         blocks: self::dashboard::BLOCKS,
     },
 ];
+
+/// The metadata-only browser/palette catalog (~786 entries).  Registered after
+/// the rich libraries and the bridged virtual libraries, so it only fills in
+/// block types those do not already provide.
+pub static PALETTE: &[crate::simulink_libraries::types::SimulinkBlockDefinition] =
+    self::catalog::BLOCKS;

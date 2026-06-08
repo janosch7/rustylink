@@ -62,6 +62,14 @@ impl DefinitionRegistry {
             all.push(def);
         }
 
+        // Metadata-only browser/palette catalog.  Registered last so the rich
+        // and bridged definitions above keep priority on key collisions; this
+        // only fills in block types they do not provide.
+        for def in super::libraries::PALETTE {
+            register_keys(&mut by_key, def);
+            all.push(def);
+        }
+
         // Bridge user-registered libraries.
         if let Some(extra) = USER_DEFINITIONS.get()
             && let Ok(guard) = extra.read()
