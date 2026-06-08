@@ -5,8 +5,6 @@
 //! read and modify this registry at runtime to customize the appearance of
 //! specific Simulink block types.
 
-#![cfg(feature = "egui")]
-
 use std::collections::HashMap;
 use std::sync::RwLock;
 

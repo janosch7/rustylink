@@ -147,3 +147,45 @@ required-features = ["egui"]
 name = "user_virtual_library"
 path = "tests/user_virtual_library.rs"
 required-features = ["egui"]
+
+[[test]]
+name = "line_coloring"
+path = "tests/line_coloring.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "signal_routing"
+path = "tests/signal_routing.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "corner_ops"
+path = "tests/corner_ops.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "view_transform"
+path = "tests/view_transform.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "egui_app_mod"
+path = "tests/egui_app_mod.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "egui_app_state"
+path = "tests/egui_app_state.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "live_values"
+path = "tests/live_values.rs"
+
+[[test]]
+name = "block"
+path = "tests/block.rs"
+
+[[test]]
+name = "connection_targets"
+path = "tests/connection_targets.rs"

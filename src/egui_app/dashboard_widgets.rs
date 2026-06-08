@@ -674,6 +674,7 @@ fn option_labels(block: &Block) -> Vec<String> {
     }
 }
 
+#[allow(dead_code)]
 fn discrete_option_items(block: &Block) -> Vec<(String, f64)> {
     let pairs = option_label_value_pairs(block);
     if pairs.is_empty() {
@@ -690,6 +691,7 @@ fn discrete_option_items(block: &Block) -> Vec<(String, f64)> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn discrete_selected_index(block: &Block, live_value: f64) -> usize {
     let options = discrete_option_items(block);
     if options.is_empty() {

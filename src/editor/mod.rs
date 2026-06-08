@@ -15,8 +15,6 @@
 //! - **ID management**: Automatic SID assignment and reassignment
 //! - **Undo/Redo**: Full undo/redo stack for all editing operations
 
-#![cfg(feature = "egui")]
-
 pub mod block_catalog;
 pub mod operations;
 pub mod selection;
