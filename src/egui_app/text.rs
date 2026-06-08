@@ -92,11 +92,10 @@ impl AnnotationRichText {
     ) -> LayoutJob {
         let mut job = LayoutJob::default();
         let base_color = style.visuals.text_color();
-        let new_line_format = |size: f32| {
-            let mut fmt = egui::text::TextFormat::default();
-            fmt.font_id = FontId::proportional(size);
-            fmt.color = base_color;
-            fmt
+        let new_line_format = |size: f32| egui::text::TextFormat {
+            font_id: FontId::proportional(size),
+            color: base_color,
+            ..Default::default()
         };
 
         for (idx, line) in self.lines.iter().enumerate() {
@@ -187,11 +186,11 @@ impl AnnotationLine {
         if text.is_empty() {
             return;
         }
-        if let Some(prev) = self.spans.last_mut() {
-            if prev.style == style {
-                prev.text.push_str(&text);
-                return;
-            }
+        if let Some(prev) = self.spans.last_mut()
+            && prev.style == style
+        {
+            prev.text.push_str(&text);
+            return;
         }
         self.spans.push(AnnotationSpan { text, style });
     }
@@ -332,7 +331,7 @@ fn push_text_segment(
     style_stack: &[StyleFrame],
 ) {
     let mut owned = text.into_owned();
-    owned = owned.replace('\r', "").replace('\n', "");
+    owned = owned.replace(['\r', '\n'], "");
     if owned.is_empty() {
         return;
     }
@@ -425,25 +424,25 @@ fn style_from_element(name: &str, attrs: &[(String, String)]) -> StyleFrame {
     if let Some(style_attr) = find_attr(attrs, "style") {
         apply_css_declarations(&mut frame, style_attr);
     }
-    if let Some(color_attr) = find_attr(attrs, "color") {
-        if let Some(color) = parse_color(color_attr) {
-            frame.color = Some(color);
-        }
+    if let Some(color_attr) = find_attr(attrs, "color")
+        && let Some(color) = parse_color(color_attr)
+    {
+        frame.color = Some(color);
     }
-    if let Some(bg_attr) = find_attr(attrs, "bgcolor") {
-        if let Some(color) = parse_color(bg_attr) {
-            frame.background = Some(color);
-        }
+    if let Some(bg_attr) = find_attr(attrs, "bgcolor")
+        && let Some(color) = parse_color(bg_attr)
+    {
+        frame.background = Some(color);
     }
-    if let Some(weight_attr) = find_attr(attrs, "font-weight") {
-        if let Some(bold) = parse_font_weight(weight_attr) {
-            frame.bold = Some(bold);
-        }
+    if let Some(weight_attr) = find_attr(attrs, "font-weight")
+        && let Some(bold) = parse_font_weight(weight_attr)
+    {
+        frame.bold = Some(bold);
     }
-    if let Some(size_attr) = find_attr(attrs, "font-size") {
-        if let Some(size) = parse_font_size(size_attr) {
-            frame.font_size_px = Some(size);
-        }
+    if let Some(size_attr) = find_attr(attrs, "font-size")
+        && let Some(size) = parse_font_size(size_attr)
+    {
+        frame.font_size_px = Some(size);
     }
 
     match name {
@@ -509,7 +508,7 @@ fn apply_css_declarations(frame: &mut StyleFrame, decls: &str) {
     }
 }
 
-fn clean_css_value<'a>(value: &'a str) -> &'a str {
+fn clean_css_value(value: &str) -> &str {
     let trimmed = value.trim();
     let lower = trimmed.to_ascii_lowercase();
     if let Some(pos) = lower.find("!important") {
@@ -714,8 +713,10 @@ pub fn highlight_query_job(text: &str, query: &str) -> LayoutJob {
             job.append(&t[i..start], 0.0, egui::TextFormat::default());
         }
         let end = start + ql.len();
-        let mut fmt = egui::TextFormat::default();
-        fmt.background = Color32::YELLOW.into();
+        let fmt = egui::TextFormat {
+            background: Color32::YELLOW,
+            ..Default::default()
+        };
         job.append(&t[start..end], 0.0, fmt);
         i = end;
     }
@@ -738,8 +739,8 @@ pub fn matlab_syntax_job(script: &str) -> LayoutJob {
     static SYNTAX_SET: OnceCell<SyntaxSet> = OnceCell::new();
     static THEME_SET: OnceCell<ThemeSet> = OnceCell::new();
 
-    let ss = SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines());
-    let ts = THEME_SET.get_or_init(|| ThemeSet::load_defaults());
+    let ss = SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines);
+    let ts = THEME_SET.get_or_init(ThemeSet::load_defaults);
     // Important: Don't select by ".m" file extension as syntect often resolves that to Objective‑C.
     // Prefer the explicit MATLAB scope or well-known names and only then fall back to plain text.
     let syntax = {

@@ -25,9 +25,7 @@ pub fn block_dialog_title(block: &crate::model::Block) -> String {
 
 pub(crate) fn is_block_subsystem(b: &crate::model::Block) -> bool {
     (b.block_type == "SubSystem" || b.block_type == "Reference")
-        && b.subsystem
-            .as_ref()
-            .map_or(false, |sub| sub.chart.is_none())
+        && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none())
 }
 
 pub(crate) fn record_interaction(current: &mut UpdateResponse, new: UpdateResponse) {

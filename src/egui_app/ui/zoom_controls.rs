@@ -1,5 +1,6 @@
 use eframe::egui::{self, Pos2, Rect, Vec2};
 
+#[allow(clippy::too_many_arguments)]
 pub fn show_zoom_controls(
     ctx: &egui::Context,
     area_id: egui::Id,

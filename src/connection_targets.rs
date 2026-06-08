@@ -296,7 +296,7 @@ impl ConnectionTargetResolver {
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
-                    "From" => self.from_block_targets(system, block, line_targets),
+                    "From" => self.resolve_from_block_targets(system, block, line_targets),
                     _ => self.base_line_targets(system, system_path, block_lookup, line),
                 };
 
@@ -558,7 +558,7 @@ impl ConnectionTargetResolver {
             .collect()
     }
 
-    fn from_block_targets(
+    fn resolve_from_block_targets(
         &self,
         system: &System,
         block: &Block,
@@ -593,6 +593,7 @@ impl ConnectionTargetResolver {
         targets
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn upstream_propagated_targets(
         &self,
         system: &System,
@@ -1078,13 +1079,12 @@ fn apply_line_resolve_hint(
         return;
     }
 
-    if let Some(dst) = &line.dst {
-        if let Some(block) = block_lookup.get(dst.sid.as_str()) {
-            if block.block_type == "Mux" {
-                target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
-                return;
-            }
-        }
+    if let Some(dst) = &line.dst
+        && let Some(block) = block_lookup.get(dst.sid.as_str())
+        && block.block_type == "Mux"
+    {
+        target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
+        return;
     }
 
     if target.resolve.is_none() && target.element_index.is_some() {
@@ -1321,6 +1321,7 @@ fn dashboard_binding_target_path(binding: &DashboardBinding) -> &DashboardTarget
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
     let mut seen: BTreeMap<
         (
@@ -1340,7 +1341,7 @@ pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
             target.signal_name.clone(),
             target.resolve.clone(),
             target.element_index,
-            target.origin.clone(),
+            target.origin,
             target.signals_only,
         );
         if let Some(index) = seen.get(&key).copied() {

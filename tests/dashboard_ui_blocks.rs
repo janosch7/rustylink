@@ -139,7 +139,7 @@ fn archive_resolves_binding_persistence_refs() {
     // resolve_binding_persistence should locate the raw bytes
     let data = archive.resolve_binding_persistence("bdmxdata:BindingPersistence_151");
     assert!(data.is_some(), "Expected raw .mxarray data");
-    assert!(data.unwrap().len() > 0);
+    assert!(!data.unwrap().is_empty());
 }
 
 #[test]

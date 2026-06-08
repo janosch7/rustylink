@@ -57,7 +57,7 @@ fn parse_block_sid_as_string_and_endpoint() {
     assert_eq!(b1.name, "freq");
     assert_eq!(b1.sid.as_deref(), Some("2::28"));
     // Endpoints should parse as strings too
-    assert!(system.lines.len() >= 1);
+    assert!(!system.lines.is_empty());
     let l = &system.lines[0];
     assert_eq!(l.src.as_ref().map(|e| e.sid.as_str()), Some("2::28"));
     assert_eq!(l.dst.as_ref().map(|e| e.sid.as_str()), Some("52"));

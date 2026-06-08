@@ -43,9 +43,10 @@ fn matrix_library_spaced_names_are_canonical() {
         // the name gives a different string, the original must already have a
         // space (or be multi-case).
         // This just ensures we didn't accidentally leave "IsTriangular" etc.
-        let has_uppercase_after_start = name.chars().enumerate().any(|(i, c)| {
-            i > 0 && c.is_uppercase() && !name.chars().nth(i - 1).map_or(false, |p| p == ' ')
-        });
+        let has_uppercase_after_start = name
+            .chars()
+            .enumerate()
+            .any(|(i, c)| i > 0 && c.is_uppercase() && name.chars().nth(i - 1) != Some(' '));
         // If it has uppercase after a non-space character (CamelCase), it should
         // also have a space somewhere (i.e. be already humanized like "Is Triangular").
         if has_uppercase_after_start {

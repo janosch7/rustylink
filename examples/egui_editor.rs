@@ -41,12 +41,12 @@ fn main() -> Result<()> {
 
     // Build library search paths
     let mut lib_paths: Vec<Utf8PathBuf> = Vec::new();
-    if let Some(parent) = path.parent() {
-        if !parent.as_str().is_empty() {
-            lib_paths.push(parent.to_path_buf());
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_str().is_empty()
+    {
+        lib_paths.push(parent.to_path_buf());
     }
-    lib_paths.extend(args.lib.iter().map(|s| Utf8PathBuf::from(s)));
+    lib_paths.extend(args.lib.iter().map(Utf8PathBuf::from));
 
     // Parse system
     let (root_system, charts, chart_map) = if path.extension() == Some("slx") {

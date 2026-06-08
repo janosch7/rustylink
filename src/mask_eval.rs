@@ -4,6 +4,7 @@
 //!  - Initialization lines of the form: <var>={ 'A','B','C' }; or using double quotes or &apos; entities already decoded.
 //!  - Popup MaskParameter with Name="control" (any name) and TypeOptions <Option>1. Position Control</Option> (ignored) and Value like "1. Position Control".
 //!  - Display string of the form `disp(var{param})` where var and param are identifiers.
+//!
 //! We map popup parameter to an index (1-based). We then select the corresponding element from var cell array and return it.
 //! If anything fails, we return None.
 use crate::model::{Block, MaskParamType};
@@ -29,10 +30,10 @@ pub fn evaluate_mask_display(block: &mut Block) {
     for p in &mask.parameters {
         if matches!(p.param_type, MaskParamType::Popup) {
             // Value like "1. Position Control" -> take prefix number as index, else try find in options
-            if let Some(val) = p.value.as_ref() {
-                if let Some(idx) = parse_leading_index(val) {
-                    param_map.insert(p.name.clone(), idx);
-                }
+            if let Some(val) = p.value.as_ref()
+                && let Some(idx) = parse_leading_index(val)
+            {
+                param_map.insert(p.name.clone(), idx);
             }
         }
     }
@@ -54,20 +55,20 @@ pub fn evaluate_mask_display(block: &mut Block) {
 
 fn parse_cell_array_assignment(init: &str) -> Vec<String> {
     // Find pattern <ident>={...}; take first {...}
-    if let Some(open) = init.find('{') {
-        if let Some(close) = init[open + 1..].find('}') {
-            // relative index
-            let inner = &init[open + 1..open + 1 + close];
-            // Split on commas not within quotes (we keep it simple assuming no escaped quotes)
-            let mut out = Vec::new();
-            for part in inner.split(',') {
-                let s = part.trim().trim_matches('\'').trim_matches('"');
-                if !s.is_empty() {
-                    out.push(s.to_string());
-                }
+    if let Some(open) = init.find('{')
+        && let Some(close) = init[open + 1..].find('}')
+    {
+        // relative index
+        let inner = &init[open + 1..open + 1 + close];
+        // Split on commas not within quotes (we keep it simple assuming no escaped quotes)
+        let mut out = Vec::new();
+        for part in inner.split(',') {
+            let s = part.trim().trim_matches('\'').trim_matches('"');
+            if !s.is_empty() {
+                out.push(s.to_string());
             }
-            return out;
         }
+        return out;
     }
     Vec::new()
 }

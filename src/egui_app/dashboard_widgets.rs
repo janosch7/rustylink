@@ -270,7 +270,7 @@ fn paint_dashboard_widget_icon(
         "DashboardScope" => {
             let plot = inner_rect(&inner, 0.95);
             painter.rect_stroke(plot, 2.0, stroke, egui::StrokeKind::Inside);
-            let pts = vec![
+            let pts = [
                 Pos2::new(plot.left() + 2.0, plot.center().y + 2.0),
                 Pos2::new(plot.left() + plot.width() * 0.3, plot.top() + 3.0),
                 Pos2::new(plot.left() + plot.width() * 0.55, plot.bottom() - 3.0),
@@ -2135,11 +2135,11 @@ fn render_edit_field_control_widget(
             }
         });
     });
-    if app.live_mode_enabled {
-        if let Some(value) = submitted {
-            app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
-            return true;
-        }
+    if app.live_mode_enabled
+        && let Some(value) = submitted
+    {
+        app.queue_dashboard_control(block.clone(), DashboardControlValue::Scalar(value));
+        return true;
     }
     false
 }
@@ -2255,7 +2255,7 @@ fn render_painted_control_widget(
         match kind {
             "bool" if response.clicked() => Some(if live_value < 0.5 { 1.0 } else { 0.0 }),
             "discrete" | "scalar"
-                if matches!(response.interact_pointer_pos(), Some(_))
+                if response.interact_pointer_pos().is_some()
                     && (response.clicked() || response.dragged()) =>
             {
                 response.interact_pointer_pos().map(|pointer_pos| {
@@ -2324,6 +2324,7 @@ fn render_painted_control_widget(
 }
 
 #[cfg(feature = "dashboard")]
+#[allow(clippy::too_many_arguments)]
 pub fn render_dashboard_control_widget(
     app: &mut SubsystemApp,
     ui: &mut egui::Ui,

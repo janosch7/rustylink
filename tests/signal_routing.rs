@@ -3,9 +3,8 @@
 use eframe::egui::Pos2;
 use indexmap::IndexMap;
 use rustylink::egui_app::ui::signal_routing::{
-    collect_branch_handle_positions, compute_port_info, get_branch_mut, move_branch_layouts,
-    move_branch_point, move_line_layout, move_line_point, orthogonalize_polyline,
-    push_orthogonal_segments, register_branch_endpoints, register_endpoint,
+    collect_branch_handle_positions, get_branch_mut, move_branch_point, move_line_layout,
+    move_line_point, orthogonalize_polyline, push_orthogonal_segments,
 };
 use rustylink::model::{Branch, Line, Point};
 

@@ -104,55 +104,55 @@ fn compare_roundtrip(path: &str) -> Result<Vec<String>> {
 
     // Compare content of each shared entry
     for (name, orig_data) in &original {
-        if let Some(regen_data) = regenerated.get(name) {
-            if orig_data != regen_data {
-                // Try to show a useful diff
-                let orig_str = String::from_utf8(orig_data.clone());
-                let regen_str = String::from_utf8(regen_data.clone());
-                match (orig_str, regen_str) {
-                    (Ok(orig_text), Ok(regen_text)) => {
-                        // Text comparison: show line-by-line diff
-                        let orig_lines: Vec<&str> = orig_text.lines().collect();
-                        let regen_lines: Vec<&str> = regen_text.lines().collect();
-                        let mut line_diffs = Vec::new();
-                        let max_lines = orig_lines.len().max(regen_lines.len());
-                        for i in 0..max_lines {
-                            let orig_line = orig_lines.get(i).copied().unwrap_or("<EOF>");
-                            let regen_line = regen_lines.get(i).copied().unwrap_or("<EOF>");
-                            if orig_line != regen_line {
+        if let Some(regen_data) = regenerated.get(name)
+            && orig_data != regen_data
+        {
+            // Try to show a useful diff
+            let orig_str = String::from_utf8(orig_data.clone());
+            let regen_str = String::from_utf8(regen_data.clone());
+            match (orig_str, regen_str) {
+                (Ok(orig_text), Ok(regen_text)) => {
+                    // Text comparison: show line-by-line diff
+                    let orig_lines: Vec<&str> = orig_text.lines().collect();
+                    let regen_lines: Vec<&str> = regen_text.lines().collect();
+                    let mut line_diffs = Vec::new();
+                    let max_lines = orig_lines.len().max(regen_lines.len());
+                    for i in 0..max_lines {
+                        let orig_line = orig_lines.get(i).copied().unwrap_or("<EOF>");
+                        let regen_line = regen_lines.get(i).copied().unwrap_or("<EOF>");
+                        if orig_line != regen_line {
+                            line_diffs.push(format!(
+                                "    Line {}: \n      orig:  {}\n      regen: {}",
+                                i + 1,
+                                orig_line,
+                                regen_line
+                            ));
+                            if line_diffs.len() >= 10 {
                                 line_diffs.push(format!(
-                                    "    Line {}: \n      orig:  {}\n      regen: {}",
-                                    i + 1,
-                                    orig_line,
-                                    regen_line
+                                    "    ... and more (orig {} lines, regen {} lines)",
+                                    orig_lines.len(),
+                                    regen_lines.len()
                                 ));
-                                if line_diffs.len() >= 10 {
-                                    line_diffs.push(format!(
-                                        "    ... and more (orig {} lines, regen {} lines)",
-                                        orig_lines.len(),
-                                        regen_lines.len()
-                                    ));
-                                    break;
-                                }
+                                break;
                             }
                         }
-                        diffs.push(format!(
-                            "CONTENT DIFFERS: {} ({} bytes orig, {} bytes regen)\n{}",
-                            name,
-                            orig_data.len(),
-                            regen_data.len(),
-                            line_diffs.join("\n")
-                        ));
                     }
-                    _ => {
-                        // Binary comparison
-                        diffs.push(format!(
-                            "CONTENT DIFFERS (binary): {} ({} bytes orig, {} bytes regen)",
-                            name,
-                            orig_data.len(),
-                            regen_data.len()
-                        ));
-                    }
+                    diffs.push(format!(
+                        "CONTENT DIFFERS: {} ({} bytes orig, {} bytes regen)\n{}",
+                        name,
+                        orig_data.len(),
+                        regen_data.len(),
+                        line_diffs.join("\n")
+                    ));
+                }
+                _ => {
+                    // Binary comparison
+                    diffs.push(format!(
+                        "CONTENT DIFFERS (binary): {} ({} bytes orig, {} bytes regen)",
+                        name,
+                        orig_data.len(),
+                        regen_data.len()
+                    ));
                 }
             }
         }

@@ -597,16 +597,16 @@ fn apply_inverse(system: &mut System, cmd: &EditorCommand) -> EditorCommand {
             dx,
             dy,
         } => {
-            if let Some(line) = system.lines.get_mut(*line_index) {
-                if let Some(branch) = navigate_branch_mut(&mut line.branches, branch_path) {
-                    if let Some(point) = branch.points.get_mut(*point_index) {
-                        point.x -= dx;
-                        point.y -= dy;
-                    }
-                    if let Some(next) = branch.points.get_mut(*point_index + 1) {
-                        next.x += dx;
-                        next.y += dy;
-                    }
+            if let Some(line) = system.lines.get_mut(*line_index)
+                && let Some(branch) = navigate_branch_mut(&mut line.branches, branch_path)
+            {
+                if let Some(point) = branch.points.get_mut(*point_index) {
+                    point.x -= dx;
+                    point.y -= dy;
+                }
+                if let Some(next) = branch.points.get_mut(*point_index + 1) {
+                    next.x += dx;
+                    next.y += dy;
                 }
             }
             EditorCommand::MoveBranchPoint {
@@ -637,15 +637,15 @@ fn apply_inverse(system: &mut System, cmd: &EditorCommand) -> EditorCommand {
             offset,
         } => {
             // Undo insert = remove that point and merge its offset into the next
-            if let Some(line) = system.lines.get_mut(*line_index) {
-                if *point_index < line.points.len() {
-                    let removed = line.points.remove(*point_index);
-                    // Merge the removed offset into the next point (if any) so
-                    // the downstream geometry stays where it was before insert.
-                    if let Some(next) = line.points.get_mut(*point_index) {
-                        next.x += removed.x;
-                        next.y += removed.y;
-                    }
+            if let Some(line) = system.lines.get_mut(*line_index)
+                && *point_index < line.points.len()
+            {
+                let removed = line.points.remove(*point_index);
+                // Merge the removed offset into the next point (if any) so
+                // the downstream geometry stays where it was before insert.
+                if let Some(next) = line.points.get_mut(*point_index) {
+                    next.x += removed.x;
+                    next.y += removed.y;
                 }
             }
             EditorCommand::RemoveCorner {
@@ -725,12 +725,12 @@ pub fn format_position(l: i32, t: i32, r: i32, b: i32) -> String {
 
 /// Apply a delta to a block's position.
 pub(crate) fn apply_position_delta(block: &mut Block, dx: i32, dy: i32) {
-    if let Some(pos) = &block.position {
-        if let Some((l, t, r, b)) = parse_position(pos) {
-            let new_pos = format_position(l + dx, t + dy, r + dx, b + dy);
-            block.position = Some(new_pos.clone());
-            block.properties.insert("Position".to_string(), new_pos);
-        }
+    if let Some(pos) = &block.position
+        && let Some((l, t, r, b)) = parse_position(pos)
+    {
+        let new_pos = format_position(l + dx, t + dy, r + dx, b + dy);
+        block.position = Some(new_pos.clone());
+        block.properties.insert("Position".to_string(), new_pos);
     }
 }
 
@@ -930,11 +930,11 @@ pub fn move_blocks(
         let src_moved = line
             .src
             .as_ref()
-            .map_or(false, |ep| moved_sids.contains(&ep.sid));
+            .is_some_and(|ep| moved_sids.contains(&ep.sid));
         let dst_moved = line
             .dst
             .as_ref()
-            .map_or(false, |ep| moved_sids.contains(&ep.sid));
+            .is_some_and(|ep| moved_sids.contains(&ep.sid));
 
         if src_moved && dst_moved {
             // Both ends moved by the same delta – shift all points
@@ -972,7 +972,7 @@ fn adjust_branches_delta(
         let dst_moved = branch
             .dst
             .as_ref()
-            .map_or(false, |ep| moved_sids.contains(&ep.sid));
+            .is_some_and(|ep| moved_sids.contains(&ep.sid));
 
         if all_moved || dst_moved {
             for pt in &mut branch.points {
@@ -1242,14 +1242,13 @@ pub fn create_subsystem_from_selection(
     let mut cy = 0i32;
     let mut count = 0;
     for &idx in block_indices {
-        if let Some(block) = system.blocks.get(idx) {
-            if let Some(pos) = &block.position {
-                if let Some((l, t, r, b)) = parse_position(pos) {
-                    cx += (l + r) / 2;
-                    cy += (t + b) / 2;
-                    count += 1;
-                }
-            }
+        if let Some(block) = system.blocks.get(idx)
+            && let Some(pos) = &block.position
+            && let Some((l, t, r, b)) = parse_position(pos)
+        {
+            cx += (l + r) / 2;
+            cy += (t + b) / 2;
+            count += 1;
         }
     }
     if count > 0 {
@@ -1266,11 +1265,11 @@ pub fn create_subsystem_from_selection(
         let src_in = line
             .src
             .as_ref()
-            .map_or(false, |ep| selected_sids.contains(&ep.sid));
+            .is_some_and(|ep| selected_sids.contains(&ep.sid));
         let dst_in = line
             .dst
             .as_ref()
-            .map_or(false, |ep| selected_sids.contains(&ep.sid));
+            .is_some_and(|ep| selected_sids.contains(&ep.sid));
 
         if src_in && dst_in {
             internal_line_indices.push(i);
@@ -1289,13 +1288,12 @@ pub fn create_subsystem_from_selection(
     for &idx in block_indices {
         let mut block = system.blocks[idx].clone();
         // Adjust position relative to centroid
-        if let Some(pos) = &block.position {
-            if let Some((l, t, r, b)) = parse_position(pos) {
-                let new_pos =
-                    format_position(l - cx + 200, t - cy + 200, r - cx + 200, b - cy + 200);
-                block.position = Some(new_pos.clone());
-                block.properties.insert("Position".to_string(), new_pos);
-            }
+        if let Some(pos) = &block.position
+            && let Some((l, t, r, b)) = parse_position(pos)
+        {
+            let new_pos = format_position(l - cx + 200, t - cy + 200, r - cx + 200, b - cy + 200);
+            block.position = Some(new_pos.clone());
+            block.properties.insert("Position".to_string(), new_pos);
         }
         sub_blocks.push(block);
     }
@@ -1460,10 +1458,10 @@ pub fn assign_sids(system: &mut System) -> EditorCommand {
 
     // Find maximum existing numeric SID
     for block in &system.blocks {
-        if let Some(sid) = &block.sid {
-            if let Ok(n) = sid.parse::<u32>() {
-                max_sid = max_sid.max(n);
-            }
+        if let Some(sid) = &block.sid
+            && let Ok(n) = sid.parse::<u32>()
+        {
+            max_sid = max_sid.max(n);
         }
     }
 
@@ -1502,53 +1500,49 @@ pub fn find_snap_port(
         if Some(block_idx) == exclude_block_idx {
             continue;
         }
-        if let Some(pos) = &block.position {
-            if let Some((l, t, r, b)) = parse_position(pos) {
-                let rect_l = l as f32;
-                let rect_t = t as f32;
-                let rect_r = r as f32;
-                let rect_b = b as f32;
+        if let Some(pos) = &block.position
+            && let Some((l, t, r, b)) = parse_position(pos)
+        {
+            let rect_l = l as f32;
+            let rect_t = t as f32;
+            let rect_r = r as f32;
+            let rect_b = b as f32;
 
-                // Count ports
-                let n_in = block
-                    .port_counts
-                    .as_ref()
-                    .and_then(|pc| pc.ins)
-                    .unwrap_or_else(|| {
-                        block.ports.iter().filter(|p| p.port_type == "in").count() as u32
-                    });
-                let n_out = block
-                    .port_counts
-                    .as_ref()
-                    .and_then(|pc| pc.outs)
-                    .unwrap_or_else(|| {
-                        block.ports.iter().filter(|p| p.port_type == "out").count() as u32
-                    });
+            // Count ports
+            let n_in = block
+                .port_counts
+                .as_ref()
+                .and_then(|pc| pc.ins)
+                .unwrap_or_else(|| {
+                    block.ports.iter().filter(|p| p.port_type == "in").count() as u32
+                });
+            let n_out = block
+                .port_counts
+                .as_ref()
+                .and_then(|pc| pc.outs)
+                .unwrap_or_else(|| {
+                    block.ports.iter().filter(|p| p.port_type == "out").count() as u32
+                });
 
-                let mirrored = block.block_mirror.unwrap_or(false);
+            let mirrored = block.block_mirror.unwrap_or(false);
 
-                // Check input ports
-                for i in 1..=n_in {
-                    let (px, py) =
-                        port_model_pos(rect_l, rect_t, rect_r, rect_b, "in", i, n_in, mirrored);
-                    let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
-                    if dist < snap_radius {
-                        if best.as_ref().map_or(true, |b| dist < b.5) {
-                            best = Some((block_idx, "in".to_string(), i, px, py, dist));
-                        }
-                    }
+            // Check input ports
+            for i in 1..=n_in {
+                let (px, py) =
+                    port_model_pos(rect_l, rect_t, rect_r, rect_b, "in", i, n_in, mirrored);
+                let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
+                if dist < snap_radius && best.as_ref().is_none_or(|b| dist < b.5) {
+                    best = Some((block_idx, "in".to_string(), i, px, py, dist));
                 }
+            }
 
-                // Check output ports
-                for i in 1..=n_out {
-                    let (px, py) =
-                        port_model_pos(rect_l, rect_t, rect_r, rect_b, "out", i, n_out, mirrored);
-                    let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
-                    if dist < snap_radius {
-                        if best.as_ref().map_or(true, |b| dist < b.5) {
-                            best = Some((block_idx, "out".to_string(), i, px, py, dist));
-                        }
-                    }
+            // Check output ports
+            for i in 1..=n_out {
+                let (px, py) =
+                    port_model_pos(rect_l, rect_t, rect_r, rect_b, "out", i, n_out, mirrored);
+                let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
+                if dist < snap_radius && best.as_ref().is_none_or(|b| dist < b.5) {
+                    best = Some((block_idx, "out".to_string(), i, px, py, dist));
                 }
             }
         }
@@ -1558,6 +1552,7 @@ pub fn find_snap_port(
 }
 
 /// Compute port position in model coordinates.
+#[allow(clippy::too_many_arguments)]
 fn port_model_pos(
     l: f32,
     t: f32,
@@ -1573,10 +1568,7 @@ fn port_model_pos(
     let dy = (b - t) / (total_segments as f32);
     let y = t + ((2 * port_index) as f32 - 0.5) * dy;
 
-    let is_left = match (port_type, mirrored) {
-        ("in", false) | ("out", true) => true,
-        _ => false,
-    };
+    let is_left = matches!((port_type, mirrored), ("in", false) | ("out", true));
 
     if is_left { (l, y) } else { (r, y) }
 }

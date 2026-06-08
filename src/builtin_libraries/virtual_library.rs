@@ -315,6 +315,7 @@ pub struct OwnedVirtualBlock {
     ///
     /// Mirrors [`VirtualBlock::compute_instance_label`] for the dynamic
     /// (user-registered) library API.
+    #[allow(clippy::type_complexity)]
     pub compute_instance_label: Option<Arc<dyn Fn(&Block) -> Option<String> + Send + Sync>>,
     /// Optional overrides for individual port positions and placement sides.
     ///

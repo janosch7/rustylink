@@ -138,6 +138,7 @@ fn parse_authored_number_list(raw: &str) -> Option<Vec<f32>> {
     (!values.is_empty()).then_some(values)
 }
 
+#[allow(clippy::type_complexity)]
 fn load_source_model(
     source_path: &Utf8Path,
 ) -> anyhow::Result<(System, BTreeMap<u32, Chart>, BTreeMap<String, u32>)> {
@@ -443,9 +444,11 @@ pub struct SubsystemApp {
     /// Empty if no library lookup was performed.
     pub library_search_paths: Vec<Utf8PathBuf>,
     /// Registered listeners to be notified whenever the displayed subsystem changes.
+    #[allow(clippy::type_complexity)]
     subsystem_change_listeners: Vec<Arc<dyn Fn(&[String], &SubsystemEntities) + Send + Sync>>, // private to encourage using the API
     /// Optional click handler to override default action when clicking a block.
     /// Return true from the handler to indicate the click was handled and suppress the default behavior.
+    #[allow(clippy::type_complexity)]
     pub block_click_handler: Option<Arc<dyn Fn(&mut SubsystemApp, &Block) -> bool + Send + Sync>>,
 
     /// Global default for showing block names.
@@ -1106,15 +1109,14 @@ impl SubsystemApp {
 
     /// If the block is a non-chart subsystem, open it and return true.
     pub fn open_block_if_subsystem(&mut self, b: &Block) -> bool {
-        if b.block_type == "SubSystem" || b.block_type == "Reference" {
-            if let Some(sub) = &b.subsystem {
-                if sub.chart.is_none() {
-                    self.remember_current_navigation_view_state();
-                    self.path.push(b.name.clone());
-                    self.finish_navigation_change();
-                    return true;
-                }
-            }
+        if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            && let Some(sub) = &b.subsystem
+            && sub.chart.is_none()
+        {
+            self.remember_current_navigation_view_state();
+            self.path.push(b.name.clone());
+            self.finish_navigation_change();
+            return true;
         }
         false
     }

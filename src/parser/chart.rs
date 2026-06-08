@@ -48,17 +48,15 @@ pub fn parse_chart_from_text(text: &str, path_hint: Option<&str>) -> Result<Char
         if let Some(eml) = st
             .children()
             .find(|c| c.is_element() && c.has_tag_name("eml"))
-        {
-            if let Some(scr) = eml
+            && let Some(scr) = eml
                 .children()
                 .find(|c| {
                     c.is_element() && c.has_tag_name("P") && c.attribute("Name") == Some("script")
                 })
                 .and_then(|p| p.text())
-            {
-                script = Some(scr.to_string());
-                break;
-            }
+        {
+            script = Some(scr.to_string());
+            break;
         }
     }
 
@@ -136,14 +134,14 @@ pub fn parse_chart_from_text(text: &str, path_hint: Option<&str>) -> Result<Char
                                 }
                             }
                             _ => {
-                                if pp.has_tag_name("P") {
-                                    if let Some(nm) = pp.attribute("Name") {
-                                        let val = pp.text().unwrap_or("").to_string();
-                                        match nm {
-                                            "complexity" => complexity = Some(val),
-                                            "frame" => frame = Some(val),
-                                            _ => {}
-                                        }
+                                if pp.has_tag_name("P")
+                                    && let Some(nm) = pp.attribute("Name")
+                                {
+                                    let val = pp.text().unwrap_or("").to_string();
+                                    match nm {
+                                        "complexity" => complexity = Some(val),
+                                        "frame" => frame = Some(val),
+                                        _ => {}
                                     }
                                 }
                             }

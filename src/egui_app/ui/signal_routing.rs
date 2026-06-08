@@ -167,6 +167,7 @@ pub fn register_branch_endpoints(
 }
 
 /// Compute port counts and connected ports from a set of lines.
+#[allow(clippy::type_complexity)]
 pub fn compute_port_info(
     lines: &[crate::model::Line],
     blocks: &[crate::model::Block],
@@ -194,22 +195,22 @@ pub fn compute_port_info(
     // Pre-populate from block declarations so line and chevron positioning
     // use consistent total port counts.
     for b in blocks {
-        if let Some(sid) = &b.sid {
-            if let Some(pc) = &b.port_counts {
-                if let Some(ins) = pc.ins {
-                    let key = (sid.clone(), 0u8);
-                    port_counts
-                        .entry(key)
-                        .and_modify(|v| *v = (*v).max(ins))
-                        .or_insert(ins);
-                }
-                if let Some(outs) = pc.outs {
-                    let key = (sid.clone(), 1u8);
-                    port_counts
-                        .entry(key)
-                        .and_modify(|v| *v = (*v).max(outs))
-                        .or_insert(outs);
-                }
+        if let Some(sid) = &b.sid
+            && let Some(pc) = &b.port_counts
+        {
+            if let Some(ins) = pc.ins {
+                let key = (sid.clone(), 0u8);
+                port_counts
+                    .entry(key)
+                    .and_modify(|v| *v = (*v).max(ins))
+                    .or_insert(ins);
+            }
+            if let Some(outs) = pc.outs {
+                let key = (sid.clone(), 1u8);
+                port_counts
+                    .entry(key)
+                    .and_modify(|v| *v = (*v).max(outs))
+                    .or_insert(outs);
             }
         }
     }

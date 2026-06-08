@@ -250,7 +250,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         .filter_map(|a| {
             a.position
                 .as_deref()
-                .and_then(|s| parse_rect_str(s))
+                .and_then(parse_rect_str)
                 .map(|pos| (a, pos))
         })
         .collect();
@@ -614,15 +614,15 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 let nt = nt as i32;
                 let nr = nr as i32;
                 let nb = nb as i32;
-                if nl != original_l || nt != original_t || nr != original_r || nb != original_b {
-                    if let Some(system) = super::state::resolve_subsystem_by_vec_mut(
+                if (nl != original_l || nt != original_t || nr != original_r || nb != original_b)
+                    && let Some(system) = super::state::resolve_subsystem_by_vec_mut(
                         &mut state.app.root,
                         &state.app.path,
-                    ) {
-                        let cmd = operations::resize_block(system, block_index, nl, nt, nr, nb);
-                        state.history.push(cmd);
-                        state.dirty = true;
-                    }
+                    )
+                {
+                    let cmd = operations::resize_block(system, block_index, nl, nt, nr, nb);
+                    state.history.push(cmd);
+                    state.dirty = true;
                 }
             }
             state.drag_mode = DragMode::None;
@@ -653,69 +653,54 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 current_x,
                 current_y,
             } = state.drag_mode.clone()
-            {
-                if let Some(system) =
+                && let Some(system) =
                     crate::egui_app::resolve_subsystem_by_vec(&state.app.root, &state.app.path)
+            {
+                let snap_radius = 20.0;
+                if let Some((dst_idx, dst_port_type, dst_port_index, _px, _py)) =
+                    operations::find_snap_port(system, current_x, current_y, snap_radius, None)
                 {
-                    let snap_radius = 20.0;
-                    if let Some((dst_idx, dst_port_type, dst_port_index, _px, _py)) =
-                        operations::find_snap_port(system, current_x, current_y, snap_radius, None)
+                    // Check we're connecting output -> input or input -> output
+                    let valid = (src_port_type == "out" && dst_port_type == "in")
+                        || (src_port_type == "in" && dst_port_type == "out");
+                    if valid
+                        && let Some(dst_block) = system.blocks.get(dst_idx)
+                        && let Some(dst_sid) = &dst_block.sid
                     {
-                        // Check we're connecting output -> input or input -> output
-                        let valid = (src_port_type == "out" && dst_port_type == "in")
-                            || (src_port_type == "in" && dst_port_type == "out");
-                        if valid {
-                            if let Some(dst_block) = system.blocks.get(dst_idx) {
-                                if let Some(dst_sid) = &dst_block.sid {
-                                    let (
-                                        actual_src_sid,
-                                        actual_src_port,
-                                        actual_dst_sid,
-                                        actual_dst_port,
-                                    ) = if src_port_type == "out" {
-                                        (
-                                            src_sid.clone(),
-                                            src_port_index,
-                                            dst_sid.clone(),
-                                            dst_port_index,
-                                        )
-                                    } else {
-                                        (
-                                            dst_sid.clone(),
-                                            dst_port_index,
-                                            src_sid.clone(),
-                                            src_port_index,
-                                        )
-                                    };
-                                    // Compute auto-routing
-                                    let src_pos = operations::find_snap_port(
-                                        system,
-                                        0.0,
-                                        0.0,
-                                        f32::MAX,
-                                        None,
-                                    );
-                                    let _ = src_pos; // We'll use auto_route from port positions
-                                    if let Some(sys_mut) =
-                                        super::state::resolve_subsystem_by_vec_mut(
-                                            &mut state.app.root,
-                                            &state.app.path,
-                                        )
-                                    {
-                                        let cmd = operations::add_line(
-                                            sys_mut,
-                                            &actual_src_sid,
-                                            actual_src_port,
-                                            &actual_dst_sid,
-                                            actual_dst_port,
-                                            Vec::new(), // Empty points = direct connection
-                                        );
-                                        state.history.push(cmd);
-                                        state.dirty = true;
-                                        state.app.show_notification("Connection created", 1500);
-                                    }
-                                }
-                            }
+                        let (actual_src_sid, actual_src_port, actual_dst_sid, actual_dst_port) =
+                            if src_port_type == "out" {
+                                (
+                                    src_sid.clone(),
+                                    src_port_index,
+                                    dst_sid.clone(),
+                                    dst_port_index,
+                                )
+                            } else {
+                                (
+                                    dst_sid.clone(),
+                                    dst_port_index,
+                                    src_sid.clone(),
+                                    src_port_index,
+                                )
+                            };
+                        // Compute auto-routing
+                        let src_pos = operations::find_snap_port(system, 0.0, 0.0, f32::MAX, None);
+                        let _ = src_pos; // We'll use auto_route from port positions
+                        if let Some(sys_mut) = super::state::resolve_subsystem_by_vec_mut(
+                            &mut state.app.root,
+                            &state.app.path,
+                        ) {
+                            let cmd = operations::add_line(
+                                sys_mut,
+                                &actual_src_sid,
+                                actual_src_port,
+                                &actual_dst_sid,
+                                actual_dst_port,
+                                Vec::new(), // Empty points = direct connection
+                            );
+                            state.history.push(cmd);
+                            state.dirty = true;
+                            state.app.show_notification("Connection created", 1500);
                         }
                     }
                 }
@@ -797,15 +782,15 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             let mut screen_pts: Vec<Pos2> = offsets_pts.iter().map(|p| to_screen(*p)).collect();
 
             // Add final destination point
-            if let Some(dst) = line.dst.as_ref() {
-                if let Some(dr) = sid_map.get(&dst.sid) {
-                    let num_dst = port_counts
-                        .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
-                        .copied();
-                    let mirrored_dst = sid_mirrored.get(&dst.sid).copied().unwrap_or(false);
-                    let dst_pt = endpoint_pos_maybe_mirrored(*dr, dst, num_dst, mirrored_dst);
-                    screen_pts.push(to_screen(dst_pt));
-                }
+            if let Some(dst) = line.dst.as_ref()
+                && let Some(dr) = sid_map.get(&dst.sid)
+            {
+                let num_dst = port_counts
+                    .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
+                    .copied();
+                let mirrored_dst = sid_mirrored.get(&dst.sid).copied().unwrap_or(false);
+                let dst_pt = endpoint_pos_maybe_mirrored(*dr, dst, num_dst, mirrored_dst);
+                screen_pts.push(to_screen(dst_pt));
             }
 
             let color = line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN);
@@ -814,7 +799,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             let stroke = Stroke::new(stroke_width, color);
 
             // Draw segments
-            let has_in_dst = line.dst.as_ref().map_or(false, |d| d.port_type == "in");
+            let has_in_dst = line.dst.as_ref().is_some_and(|d| d.port_type == "in");
             for (seg_idx, seg) in screen_pts.windows(2).enumerate() {
                 let is_last = has_in_dst && seg_idx == screen_pts.len().saturating_sub(2);
                 if is_last {
@@ -865,18 +850,18 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             }
 
             // Line label
-            if let Some(name) = &line.name {
-                if !name.is_empty() && screen_pts.len() >= 2 {
-                    let mid_idx = screen_pts.len() / 2;
-                    let label_pos = Pos2::new(
-                        (screen_pts[mid_idx - 1].x + screen_pts[mid_idx].x) / 2.0,
-                        (screen_pts[mid_idx - 1].y + screen_pts[mid_idx].y) / 2.0
-                            - 10.0 * font_scale,
-                    );
-                    let label_font = egui::FontId::proportional(11.0 * font_scale);
-                    ui.painter()
-                        .text(label_pos, Align2::CENTER_BOTTOM, name, label_font, color);
-                }
+            if let Some(name) = &line.name
+                && !name.is_empty()
+                && screen_pts.len() >= 2
+            {
+                let mid_idx = screen_pts.len() / 2;
+                let label_pos = Pos2::new(
+                    (screen_pts[mid_idx - 1].x + screen_pts[mid_idx].x) / 2.0,
+                    (screen_pts[mid_idx - 1].y + screen_pts[mid_idx].y) / 2.0 - 10.0 * font_scale,
+                );
+                let label_font = egui::FontId::proportional(11.0 * font_scale);
+                ui.painter()
+                    .text(label_pos, Align2::CENTER_BOTTOM, name, label_font, color);
             }
 
             // Allocate hit rect for lines
@@ -918,9 +903,6 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                         start: Pos2,
                         out: &mut Vec<(Pos2, Pos2)>,
                         to_screen: &dyn Fn(Pos2) -> Pos2,
-                        sid_map: &std::collections::HashMap<String, Rect>,
-                        port_counts: &std::collections::HashMap<(String, u8), u32>,
-                        sid_mirrored: &std::collections::HashMap<String, bool>,
                     ) {
                         let mut cur = start;
                         for off in &br.points {
@@ -929,15 +911,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                             cur = next;
                         }
                         for child in &br.branches {
-                            collect_branch_segments_editor(
-                                child,
-                                cur,
-                                out,
-                                to_screen,
-                                sid_map,
-                                port_counts,
-                                sid_mirrored,
-                            );
+                            collect_branch_segments_editor(child, cur, out, to_screen);
                         }
                     }
                     let main_anchor = offsets_pts
@@ -945,15 +919,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                         .copied()
                         .unwrap_or(offsets_pts.first().copied().unwrap_or(Pos2::ZERO));
                     for br in &line.branches {
-                        collect_branch_segments_editor(
-                            br,
-                            main_anchor,
-                            &mut segments,
-                            &to_screen,
-                            &sid_map,
-                            &port_counts,
-                            &sid_mirrored,
-                        );
+                        collect_branch_segments_editor(br, main_anchor, &mut segments, &to_screen);
                     }
 
                     for (a, b) in &segments {
@@ -963,7 +929,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                         let ap_y = cp.y - a.y;
                         let ab_len2 = (ab_x * ab_x + ab_y * ab_y).max(1e-6);
                         let t = (ap_x * ab_x + ap_y * ab_y) / ab_len2;
-                        let t_clamped = t.max(0.0).min(1.0);
+                        let t_clamped = t.clamp(0.0, 1.0);
                         let proj_x = a.x + ab_x * t_clamped;
                         let proj_y = a.y + ab_y * t_clamped;
                         let dx = cp.x - proj_x;
@@ -1305,29 +1271,31 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         });
 
         // Rectangle selection via canvas drag (when not dragging blocks)
-        if matches!(state.drag_mode, DragMode::None) && canvas_resp.drag_started() {
-            if let Some(pos) = canvas_resp.hover_pos() {
-                // Check if we clicked on empty space (not on a block)
-                let on_block = blocks.iter().enumerate().any(|(_, (_, r))| {
-                    let r_screen = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
-                    r_screen.contains(pos)
-                });
-                if !on_block {
-                    if ui.input(|i| i.modifiers.shift) {
-                        // Selection rectangle
-                        state.selection.start_rect(pos.x, pos.y);
-                        state.drag_mode = DragMode::SelectionRect;
-                    } else {
-                        // Pan
-                        state.drag_mode = DragMode::Pan;
-                    }
+        if matches!(state.drag_mode, DragMode::None)
+            && canvas_resp.drag_started()
+            && let Some(pos) = canvas_resp.hover_pos()
+        {
+            // Check if we clicked on empty space (not on a block)
+            let on_block = blocks.iter().any(|(_, r)| {
+                let r_screen = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
+                r_screen.contains(pos)
+            });
+            if !on_block {
+                if ui.input(|i| i.modifiers.shift) {
+                    // Selection rectangle
+                    state.selection.start_rect(pos.x, pos.y);
+                    state.drag_mode = DragMode::SelectionRect;
+                } else {
+                    // Pan
+                    state.drag_mode = DragMode::Pan;
                 }
             }
         }
-        if matches!(state.drag_mode, DragMode::SelectionRect) && canvas_resp.dragged() {
-            if let Some(pos) = canvas_resp.hover_pos() {
-                state.selection.update_rect(pos.x, pos.y);
-            }
+        if matches!(state.drag_mode, DragMode::SelectionRect)
+            && canvas_resp.dragged()
+            && let Some(pos) = canvas_resp.hover_pos()
+        {
+            state.selection.update_rect(pos.x, pos.y);
         }
         if matches!(state.drag_mode, DragMode::SelectionRect) && canvas_resp.drag_stopped() {
             if let Some(system) =
@@ -1357,7 +1325,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 let r_screen = Rect::from_min_max(to_screen(r.min), to_screen(r.max));
                 canvas_resp
                     .hover_pos()
-                    .map_or(false, |p| r_screen.contains(p))
+                    .is_some_and(|p| r_screen.contains(p))
             });
             if !on_block {
                 state.selection.clear();
@@ -1503,22 +1471,21 @@ fn block_context_menu(
         }
         ui.separator();
     }
-    if is_subsystem_block(block) {
-        if ui.button("Open Subsystem").clicked() {
-            state.app.open_block_if_subsystem(block);
-            state.selection.clear();
-            ui.close();
-        }
+    if is_subsystem_block(block) && ui.button("Open Subsystem").clicked() {
+        state.app.open_block_if_subsystem(block);
+        state.selection.clear();
+        ui.close();
     }
-    if !state.selection.selected_blocks.is_empty() && state.selection.selected_blocks.len() > 1 {
-        if ui.button("Create Subsystem from Selection…").clicked() {
-            let name = format!(
-                "Subsystem{}",
-                state.current_system().map_or(0, |s| s.blocks.len())
-            );
-            state.create_subsystem_from_selection(&name);
-            ui.close();
-        }
+    if !state.selection.selected_blocks.is_empty()
+        && state.selection.selected_blocks.len() > 1
+        && ui.button("Create Subsystem from Selection…").clicked()
+    {
+        let name = format!(
+            "Subsystem{}",
+            state.current_system().map_or(0, |s| s.blocks.len())
+        );
+        state.create_subsystem_from_selection(&name);
+        ui.close();
     }
     ui.separator();
     if ui.button("Properties…").clicked() {
@@ -1579,7 +1546,7 @@ fn canvas_context_menu(
     if ui.button("Add Block… (A)").clicked() {
         let pos = canvas_resp
             .hover_pos()
-            .map(|p| from_screen(p))
+            .map(from_screen)
             .unwrap_or(Pos2::new(200.0, 200.0));
         state.block_browser.open_at(pos.x as i32, pos.y as i32);
         ui.close();
@@ -1730,12 +1697,11 @@ fn show_code_editor(state: &mut EditorState, ui: &mut egui::Ui) {
                     if let Some(system) = super::state::resolve_subsystem_by_vec_mut(
                         &mut state.app.root,
                         &state.app.path,
-                    ) {
-                        if let Some(block) = system.blocks.get_mut(block_index) {
-                            set_block_code(block, &code);
-                            state.mark_dirty();
-                            state.app.show_notification("Code applied", 1500);
-                        }
+                    ) && let Some(block) = system.blocks.get_mut(block_index)
+                    {
+                        set_block_code(block, &code);
+                        state.mark_dirty();
+                        state.app.show_notification("Code applied", 1500);
                     }
                     state.code_editor.original_code = code;
                 }
@@ -1773,10 +1739,7 @@ pub fn is_code_block(block: &crate::model::Block) -> bool {
 
 pub fn is_subsystem_block(block: &crate::model::Block) -> bool {
     (block.block_type == "SubSystem" || block.block_type == "Reference")
-        && block
-            .subsystem
-            .as_ref()
-            .map_or(false, |s| s.chart.is_none())
+        && block.subsystem.as_ref().is_some_and(|s| s.chart.is_none())
 }
 
 fn open_code_editor(state: &mut EditorState, block_idx: usize, block: &crate::model::Block) {
@@ -1980,6 +1943,7 @@ fn draw_arrow_with_trim(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_branch_rec(
     painter: &egui::Painter,
     to_screen: &dyn Fn(Pos2) -> Pos2,
@@ -2002,22 +1966,22 @@ fn draw_branch_rec(
         let b = to_screen(seg[1]);
         painter.line_segment([a, b], stroke);
     }
-    if let Some(dstb) = &br.dst {
-        if let Some(dr) = sid_map.get(&dstb.sid) {
-            let key = (
-                dstb.sid.clone(),
-                if dstb.port_type == "out" { 1 } else { 0 },
-            );
-            let num_dst = port_counts.get(&key).copied();
-            let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
-            let end_pt = endpoint_pos_maybe_mirrored(*dr, dstb, num_dst, mirrored_dst);
-            let a = to_screen(*pts.last().unwrap_or(&cur));
-            let b = to_screen(end_pt);
-            if dstb.port_type == "in" {
-                draw_arrow_with_trim(painter, a, b, color, stroke);
-            } else {
-                painter.line_segment([a, b], stroke);
-            }
+    if let Some(dstb) = &br.dst
+        && let Some(dr) = sid_map.get(&dstb.sid)
+    {
+        let key = (
+            dstb.sid.clone(),
+            if dstb.port_type == "out" { 1 } else { 0 },
+        );
+        let num_dst = port_counts.get(&key).copied();
+        let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
+        let end_pt = endpoint_pos_maybe_mirrored(*dr, dstb, num_dst, mirrored_dst);
+        let a = to_screen(*pts.last().unwrap_or(&cur));
+        let b = to_screen(end_pt);
+        if dstb.port_type == "in" {
+            draw_arrow_with_trim(painter, a, b, color, stroke);
+        } else {
+            painter.line_segment([a, b], stroke);
         }
     }
     for sub in &br.branches {
@@ -2247,6 +2211,7 @@ fn draw_resize_handles(
 
 /// Compute the new rect after applying a resize delta from a specific handle.
 /// Returns (new_l, new_t, new_r, new_b) with minimum size enforcement and grid snapping.
+#[allow(clippy::too_many_arguments)]
 fn compute_resized_rect(
     l: f32,
     t: f32,

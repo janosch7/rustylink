@@ -167,10 +167,10 @@ fn find_graphical_interface_for_system_xml(system_xml_path: &Utf8Path) -> Option
     let sibling = system_xml_path
         .parent()
         .map(|p| p.join("graphicalInterface.json"));
-    if let Some(sib) = sibling {
-        if sib.exists() {
-            return Some(sib);
-        }
+    if let Some(sib) = sibling
+        && sib.exists()
+    {
+        return Some(sib);
     }
     None
 }

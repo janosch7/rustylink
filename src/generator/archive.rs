@@ -231,28 +231,26 @@ impl SlxArchive {
         for entry in &self.entries {
             if let SlxContent::SystemXml(system) = &entry.content {
                 Self::collect_binding_refs(system, &mut |ref_value| {
-                    if !binding_cache.contains_key(ref_value) {
-                        if let Some(archive_path) = {
+                    if !binding_cache.contains_key(ref_value)
+                        && let Some(archive_path) = {
                             let id = ref_value.strip_prefix("bdmxdata:");
                             id.and_then(|id| self.relationships.get(id))
                                 .map(|rel| format!("simulink/{}", rel.target))
-                        } {
-                            if let Some(raw) = self.entries.iter().find_map(|e| {
-                                if e.path == archive_path {
-                                    if let SlxContent::Raw(ref data) = e.content {
-                                        Some(data.as_slice())
-                                    } else {
-                                        None
-                                    }
+                        }
+                        && let Some(raw) = self.entries.iter().find_map(|e| {
+                            if e.path == archive_path {
+                                if let SlxContent::Raw(ref data) = e.content {
+                                    Some(data.as_slice())
                                 } else {
                                     None
                                 }
-                            }) {
-                                if let Some(binding) = crate::model::parse_mxarray_binding(raw) {
-                                    binding_cache.insert(ref_value.to_string(), binding);
-                                }
+                            } else {
+                                None
                             }
-                        }
+                        })
+                        && let Some(binding) = crate::model::parse_mxarray_binding(raw)
+                    {
+                        binding_cache.insert(ref_value.to_string(), binding);
                     }
                 });
             }
@@ -269,10 +267,10 @@ impl SlxArchive {
     /// Recursively collect all `BindingPersistence` ref values from a system.
     fn collect_binding_refs<F: FnMut(&str)>(system: &System, cb: &mut F) {
         for block in &system.blocks {
-            if block.ref_properties.contains("BindingPersistence") {
-                if let Some(ref_val) = block.properties.get("BindingPersistence") {
-                    cb(ref_val);
-                }
+            if block.ref_properties.contains("BindingPersistence")
+                && let Some(ref_val) = block.properties.get("BindingPersistence")
+            {
+                cb(ref_val);
             }
             if let Some(sub) = &block.subsystem {
                 Self::collect_binding_refs(sub, cb);
@@ -287,12 +285,11 @@ impl SlxArchive {
         cache: &BTreeMap<String, crate::model::DashboardBinding>,
     ) {
         for block in &mut system.blocks {
-            if block.ref_properties.contains("BindingPersistence") {
-                if let Some(ref_val) = block.properties.get("BindingPersistence") {
-                    if let Some(binding) = cache.get(ref_val) {
-                        block.dashboard_binding = Some(binding.clone());
-                    }
-                }
+            if block.ref_properties.contains("BindingPersistence")
+                && let Some(ref_val) = block.properties.get("BindingPersistence")
+                && let Some(binding) = cache.get(ref_val)
+            {
+                block.dashboard_binding = Some(binding.clone());
             }
             if let Some(sub) = &mut block.subsystem {
                 Self::apply_bindings(sub, cache);
@@ -438,13 +435,12 @@ impl SlxArchive {
         const RELS_PATH: &str = "simulink/_rels/blockdiagram.xml.rels";
         let mut map = BTreeMap::new();
         for entry in entries {
-            if entry.path == RELS_PATH {
-                if let SlxContent::Raw(ref data) = entry.content {
-                    if let Ok(xml) = std::str::from_utf8(data) {
-                        for rel in parse_rels_xml(xml) {
-                            map.insert(rel.id.clone(), rel);
-                        }
-                    }
+            if entry.path == RELS_PATH
+                && let SlxContent::Raw(ref data) = entry.content
+                && let Ok(xml) = std::str::from_utf8(data)
+            {
+                for rel in parse_rels_xml(xml) {
+                    map.insert(rel.id.clone(), rel);
                 }
             }
         }

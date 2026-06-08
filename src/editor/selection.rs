@@ -192,17 +192,17 @@ impl EditorSelection {
 
             // Check blocks
             for (i, block) in system.blocks.iter().enumerate() {
-                if let Some(pos) = &block.position {
-                    if let Some((l, t, r, b)) = super::operations::parse_position(pos) {
-                        // Convert block position to screen coordinates
-                        let sl = l as f32 * zoom + pan_x + canvas_offset_x;
-                        let st = t as f32 * zoom + pan_y + canvas_offset_y;
-                        let sr = r as f32 * zoom + pan_x + canvas_offset_x;
-                        let sb = b as f32 * zoom + pan_y + canvas_offset_y;
+                if let Some(pos) = &block.position
+                    && let Some((l, t, r, b)) = super::operations::parse_position(pos)
+                {
+                    // Convert block position to screen coordinates
+                    let sl = l as f32 * zoom + pan_x + canvas_offset_x;
+                    let st = t as f32 * zoom + pan_y + canvas_offset_y;
+                    let sr = r as f32 * zoom + pan_x + canvas_offset_x;
+                    let sb = b as f32 * zoom + pan_y + canvas_offset_y;
 
-                        if rect.overlaps_rect(sl, st, sr, sb) {
-                            self.selected_blocks.push(i);
-                        }
+                    if rect.overlaps_rect(sl, st, sr, sb) {
+                        self.selected_blocks.push(i);
                     }
                 }
             }
@@ -267,10 +267,10 @@ fn line_intersects_rect(
 
     // Check if any segment between consecutive points intersects rect
     for window in abs_points.windows(2) {
-        if let [(x1, y1), (x2, y2)] = window {
-            if segment_intersects_rect(*x1, *y1, *x2, *y2, rect) {
-                return true;
-            }
+        if let [(x1, y1), (x2, y2)] = window
+            && segment_intersects_rect(*x1, *y1, *x2, *y2, rect)
+        {
+            return true;
         }
     }
 

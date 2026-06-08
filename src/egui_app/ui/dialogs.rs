@@ -113,7 +113,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
     if let Some(sd) = &app.signal_view {
         let mut open_flag = sd.open;
         let title = format!("Signal: {}", sd.title);
-        let sys = app.current_system().map(|s| s.clone());
+        let sys = app.current_system().cloned();
         let line_idx = sd.line_idx;
         egui::Window::new(title)
             .open(&mut open_flag)
@@ -249,10 +249,8 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             ui.label(RichText::new("Actions").strong());
                             ui.horizontal_wrapped(|ui| {
                                 for btn in &app.signal_buttons {
-                                    if (btn.filter)(line) {
-                                        if ui.button(&btn.label).clicked() {
-                                            (btn.on_click)(line);
-                                        }
+                                    if (btn.filter)(line) && ui.button(&btn.label).clicked() {
+                                        (btn.on_click)(line);
                                     }
                                 }
                             });
@@ -325,76 +323,74 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             });
                         }
                     });
-                if let Some(id) = &block.instance_data {
-                    if !id.properties.is_empty() {
-                        ui.separator();
-                        egui::CollapsingHeader::new("Instance Parameters")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                for (k, v) in &id.properties {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(
-                                                crate::parser::helpers::clean_whitespace(k),
-                                            )
+                if let Some(id) = &block.instance_data
+                    && !id.properties.is_empty()
+                {
+                    ui.separator();
+                    egui::CollapsingHeader::new("Instance Parameters")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for (k, v) in &id.properties {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(crate::parser::helpers::clean_whitespace(k))
                                             .strong(),
-                                        );
-                                        ui.label(crate::parser::helpers::clean_whitespace(v));
-                                    });
-                                }
-                            });
-                    }
+                                    );
+                                    ui.label(crate::parser::helpers::clean_whitespace(v));
+                                });
+                            }
+                        });
                 }
-                if block.block_type == "CFunction" {
-                    if let Some(cfg) = &block.c_function {
-                        ui.separator();
-                        egui::CollapsingHeader::new("C/C++ Code")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                if let Some(s) = &cfg.start_code {
-                                    ui.label(RichText::new("StartCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.output_code {
-                                    ui.label(RichText::new("OutputCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.terminate_code {
-                                    ui.label(RichText::new("TerminateCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_start_code {
-                                    ui.label(RichText::new("CodegenStartCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_output_code {
-                                    ui.label(RichText::new("CodegenOutputCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_terminate_code {
-                                    ui.label(RichText::new("CodegenTerminateCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                            });
-                    }
+                if block.block_type == "CFunction"
+                    && let Some(cfg) = &block.c_function
+                {
+                    ui.separator();
+                    egui::CollapsingHeader::new("C/C++ Code")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            if let Some(s) = &cfg.start_code {
+                                ui.label(RichText::new("StartCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.output_code {
+                                ui.label(RichText::new("OutputCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.terminate_code {
+                                ui.label(RichText::new("TerminateCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_start_code {
+                                ui.label(RichText::new("CodegenStartCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_output_code {
+                                ui.label(RichText::new("CodegenOutputCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_terminate_code {
+                                ui.label(RichText::new("CodegenTerminateCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                        });
                 }
                 egui::CollapsingHeader::new("Ports")
                     .default_open(false)
@@ -445,10 +441,8 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new("Actions").strong());
                     ui.horizontal_wrapped(|ui| {
                         for btn in &app.block_buttons {
-                            if (btn.filter)(&block) {
-                                if ui.button(&btn.label).clicked() {
-                                    (btn.on_click)(&block);
-                                }
+                            if (btn.filter)(&block) && ui.button(&btn.label).clicked() {
+                                (btn.on_click)(&block);
                             }
                         }
                     });

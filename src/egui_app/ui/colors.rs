@@ -68,14 +68,15 @@ pub fn block_base_color(
             "white" => return Color32::from_rgb(235, 235, 235),
             "gray" | "grey" => return Color32::from_rgb(180, 180, 180),
             _ => {
-                if lower.starts_with('#') && lower.len() == 7 {
-                    if let (Ok(r), Ok(g), Ok(b)) = (
+                if lower.starts_with('#')
+                    && lower.len() == 7
+                    && let (Ok(r), Ok(g), Ok(b)) = (
                         u8::from_str_radix(&lower[1..3], 16),
                         u8::from_str_radix(&lower[3..5], 16),
                         u8::from_str_radix(&lower[5..7], 16),
-                    ) {
-                        return Color32::from_rgb(r, g, b);
-                    }
+                    )
+                {
+                    return Color32::from_rgb(r, g, b);
                 }
             }
         }

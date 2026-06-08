@@ -114,7 +114,7 @@ pub fn preview_block_rect(
             current_dx,
             current_dy,
         } => {
-            if block_sid.map_or(false, |sid| selected_sids.contains(sid)) {
+            if block_sid.is_some_and(|sid| selected_sids.contains(sid)) {
                 rect.translate(Vec2::new(*current_dx as f32, *current_dy as f32))
             } else {
                 rect
@@ -225,7 +225,7 @@ pub fn compute_resized_rect(
         }
     }
     if nb - nt < min_size {
-        if matches!(handle, 0 | 1 | 2) {
+        if matches!(handle, 0..=2) {
             nt = nb - min_size;
         } else {
             nb = nt + min_size;

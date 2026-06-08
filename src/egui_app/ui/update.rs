@@ -208,20 +208,13 @@ fn toggle_manual_switch_setting(
     app: &mut SubsystemApp,
     block: &crate::model::Block,
 ) -> Option<bool> {
-    let Some(block_sid) = block.sid.as_ref() else {
-        return None;
-    };
+    let block_sid = block.sid.as_ref()?;
     let path = app.path.clone();
-    let Some(system) = resolve_subsystem_by_vec_mut(&mut app.root, &path) else {
-        return None;
-    };
-    let Some(live_block) = system
+    let system = resolve_subsystem_by_vec_mut(&mut app.root, &path)?;
+    let live_block = system
         .blocks
         .iter_mut()
-        .find(|candidate| candidate.sid.as_ref() == Some(block_sid))
-    else {
-        return None;
-    };
+        .find(|candidate| candidate.sid.as_ref() == Some(block_sid))?;
 
     let enabled = !matches!(live_block.current_setting.as_deref(), Some("1"));
     live_block.current_setting = Some(if enabled { "1" } else { "0" }.to_string());
@@ -428,10 +421,9 @@ fn scope_title_for_block(
 ) -> String {
     if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
         block.dashboard_binding.as_ref()
+        && !signal_name.trim().is_empty()
     {
-        if !signal_name.trim().is_empty() {
-            return signal_name.clone();
-        }
+        return signal_name.clone();
     }
 
     first_input_signal_name(block, entities).unwrap_or_else(|| block.name.clone())
@@ -828,7 +820,7 @@ pub(crate) fn update_internal(
                     .filter_map(|a| {
                         a.position
                             .as_deref()
-                            .and_then(|s| parse_rect_str(s))
+                            .and_then(parse_rect_str)
                             .map(|pos| (a, pos))
                     })
                     .collect()
@@ -841,10 +833,9 @@ pub(crate) fn update_internal(
             );
             return;
         }
-        let mut content_bb = blocks
-            .get(0)
+        let mut content_bb = blocks.first()
             .map(|x| x.1)
-            .or_else(|| annotations.get(0).map(|x| x.1))
+            .or_else(|| annotations.first().map(|x| x.1))
             .unwrap();
         for (_, r) in &blocks {
             content_bb = content_bb.union(*r);
@@ -853,12 +844,13 @@ pub(crate) fn update_internal(
             content_bb = content_bb.union(*r);
         }
 
-        let bb = if staged_reset || staged_view_bounds.is_none() {
-            let fitted = content_bb.expand(20.0);
-            staged_view_bounds = Some(fitted);
-            fitted
-        } else {
-            staged_view_bounds.unwrap()
+        let bb = match staged_view_bounds {
+            Some(bounds) if !staged_reset => bounds,
+            _ => {
+                let fitted = content_bb.expand(20.0);
+                staged_view_bounds = Some(fitted);
+                fitted
+            }
         };
 
         // Interaction space
@@ -996,8 +988,8 @@ pub(crate) fn update_internal(
             let bg = block_base_color(b, &cfg);
             let mut effective_bg = bg;
 
-            if app.move_mode_enabled && resp.drag_started() {
-                if let Some(sid) = &b.sid {
+            if app.move_mode_enabled && resp.drag_started()
+                && let Some(sid) = &b.sid {
                     if !app.selected_block_sids.contains(sid) {
                         app.selected_block_sids.clear();
                         app.selected_block_sids.insert(sid.clone());
@@ -1008,7 +1000,6 @@ pub(crate) fn update_internal(
                         current_dy: 0,
                     };
                 }
-            }
             if app.move_mode_enabled
                 && resp.dragged()
                 && b
@@ -1102,8 +1093,8 @@ pub(crate) fn update_internal(
             }
 
             // Clear selection when clicking empty canvas.
-            if canvas_resp.clicked() && !any_block_clicked {
-                if let Some(pos) = canvas_resp.interact_pointer_pos() {
+            if canvas_resp.clicked() && !any_block_clicked
+                && let Some(pos) = canvas_resp.interact_pointer_pos() {
                     let hit_any = blocks.iter().any(|(_, br)| {
                         let br_screen = Rect::from_min_max(to_screen(br.min), to_screen(br.max));
                         br_screen.contains(pos)
@@ -1113,7 +1104,6 @@ pub(crate) fn update_internal(
                         app.selected_line_indices.clear();
                     }
                 }
-            }
 
             // Paint selection shadow behind the block (outside-only).
             if b
@@ -1124,8 +1114,8 @@ pub(crate) fn update_internal(
             {
                 let rounding = if b.commented { 0.0 } else { 6.0 };
                 paint_selected_shadow(ui.painter(), r_screen, rounding, font_scale);
-                if app.move_mode_enabled {
-                    if let Some(sid) = &b.sid {
+                if app.move_mode_enabled
+                    && let Some(sid) = &b.sid {
                         draw_viewer_resize_handles(
                             ui,
                             &r_screen,
@@ -1135,7 +1125,6 @@ pub(crate) fn update_internal(
                             base_scale * staged_zoom,
                         );
                     }
-                }
             }
 
             match cfg.shape {
@@ -1209,12 +1198,11 @@ pub(crate) fn update_internal(
                         ui.close();
                     }
                     for item in &block_menu_items_snapshot {
-                        if (item.filter)(b) {
-                            if ui.button(&item.label).clicked() {
+                        if (item.filter)(b)
+                            && ui.button(&item.label).clicked() {
                                 (item.on_click)(b);
                                 ui.close();
                             }
-                        }
                     }
                 });
             }
@@ -1229,8 +1217,8 @@ pub(crate) fn update_internal(
                     }
                     // Double-click on Constant block opens inline editor.
                     #[cfg(feature = "dashboard")]
-                    if !handled && b.block_type == "Constant" {
-                        if let Some(sid) = &b.sid {
+                    if !handled && b.block_type == "Constant"
+                        && let Some(sid) = &b.sid {
                             // Seed the edit buffer with the current value if not yet present.
                             if !app.constant_edits.contains_key(sid.as_str()) {
                                 let val = b.value.clone().unwrap_or_else(|| "1".to_string());
@@ -1239,7 +1227,6 @@ pub(crate) fn update_internal(
                             deferred_constant_edits.push((sid.clone(), r_screen));
                             handled = true;
                         }
-                    }
                     if !handled && is_block_subsystem(b) {
                         // Normal subsystem open
                         block_to_open_subsystem = Some((*b).clone());
@@ -1273,8 +1260,8 @@ pub(crate) fn update_internal(
                     },
                 );
             }
-            if app.move_mode_enabled && resp.drag_stopped() {
-                if let ViewerDragState::Blocks {
+            if app.move_mode_enabled && resp.drag_stopped()
+                && let ViewerDragState::Blocks {
                     current_dx,
                     current_dy,
                 } = app.viewer_drag_state.clone()
@@ -1307,16 +1294,14 @@ pub(crate) fn update_internal(
                                 // Auto-adjust signal line corners for moved blocks
                                 for sid in &selected_sids {
                                     for line in &mut system.lines {
-                                        if let Some(src) = &line.src {
-                                            if src.sid == *sid {
+                                        if let Some(src) = &line.src
+                                            && src.sid == *sid {
                                                 corner_ops::auto_adjust_on_block_move(line, true, current_dx, current_dy);
                                             }
-                                        }
-                                        if let Some(dst) = &line.dst {
-                                            if dst.sid == *sid {
+                                        if let Some(dst) = &line.dst
+                                            && dst.sid == *sid {
                                                 corner_ops::auto_adjust_on_block_move(line, false, current_dx, current_dy);
                                             }
-                                        }
                                         corner_ops::auto_adjust_branches_on_block_move(&mut line.branches, sid, current_dx, current_dy);
                                     }
                                 }
@@ -1332,7 +1317,6 @@ pub(crate) fn update_internal(
                     }
                     app.viewer_drag_state = ViewerDragState::None;
                 }
-            }
             block_views.push((b, r_screen, resp.clicked(), effective_bg));
         }
 
@@ -1398,6 +1382,7 @@ pub(crate) fn update_internal(
         let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
 
         // Build lines in screen space and interactive hit rects
+        #[allow(clippy::type_complexity)]
         let mut line_views: Vec<(
             &crate::model::Line,
             Vec<Pos2>,
@@ -1435,7 +1420,7 @@ pub(crate) fn update_internal(
             }
             let mut screen_pts: Vec<Pos2> = offsets_pts.iter().map(|p| to_screen(*p)).collect();
             if let Some(src_ep) = line.src.as_ref() {
-                let src_screen = *screen_pts.get(0).unwrap_or(&to_screen(cur));
+                let src_screen = *screen_pts.first().unwrap_or(&to_screen(cur));
                 port_label_requests.push((
                     src_ep.sid.clone(),
                     src_ep.port_index,
@@ -1444,8 +1429,8 @@ pub(crate) fn update_internal(
                 ));
                 port_y_screen.insert((src_ep.sid.clone(), src_ep.port_index, false), src_screen.y);
             }
-            if let Some(dst) = line.dst.as_ref() {
-                if let Some(dr) = sid_map.get(&dst.sid) {
+            if let Some(dst) = line.dst.as_ref()
+                && let Some(dr) = sid_map.get(&dst.sid) {
                     let num_dst = port_counts
                         .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
                         .copied();
@@ -1473,7 +1458,6 @@ pub(crate) fn update_internal(
                         port_y_screen.insert((dst.sid.clone(), dst.port_index, true), dst_screen.y);
                     }
                 }
-            }
             if screen_pts.is_empty() {
                 continue;
             }
@@ -1549,6 +1533,7 @@ pub(crate) fn update_internal(
         }
 
         // Collect segments for a branch tree (model coords in, screen-space segments out)
+        #[allow(clippy::too_many_arguments)]
         fn collect_branch_segments_rec(
             to_screen: &dyn Fn(Pos2) -> Pos2,
             sid_map: &HashMap<String, Rect>,
@@ -1567,8 +1552,8 @@ pub(crate) fn update_internal(
             }
             let screen_pts: Vec<Pos2> = pts.iter().map(|p| to_screen(*p)).collect();
             signal_routing::push_orthogonal_segments(&screen_pts, out);
-            if let Some(dstb) = &br.dst {
-                if let Some(dr) = sid_map.get(&dstb.sid) {
+            if let Some(dstb) = &br.dst
+                && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
                         if dstb.port_type == "out" { 1 } else { 0 },
@@ -1588,7 +1573,6 @@ pub(crate) fn update_internal(
                         port_y_screen.insert((dstb.sid.clone(), dstb.port_index, true), b.y);
                     }
                 }
-            }
             for sub in &br.branches {
                 collect_branch_segments_rec(
                     to_screen,
@@ -1633,6 +1617,7 @@ pub(crate) fn update_internal(
             ));
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn draw_branch_rec(
             painter: &egui::Painter,
             to_screen: &dyn Fn(Pos2) -> Pos2,
@@ -1655,8 +1640,8 @@ pub(crate) fn update_internal(
             for seg in signal_routing::orthogonalize_polyline(&screen_pts).windows(2) {
                 painter.line_segment([seg[0], seg[1]], stroke);
             }
-            if let Some(dstb) = &br.dst {
-                if let Some(dr) = sid_map.get(&dstb.sid) {
+            if let Some(dstb) = &br.dst
+                && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
                         if dstb.port_type == "out" { 1 } else { 0 },
@@ -1688,7 +1673,6 @@ pub(crate) fn update_internal(
                         }
                     }
                 }
-            }
             for sub in &br.branches {
                 draw_branch_rec(
                     painter,
@@ -1729,7 +1713,7 @@ pub(crate) fn update_internal(
                 line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
                 color,
             );
-            let has_in_dst = line.dst.as_ref().map_or(false, |dst| dst.port_type == "in");
+            let has_in_dst = line.dst.as_ref().is_some_and(|dst| dst.port_type == "in");
             let mut draw_pts = screen_pts.clone();
             if draw_pts.len() >= 2 {
                 let dx = draw_pts[1].x - draw_pts[0].x;
@@ -1766,11 +1750,10 @@ pub(crate) fn update_internal(
                     &sid_mirrored,
                 );
             }
-            if show_testpoint_marker {
-                if let Some(marker_pos) = line_testpoint_marker_position(&draw_pts) {
+            if show_testpoint_marker
+                && let Some(marker_pos) = line_testpoint_marker_position(&draw_pts) {
                     draw_line_testpoint_marker(&painter, marker_pos, color);
                 }
-            }
             // Precise per-segment distance check.  We detect clicks via
             // pointer state instead of from the bounding-box response so that
             // line rects (which can be very large) never steal clicks from
@@ -1798,7 +1781,7 @@ pub(crate) fn update_internal(
                         let ap_y = cp.y - a.y;
                         let ab_len2 = (ab_x * ab_x + ab_y * ab_y).max(1e-6);
                         let t = (ap_x * ab_x + ap_y * ab_y) / ab_len2;
-                        let t_clamped = t.max(0.0).min(1.0);
+                        let t_clamped = t.clamp(0.0, 1.0);
                         let proj_x = a.x + ab_x * t_clamped;
                         let proj_y = a.y + ab_y * t_clamped;
                         let dx = cp.x - proj_x;
@@ -1874,12 +1857,11 @@ pub(crate) fn update_internal(
                                 ui.close();
                             }
                             for item in &signal_menu_items_snapshot {
-                                if (item.filter)(line) {
-                                    if ui.button(&item.label).clicked() {
+                                if (item.filter)(line)
+                                    && ui.button(&item.label).clicked() {
                                         (item.on_click)(line);
                                         ui.close();
                                     }
-                                }
                             }
                         });
                     }
@@ -1932,16 +1914,15 @@ pub(crate) fn update_internal(
                         }
                         ui.ctx().request_repaint();
                     }
-                    if resp.drag_stopped() {
-                        if let ViewerDragState::LinePointDrag { line_idx, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+                    if resp.drag_stopped()
+                        && let ViewerDragState::LinePointDrag { line_idx, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                             if acc_dx != 0 || acc_dy != 0 {
                                 let mut layout_changed = false;
-                                if let Some(system) = app.current_system_mut() {
-                                    if let Some(line_mut) = system.lines.get_mut(line_idx) {
+                                if let Some(system) = app.current_system_mut()
+                                    && let Some(line_mut) = system.lines.get_mut(line_idx) {
                                         signal_routing::move_line_point(line_mut, point_idx, acc_dx, acc_dy);
                                         layout_changed = true;
                                     }
-                                }
                                 if layout_changed {
                                     app.viewer_history.push(
                                         crate::editor::operations::EditorCommand::MoveLinePoint {
@@ -1957,15 +1938,13 @@ pub(crate) fn update_internal(
                             }
                             app.viewer_drag_state = ViewerDragState::None;
                         }
-                    }
                     // Double-click on a corner handle removes it
                     if resp.double_clicked() {
                         let mut removed_point = None;
-                        if let Some(system) = app.current_system_mut() {
-                            if let Some(line_mut) = system.lines.get_mut(*li) {
+                        if let Some(system) = app.current_system_mut()
+                            && let Some(line_mut) = system.lines.get_mut(*li) {
                                 removed_point = corner_ops::remove_corner(&mut line_mut.points, point_index);
                             }
-                        }
                         if let Some(rp) = removed_point {
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::RemoveCorner {
@@ -2021,18 +2000,16 @@ pub(crate) fn update_internal(
                         }
                         ui.ctx().request_repaint();
                     }
-                    if resp.drag_stopped() {
-                        if let ViewerDragState::BranchPointDrag { line_idx, branch_path: bp, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+                    if resp.drag_stopped()
+                        && let ViewerDragState::BranchPointDrag { line_idx, branch_path: bp, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                             if acc_dx != 0 || acc_dy != 0 {
                                 let mut layout_changed = false;
-                                if let Some(system) = app.current_system_mut() {
-                                    if let Some(line_mut) = system.lines.get_mut(line_idx) {
-                                    if let Some(branch_mut) = signal_routing::get_branch_mut(&mut line_mut.branches, &bp) {
+                                if let Some(system) = app.current_system_mut()
+                                    && let Some(line_mut) = system.lines.get_mut(line_idx)
+                                    && let Some(branch_mut) = signal_routing::get_branch_mut(&mut line_mut.branches, &bp) {
                                             signal_routing::move_branch_point(branch_mut, point_idx, acc_dx, acc_dy);
                                             layout_changed = true;
                                         }
-                                    }
-                                }
                                 if layout_changed {
                                     app.viewer_history.push(
                                         crate::editor::operations::EditorCommand::MoveBranchPoint {
@@ -2049,7 +2026,6 @@ pub(crate) fn update_internal(
                             }
                             app.viewer_drag_state = ViewerDragState::None;
                         }
-                    }
                 }
             }
         }
@@ -2101,11 +2077,10 @@ pub(crate) fn update_internal(
                             // point *after* seg_idx positions (index seg_idx corresponds
                             // to the segment from anchor/model_pts[seg_idx] to points[seg_idx]).
                             let insert_idx = seg_idx;
-                            if let Some(system) = app.current_system_mut() {
-                                if let Some(line_mut) = system.lines.get_mut(*li) {
+                            if let Some(system) = app.current_system_mut()
+                                && let Some(line_mut) = system.lines.get_mut(*li) {
                                     corner_ops::insert_corner(&mut line_mut.points, insert_idx, offset.clone());
                                 }
-                            }
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::InsertCorner {
                                     line_index: *li,
@@ -2245,7 +2220,7 @@ pub(crate) fn update_internal(
                     for (i, ch) in bytes.iter() {
                         if *ch == ' ' {
                             let dist =
-                                (*i as isize - (label_text.len() as isize) / 2).abs() as usize;
+                                (*i as isize - (label_text.len() as isize) / 2).unsigned_abs();
                             if dist < best_dist {
                                 best_dist = dist;
                                 best_split = Some(*i);
@@ -2399,16 +2374,15 @@ pub(crate) fn update_internal(
                 }
                 ui.ctx().request_repaint();
             }
-            if app.move_mode_enabled && resp.drag_stopped() && app.selected_line_indices.contains(li) {
-                if let ViewerDragState::SignalLabelDrag { line_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+            if app.move_mode_enabled && resp.drag_stopped() && app.selected_line_indices.contains(li)
+                && let ViewerDragState::SignalLabelDrag { line_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                     if acc_dx != 0 || acc_dy != 0 {
                         let mut layout_changed = false;
-                        if let Some(system) = app.current_system_mut() {
-                            if let Some(line_mut) = system.lines.get_mut(line_idx) {
+                        if let Some(system) = app.current_system_mut()
+                            && let Some(line_mut) = system.lines.get_mut(line_idx) {
                                 signal_routing::move_line_layout(line_mut, acc_dx, acc_dy);
                                 layout_changed = true;
                             }
-                        }
                         if layout_changed {
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::MoveLineLayout {
@@ -2423,7 +2397,6 @@ pub(crate) fn update_internal(
                     }
                     app.viewer_drag_state = ViewerDragState::None;
                 }
-            }
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
@@ -2441,12 +2414,11 @@ pub(crate) fn update_internal(
                     }
                     let line_ref = &entities.lines[*li];
                     for item in &signal_menu_items_snapshot {
-                        if (item.filter)(line_ref) {
-                            if ui.button(&item.label).clicked() {
+                        if (item.filter)(line_ref)
+                            && ui.button(&item.label).clicked() {
                                 (item.on_click)(line_ref);
                                 ui.close();
                             }
-                        }
                     }
                 });
             }
@@ -3205,7 +3177,7 @@ pub(crate) fn update_internal(
 
     // After the UI closure, call open_block_if_subsystem if needed
     if let Some(ref block) = block_to_open_subsystem {
-        app.open_block_if_subsystem(&block);
+        app.open_block_if_subsystem(block);
     }
 
     let navigated = navigate_to.is_some() || block_to_open_subsystem.is_some();
@@ -3273,16 +3245,15 @@ fn draw_viewer_resize_handles(
                 current_dy,
                 ..
             } = &mut app.viewer_drag_state
+                && resize_sid == sid
             {
-                if resize_sid == sid {
-                    *current_dx += dx;
-                    *current_dy += dy;
-                    ui.ctx().request_repaint();
-                }
+                *current_dx += dx;
+                *current_dy += dy;
+                ui.ctx().request_repaint();
             }
         }
-        if resp.drag_stopped() {
-            if let ViewerDragState::Resize {
+        if resp.drag_stopped()
+            && let ViewerDragState::Resize {
                 sid: resize_sid,
                 handle,
                 original_l,
@@ -3292,46 +3263,43 @@ fn draw_viewer_resize_handles(
                 current_dx,
                 current_dy,
             } = app.viewer_drag_state.clone()
+            && resize_sid == sid
+        {
+            let (nl, nt, nr, nb) = view_transform::compute_resized_rect(
+                original_l as f32,
+                original_t as f32,
+                original_r as f32,
+                original_b as f32,
+                handle,
+                current_dx as f32,
+                current_dy as f32,
+            );
+            let mut layout_changed = false;
+            let mut undo_cmd = None;
+            if let Some(system) = app.current_system_mut()
+                && let Some(block_index) = system
+                    .blocks
+                    .iter()
+                    .position(|block| block.sid.as_deref() == Some(sid))
             {
-                if resize_sid == sid {
-                    let (nl, nt, nr, nb) = view_transform::compute_resized_rect(
-                        original_l as f32,
-                        original_t as f32,
-                        original_r as f32,
-                        original_b as f32,
-                        handle,
-                        current_dx as f32,
-                        current_dy as f32,
-                    );
-                    let mut layout_changed = false;
-                    let mut undo_cmd = None;
-                    if let Some(system) = app.current_system_mut() {
-                        if let Some(block_index) = system
-                            .blocks
-                            .iter()
-                            .position(|block| block.sid.as_deref() == Some(sid))
-                        {
-                            undo_cmd = Some(operations::resize_block(
-                                system,
-                                block_index,
-                                nl,
-                                nt,
-                                nr,
-                                nb,
-                            ));
-                            layout_changed = true;
-                        }
-                    }
-                    if let Some(cmd) = undo_cmd {
-                        app.viewer_history.push(cmd);
-                    }
-                    if layout_changed {
-                        app.layout_dirty = true;
-                        app.view_cache.invalidate();
-                    }
-                    app.viewer_drag_state = ViewerDragState::None;
-                }
+                undo_cmd = Some(operations::resize_block(
+                    system,
+                    block_index,
+                    nl,
+                    nt,
+                    nr,
+                    nb,
+                ));
+                layout_changed = true;
             }
+            if let Some(cmd) = undo_cmd {
+                app.viewer_history.push(cmd);
+            }
+            if layout_changed {
+                app.layout_dirty = true;
+                app.view_cache.invalidate();
+            }
+            app.viewer_drag_state = ViewerDragState::None;
         }
     }
 }
@@ -3670,34 +3638,34 @@ fn print_line_based_connections(
         let signal_name = line.name.as_deref().unwrap_or("<unnamed>");
 
         // Check if this block is a source of the line
-        if let Some(ref src) = line.src {
-            if src.sid == block_sid {
-                let dst_sids = collect_dst_sids(line);
-                for dsid in &dst_sids {
-                    let dst_name = block_name_by_sid.get(dsid).copied().unwrap_or("?");
-                    println!(
-                        "    → drives signal '{}' to block '{}' (dst SID {})",
-                        signal_name, dst_name, dsid
-                    );
-                    found_any = true;
-                }
+        if let Some(ref src) = line.src
+            && src.sid == block_sid
+        {
+            let dst_sids = collect_dst_sids(line);
+            for dsid in &dst_sids {
+                let dst_name = block_name_by_sid.get(dsid).copied().unwrap_or("?");
+                println!(
+                    "    → drives signal '{}' to block '{}' (dst SID {})",
+                    signal_name, dst_name, dsid
+                );
+                found_any = true;
             }
         }
 
         // Check if this block is a destination of the line
         let all_dsts = collect_dst_sids(line);
-        if all_dsts.iter().any(|d| *d == block_sid) {
-            if let Some(ref src) = line.src {
-                let src_name = block_name_by_sid
-                    .get(src.sid.as_str())
-                    .copied()
-                    .unwrap_or("?");
-                println!(
-                    "    ← receives signal '{}' from block '{}' (src SID {})",
-                    signal_name, src_name, src.sid
-                );
-                found_any = true;
-            }
+        if all_dsts.contains(&block_sid)
+            && let Some(ref src) = line.src
+        {
+            let src_name = block_name_by_sid
+                .get(src.sid.as_str())
+                .copied()
+                .unwrap_or("?");
+            println!(
+                "    ← receives signal '{}' from block '{}' (src SID {})",
+                signal_name, src_name, src.sid
+            );
+            found_any = true;
         }
     }
 

@@ -147,7 +147,7 @@ pub fn compute_block_instance_label(block: &Block) -> Option<String> {
                         an == norm_name || an == norm_humanized
                     });
                 if matches {
-                    return vv_compute_instance_label(&vb, block);
+                    return vv_compute_instance_label(vb, block);
                 }
             }
             None

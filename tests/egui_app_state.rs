@@ -95,3 +95,36 @@ fn cache_invalid_after_invalidate() {
     cache.invalidate();
     assert!(!cache.is_valid(&path, cache.generation));
 }
+
+#[test]
+fn resolver_reused_until_topology_changes() {
+    use std::sync::Arc;
+
+    let mut cache = ComputedViewCache::default();
+    let mut root = root_with_subsystem();
+
+    let first = cache.ensure_resolver(&root);
+    let again = cache.ensure_resolver(&root);
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "resolver should be reused when the model is unchanged"
+    );
+
+    // A geometry-only edit (block Position) must reuse the cached resolver.
+    root.blocks[0]
+        .properties
+        .insert("Position".to_string(), "[1, 2, 3, 4]".to_string());
+    let after_move = cache.ensure_resolver(&root);
+    assert!(
+        Arc::ptr_eq(&first, &after_move),
+        "layout-only edits must not rebuild the resolver"
+    );
+
+    // A topology edit (adding a block) must rebuild the resolver.
+    root.blocks.push(test_block("Extra", Some("2")));
+    let after_topology = cache.ensure_resolver(&root);
+    assert!(
+        !Arc::ptr_eq(&first, &after_topology),
+        "topology edits must rebuild the resolver"
+    );
+}

@@ -58,10 +58,10 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
 
     if let Some(ref lib_path) = block.library_block_path {
         lib_candidates.push(lib_path.clone());
-        if let Some(n) = normalize_library_block_path(lib_path) {
-            if n != *lib_path {
-                lib_candidates.push(n);
-            }
+        if let Some(n) = normalize_library_block_path(lib_path)
+            && n != *lib_path
+        {
+            lib_candidates.push(n);
         }
     }
     // Always check SourceBlock as well (not only when library_block_path is absent),
@@ -70,10 +70,10 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
         if block.library_block_path.as_deref() != Some(source_block.as_str()) {
             lib_candidates.push(source_block.clone());
         }
-        if let Some(n) = normalize_library_block_path(source_block) {
-            if !lib_candidates.contains(&n) {
-                lib_candidates.push(n);
-            }
+        if let Some(n) = normalize_library_block_path(source_block)
+            && !lib_candidates.contains(&n)
+        {
+            lib_candidates.push(n);
         }
     }
 
@@ -114,10 +114,10 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
             return cfg.clone();
         }
         let seg_human_norm = normalize_block_name(&humanize_camel_case(seg));
-        if seg_human_norm != seg_norm {
-            if let Some(cfg) = g.get(seg_human_norm.as_str()) {
-                return cfg.clone();
-            }
+        if seg_human_norm != seg_norm
+            && let Some(cfg) = g.get(seg_human_norm.as_str())
+        {
+            return cfg.clone();
         }
     }
 
@@ -127,10 +127,9 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
     // Simulink encodes a matrix-multiply.  Show the dedicated SVG for it.
     if block.block_type == "Product"
         && block.properties.get("Multiplication").map(|v| v.trim()) == Some("Matrix(*)")
+        && let Some(cfg) = g.get("matrix multiply")
     {
-        if let Some(cfg) = g.get("matrix multiply") {
-            return cfg.clone();
-        }
+        return cfg.clone();
     }
 
     // Phase 4 – generic block-type fallback (lowest priority).
@@ -523,8 +522,7 @@ fn svg_dest_size_points(avail_points: Vec2, px_size: [usize; 2], pixels_per_poin
 
     let scale = (avail_points.x / w_points)
         .min(avail_points.y / h_points)
-        .min(1.0)
-        .max(0.0);
+        .clamp(0.0, 1.0);
     Vec2::new(w_points * scale, h_points * scale)
 }
 
@@ -595,13 +593,13 @@ static ICON_WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn warn_missing_icon(block_type: &str, block_path: &str) {
     let warned = ICON_WARNED.get_or_init(|| Mutex::new(HashSet::new()));
-    if let Ok(mut set) = warned.lock() {
-        if set.insert(block_type.to_string()) {
-            eprintln!(
-                "\x1b[33m[rustylink] WARNING: {} at {} does not have a corresponding virtual library block\x1b[0m",
-                block_type, block_path
-            );
-        }
+    if let Ok(mut set) = warned.lock()
+        && set.insert(block_type.to_string())
+    {
+        eprintln!(
+            "\x1b[33m[rustylink] WARNING: {} at {} does not have a corresponding virtual library block\x1b[0m",
+            block_type, block_path
+        );
     }
 }
 

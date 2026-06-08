@@ -34,8 +34,7 @@ impl FsSource {
 
 impl ContentSource for FsSource {
     fn read_to_string(&mut self, path: &Utf8Path) -> Result<String> {
-        Ok(std::fs::read_to_string(path.as_str())
-            .with_context(|| format!("Failed to read {}", path))?)
+        std::fs::read_to_string(path.as_str()).with_context(|| format!("Failed to read {}", path))
     }
     fn list_dir(&mut self, path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         self.list_dir_impl(path)

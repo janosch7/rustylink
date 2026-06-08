@@ -194,6 +194,10 @@ impl LiveValueList {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn first_f64(&self) -> Option<f64> {
         match self {
             LiveValueList::Empty => None,
