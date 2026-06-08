@@ -28,11 +28,11 @@ pub enum ConnectionTargetResolve {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 pub struct ConnectionTarget {
-    pub path: String,
-    pub signal_name: Option<String>,
-    pub resolve: Option<ConnectionTargetResolve>,
-    pub element_index: Option<u32>,
-    pub origin: ConnectionTargetOrigin,
+    pub path: String, 
+    pub signal_name: Option<String>, 
+    pub resolve: Option<ConnectionTargetResolve>, 
+    pub element_index: Option<u32>, 
+    pub origin: ConnectionTargetOrigin, 
     pub signals_only: bool,
     pub testpoint: bool,
     /// The Simulink block type that produced this target (e.g. "Reference",
@@ -783,14 +783,15 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} resolve={:?} index={:?} signals_only={} testpoint={}",
+            "    - path='{}' origin={:?} signal={:?} resolve={:?} index={:?} signals_only={} testpoint={} block_type={:?}",
             target.path,
             target.origin,
             target.signal_name,
             target.resolve,
             target.element_index,
             target.signals_only,
-            target.testpoint
+            target.testpoint,
+            target.block_type
         );
     }
 }
