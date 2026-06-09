@@ -245,7 +245,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Is Hermitian"])
         .with_description("Test whether matrix is Hermitian")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("H?")),
+        .with_icon(icon("Aᴴ")),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Model Verification / Testing
