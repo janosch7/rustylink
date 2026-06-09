@@ -10,6 +10,7 @@
 pub mod catalog;
 pub mod core;
 pub mod dashboard;
+pub mod simulink_blocks;
 
 use crate::simulink_libraries::types::SimulinkLibrary;
 
@@ -19,6 +20,10 @@ pub static ALL_LIBRARIES: &[SimulinkLibrary] = &[
     SimulinkLibrary {
         name: "simulink",
         blocks: self::core::BLOCKS,
+    },
+    SimulinkLibrary {
+        name: "simulink",
+        blocks: self::simulink_blocks::BLOCKS,
     },
     SimulinkLibrary {
         name: "dashboard",

@@ -729,11 +729,83 @@ fn warn_missing_icon(block_type: &str, block_path: &str) {
     }
 }
 
-/// Render an icon in the center of the block according to its type.
+/// Draw a single [`IconSpec`] centered in `rect`.
 ///
-/// The rendered glyph is maximized to fill the available center area while:
-/// - leaving at least 10% margin to the block border on all sides
-/// - avoiding overlap with optional inside-block port labels (left/right)
+/// Shared by the config-map icon path (`render_block_icon`) and the
+/// definition-driven icon path so the catalog definition's `icon` and the
+/// legacy registry render identically.  The rendered glyph is maximized to fill
+/// the available center area while leaving a margin to the block border and
+/// avoiding overlap with optional inside-block port labels.
+pub fn draw_icon_spec(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    icon: &block_types::IconSpec,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    match icon {
+        block_types::IconSpec::Utf8(glyph) => {
+            render_center_glyph_maximized(
+                painter,
+                rect,
+                font_scale,
+                glyph,
+                color,
+                port_label_widths,
+            );
+        }
+        block_types::IconSpec::Phosphor(name) => {
+            let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
+            let avail_points = avail_rect.size();
+            if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
+                return;
+            }
+            let font_id = egui::FontId::proportional(avail_points.y * 0.7);
+            painter.text(
+                avail_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                name,
+                font_id,
+                color,
+            );
+        }
+        block_types::IconSpec::Svg(path) => {
+            let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
+            let avail_points = avail_rect.size();
+            if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
+                return;
+            }
+
+            let ctx = painter.ctx();
+            let pixels_per_point = ctx.pixels_per_point();
+            let request_px = [
+                (avail_points.x * pixels_per_point).round().max(1.0) as usize,
+                (avail_points.y * pixels_per_point).round().max(1.0) as usize,
+            ];
+
+            let Some(svg) = get_or_create_svg_texture(ctx, path, request_px) else {
+                return;
+            };
+
+            let dest_size = svg_dest_size_points(avail_points, svg.px_size, pixels_per_point);
+            if dest_size.x <= 1.0 || dest_size.y <= 1.0 {
+                return;
+            }
+
+            let dest_rect = Rect::from_center_size(avail_rect.center(), dest_size);
+            let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+            painter.image(svg.texture.id(), dest_rect, uv, Color32::WHITE);
+        }
+    }
+}
+
+/// Contrast color for a glyph icon drawn on this block's background.
+pub fn block_icon_color(block: &Block) -> Color32 {
+    let cfg = get_block_type_cfg(block);
+    super::ui::colors::contrast_color(super::ui::colors::block_base_color(block, &cfg))
+}
+
 pub fn render_block_icon(
     painter: &egui::Painter,
     block: &Block,
@@ -749,60 +821,14 @@ pub fn render_block_icon(
     let dark_icon =
         super::ui::colors::contrast_color(super::ui::colors::block_base_color(block, &cfg));
     if let Some(icon) = cfg.icon {
-        match icon {
-            block_types::IconSpec::Utf8(glyph) => {
-                render_center_glyph_maximized(
-                    painter,
-                    rect,
-                    font_scale,
-                    glyph,
-                    dark_icon,
-                    port_label_widths,
-                );
-            }
-            block_types::IconSpec::Phosphor(name) => {
-                let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
-                let avail_points = avail_rect.size();
-                if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
-                    return;
-                }
-                let font_id = egui::FontId::proportional(avail_points.y * 0.7);
-                painter.text(
-                    avail_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    name,
-                    font_id,
-                    dark_icon,
-                );
-            }
-            block_types::IconSpec::Svg(path) => {
-                let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
-                let avail_points = avail_rect.size();
-                if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
-                    return;
-                }
-
-                let ctx = painter.ctx();
-                let pixels_per_point = ctx.pixels_per_point();
-                let request_px = [
-                    (avail_points.x * pixels_per_point).round().max(1.0) as usize,
-                    (avail_points.y * pixels_per_point).round().max(1.0) as usize,
-                ];
-
-                let Some(svg) = get_or_create_svg_texture(ctx, path, request_px) else {
-                    return;
-                };
-
-                let dest_size = svg_dest_size_points(avail_points, svg.px_size, pixels_per_point);
-                if dest_size.x <= 1.0 || dest_size.y <= 1.0 {
-                    return;
-                }
-
-                let dest_rect = Rect::from_center_size(avail_rect.center(), dest_size);
-                let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
-                painter.image(svg.texture.id(), dest_rect, uv, Color32::WHITE);
-            }
-        }
+        draw_icon_spec(
+            painter,
+            rect,
+            font_scale,
+            &icon,
+            dark_icon,
+            port_label_widths,
+        );
     } else {
         // No icon for this block.  Only warn for truly unknown blocks.
         // Known virtual-library blocks that simply lack a dedicated SVG

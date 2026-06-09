@@ -93,16 +93,33 @@ pub fn render_block_interior(
         return;
     }
 
-    // 5. Icon / default.  A non-rectangular body (e.g. the Gain triangle)
-    // already conveys the block's identity, so an iconless shaped block is left
-    // empty rather than stamped with a noisy `?` placeholder.
-    if def.icon.is_none() && def.shape != SimulinkShape::Rectangle {
+    // 5. Icon.  The catalog definition is the source of truth: if it carries an
+    // icon, draw it directly (this also wins over any stale config-map entry for
+    // blocks that also exist in a bridged virtual library).
+    if let Some(icon) = def.icon {
+        let spec = super::config::icon_to_spec(icon);
+        let color = crate::egui_app::render::block_icon_color(block);
+        crate::egui_app::render::draw_icon_spec(
+            painter,
+            rect,
+            ctx.font_scale,
+            &spec,
+            color,
+            ctx.port_label_widths,
+        );
         return;
     }
 
-    // The existing icon path is the single place that rasterises every icon kind
-    // (UTF-8 glyph, Phosphor, SVG) and emits the `?` fallback (plus a one-time
-    // warning) for unknown rectangular blocks.
+    // No icon in the definition: a non-rectangular body (e.g. the Gain triangle)
+    // already conveys the block's identity, so leave it empty rather than stamp a
+    // noisy `?` placeholder.
+    if def.shape != SimulinkShape::Rectangle {
+        return;
+    }
+
+    // Rectangular & iconless: fall back to the legacy config-map icon path, which
+    // is the single place that rasterises every icon kind and emits the `?`
+    // fallback (plus a one-time warning) for unknown rectangular blocks.
     crate::egui_app::render::render_block_icon(
         painter,
         block,
