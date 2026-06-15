@@ -10,11 +10,11 @@ use std::collections::BTreeMap;
 
 use crate::model::{Block, Chart, System};
 
-use super::block_catalog::{BlockCatalogCategory, get_block_catalog_by_category};
 use super::operations::EditorHistory;
 use super::selection::EditorSelection;
 use crate::egui_app::SubsystemApp;
 use crate::egui_app::resolve_subsystem_by_vec;
+use crate::simulink_libraries::browser::{BlockCatalogCategory, get_block_catalog_by_category};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Drag state

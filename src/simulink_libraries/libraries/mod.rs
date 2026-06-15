@@ -10,6 +10,7 @@
 pub mod catalog;
 pub mod core;
 pub mod dashboard;
+pub mod matrix;
 pub mod simulink_blocks;
 
 use crate::simulink_libraries::types::SimulinkLibrary;
@@ -28,6 +29,10 @@ pub static ALL_LIBRARIES: &[SimulinkLibrary] = &[
     SimulinkLibrary {
         name: "dashboard",
         blocks: self::dashboard::BLOCKS,
+    },
+    SimulinkLibrary {
+        name: "matrix_library",
+        blocks: self::matrix::BLOCKS,
     },
 ];
 

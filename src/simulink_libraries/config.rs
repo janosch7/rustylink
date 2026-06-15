@@ -8,49 +8,9 @@
 use std::collections::HashMap;
 
 use crate::block_types::{BlockTypeConfig, IconSpec};
-use crate::builtin_libraries::virtual_library::{
-    BlockShape as CfgShape, humanize_camel_case, normalize_block_name,
-};
+use crate::simulink_libraries::stubs::{humanize_camel_case, normalize_block_name};
 
-use super::types::{
-    PortLabelPolicy, PortPlacement, PortPositionOverride, SimulinkBlockDefinition, SimulinkIcon,
-    SimulinkShape,
-};
-
-/// Map a catalog port placement to the legacy rendering placement.
-fn placement_to_cfg(p: PortPlacement) -> crate::builtin_libraries::virtual_library::PortPlacement {
-    use crate::builtin_libraries::virtual_library::PortPlacement as CfgPlacement;
-    match p {
-        PortPlacement::Left => CfgPlacement::Left,
-        PortPlacement::Right => CfgPlacement::Right,
-        PortPlacement::Top => CfgPlacement::Top,
-        PortPlacement::Bottom => CfgPlacement::Bottom,
-    }
-}
-
-/// Map a catalog port-position override to the legacy one.
-fn override_to_cfg(
-    o: &PortPositionOverride,
-) -> crate::builtin_libraries::virtual_library::PortPositionOverride {
-    crate::builtin_libraries::virtual_library::PortPositionOverride {
-        is_input: o.is_input,
-        port_index: o.port_index,
-        placement: placement_to_cfg(o.placement),
-        fraction: o.fraction,
-    }
-}
-
-/// Map a catalog shape to the legacy rendering shape.
-pub fn shape_to_cfg(shape: SimulinkShape) -> CfgShape {
-    match shape {
-        SimulinkShape::Rectangle => CfgShape::Rectangle,
-        SimulinkShape::Triangle => CfgShape::Triangle,
-        SimulinkShape::Circle => CfgShape::Circle,
-        SimulinkShape::FilledBlack => CfgShape::FilledBlack,
-        SimulinkShape::Goto => CfgShape::Goto,
-        SimulinkShape::From => CfgShape::From,
-    }
-}
+use super::types::{PortLabelPolicy, SimulinkBlockDefinition, SimulinkIcon};
 
 /// Map a catalog icon to the legacy icon spec.
 pub fn icon_to_spec(icon: SimulinkIcon) -> IconSpec {
@@ -80,15 +40,11 @@ pub fn from_definition(def: &SimulinkBlockDefinition) -> BlockTypeConfig {
         icon: def.icon.map(icon_to_spec),
         show_input_port_labels: show_in,
         show_output_port_labels: show_out,
-        shape: shape_to_cfg(def.shape),
+        shape: def.shape,
         default_ins: def.inputs.default_count(),
         default_outs: def.outputs.default_count(),
         known: true,
-        port_position_overrides: def
-            .port_position_overrides
-            .iter()
-            .map(override_to_cfg)
-            .collect(),
+        port_position_overrides: def.port_position_overrides.to_vec(),
         input_port_names: in_names,
         output_port_names: out_names,
     }

@@ -1047,7 +1047,7 @@ pub(crate) fn update_internal(
                     } else {
                         // Dashboard / UI block click: print connected block and signal info.
                         // Also handle traditional signal-line blocks like Scope and Display.
-                        if crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
+                        if crate::simulink_libraries::stubs::is_dashboard_block_type(
                             &b.block_type,
                         ) || matches!(b.block_type.as_str(), "Scope" | "Display")
                         {
@@ -2463,11 +2463,11 @@ pub(crate) fn update_internal(
                 painter: &egui::Painter,
                 outline: Pos2,
                 is_left_side: bool,
-                placement: Option<crate::builtin_libraries::virtual_library::PortPlacement>,
+                placement: Option<crate::simulink_libraries::types::PortPlacement>,
                 font_scale: f32,
                 color: Color32,
             ) {
-                use crate::builtin_libraries::virtual_library::PortPlacement;
+                use crate::simulink_libraries::types::PortPlacement;
                 let (h, w, stroke_w) = crate::egui_app::geometry::port_chevron_size(font_scale);
 
                 let points = match placement {
@@ -2728,8 +2728,9 @@ pub(crate) fn update_internal(
                     let pos = r_screen.center() - galley.size() * 0.5;
                     painter.galley(pos, galley, fg);
                 }
-            } else if let Some(instance_label) =
-                crate::builtin_libraries::compute_block_instance_label(b)
+            } else if let Some(instance_label) = crate::simulink_libraries::resolve_definition(b)
+                .compute_instance_label
+                .and_then(|f| f(b))
             {
                 // Per-instance label from InstanceData (e.g. "≤ 3.0" for Compare To Constant).
                 let beneath_font_px = 12.0 * font_scale;

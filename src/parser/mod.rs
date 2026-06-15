@@ -22,8 +22,8 @@ pub use helpers::{parse_endpoint, parse_points, resolve_system_reference};
 pub use library::*;
 pub use source::*;
 
-use crate::builtin_libraries::matrix_library;
 use crate::model::*;
+use crate::simulink_libraries::stubs;
 use anyhow::{Context, Result, anyhow};
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
@@ -180,9 +180,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                         // For most virtual libraries we just insert an empty system.
                         // Some virtual libraries provide structured metadata so that
                         // the UI can render reasonable placeholders (ports/icons).
-                        if let Some(sys) =
-                            crate::builtin_libraries::virtual_library_initial_system(lib_name)
-                        {
+                        if let Some(sys) = stubs::virtual_library_initial_system(lib_name) {
                             cache.insert(lib_name.to_string(), sys);
                         } else {
                             cache.insert(lib_name.to_string(), empty_library_system());
@@ -225,14 +223,14 @@ impl<S: ContentSource> SimulinkParser<S> {
                 }
                 // after ensuring the library system is cached, we may need to
                 // add a matrix-specific stub block for an unknown name.
-                if matrix_library::is_matrix_library_name(lib_name)
+                if stubs::is_matrix_library_name(lib_name)
                     && let Some(lib_system) = cache.get_mut(lib_name)
                 {
                     // add missing stub if necessary
                     if !lib_system.blocks.iter().any(|b| b.name == block_path) {
                         lib_system
                             .blocks
-                            .push(matrix_library::create_stub(block_path));
+                            .push(stubs::create_matrix_stub(block_path));
                     }
                 }
 
@@ -250,11 +248,9 @@ impl<S: ContentSource> SimulinkParser<S> {
                     {
                         let ins = block.port_counts.as_ref().and_then(|p| p.ins).unwrap_or(1);
                         let outs = block.port_counts.as_ref().and_then(|p| p.outs).unwrap_or(1);
-                        lib_system.blocks.push(
-                            crate::builtin_libraries::virtual_library::create_stub_block(
-                                block_path, ins, outs,
-                            ),
-                        );
+                        lib_system
+                            .blocks
+                            .push(stubs::create_stub_block(block_path, ins, outs));
                     }
                 }
                 if let Some(lib_system) = cache.get(lib_name) {

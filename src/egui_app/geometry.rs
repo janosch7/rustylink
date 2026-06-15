@@ -108,7 +108,7 @@ pub fn port_indicator_positions_with_overrides(
     in_count: u32,
     out_count: u32,
     mirrored: bool,
-    overrides: &[crate::builtin_libraries::virtual_library::PortPositionOverride],
+    overrides: &[crate::simulink_libraries::types::PortPositionOverride],
 ) -> (Vec<Pos2>, Vec<Pos2>) {
     let (in_side, out_side) = if mirrored {
         (PortSide::Out, PortSide::In)
@@ -138,10 +138,10 @@ pub fn port_indicator_positions_with_overrides(
 /// Convert a [`PortPlacement`] + fraction to a concrete position on a block rect.
 fn placement_pos(
     r: Rect,
-    placement: crate::builtin_libraries::virtual_library::PortPlacement,
+    placement: crate::simulink_libraries::types::PortPlacement,
     fraction: f32,
 ) -> Pos2 {
-    use crate::builtin_libraries::virtual_library::PortPlacement;
+    use crate::simulink_libraries::types::PortPlacement;
     let f = fraction.clamp(0.0, 1.0);
     match placement {
         PortPlacement::Left => Pos2::new(r.left(), r.top() + f * r.height()),
@@ -161,10 +161,10 @@ fn placement_pos(
 /// `is_left_side` flag used for the default layout.  For Top/Bottom
 /// overrides the value is always `true` (the chevron faces inward).
 pub fn port_override_is_left_side(
-    placement: crate::builtin_libraries::virtual_library::PortPlacement,
+    placement: crate::simulink_libraries::types::PortPlacement,
     _mirrored: bool,
 ) -> bool {
-    use crate::builtin_libraries::virtual_library::PortPlacement;
+    use crate::simulink_libraries::types::PortPlacement;
     match placement {
         PortPlacement::Left => true,
         PortPlacement::Right => false,

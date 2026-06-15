@@ -34,7 +34,7 @@ fn register_keys(
     names.extend_from_slice(def.aliases);
 
     for n in names {
-        use crate::builtin_libraries::virtual_library::humanize_camel_case;
+        use crate::simulink_libraries::stubs::humanize_camel_case;
         let human = humanize_camel_case(n);
         for key in [n.to_string(), normalize_name(n), normalize_name(&human)] {
             map.entry(key).or_insert(def);
@@ -54,16 +54,8 @@ impl DefinitionRegistry {
             }
         }
 
-        // Bridge the built-in virtual libraries (matrix, discrete, …) for their
-        // rendering metadata.  Registered after the hand-written libraries so
-        // core definitions win on key collisions.
-        for def in super::bridge::bridged_definitions() {
-            register_keys(&mut by_key, def);
-            all.push(def);
-        }
-
         // Metadata-only browser/palette catalog.  Registered last so the rich
-        // and bridged definitions above keep priority on key collisions; this
+        // hand-written definitions above keep priority on key collisions; this
         // only fills in block types they do not provide.
         for def in super::libraries::PALETTE {
             register_keys(&mut by_key, def);

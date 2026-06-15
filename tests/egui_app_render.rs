@@ -75,15 +75,16 @@ fn svg_parse_extract_diagonal_embedded() {
 #[test]
 fn block_type_registry_contains_matrix_library_icons() {
     use rustylink::block_types::IconSpec;
+    use rustylink::simulink_libraries::types::SimulinkIcon;
     let map = rustylink::block_types::get_block_type_config_map();
     let r = map.read().unwrap();
-    for b in rustylink::builtin_libraries::matrix_library::BLOCKS {
-        if let Some(icon) = b.icon {
+    for def in rustylink::simulink_libraries::libraries::matrix::BLOCKS {
+        if let Some(SimulinkIcon::Svg(icon)) = def.icon {
             assert_eq!(
-                r.get(b.name).and_then(|c| c.icon),
+                r.get(def.block_type).and_then(|c| c.icon),
                 Some(IconSpec::Svg(icon)),
                 "registry entry for {}",
-                b.name,
+                def.block_type,
             );
         }
     }
@@ -98,11 +99,12 @@ fn block_type_registry_contains_matrix_library_icons() {
 #[test]
 fn icon_lookup_stub_block_initial_system_no_library_path() {
     use rustylink::block_types::IconSpec;
-    for b in rustylink::builtin_libraries::matrix_library::BLOCKS {
-        if let Some(icon) = b.icon {
-            let blk = rustylink::builtin_libraries::virtual_library::create_stub_block(
-                b.name, b.ins, b.outs,
-            );
+    use rustylink::simulink_libraries::stubs;
+    use rustylink::simulink_libraries::types::SimulinkIcon;
+    for def in rustylink::simulink_libraries::libraries::matrix::BLOCKS {
+        if let Some(SimulinkIcon::Svg(icon)) = def.icon {
+            let (ins, outs) = stubs::matrix_port_counts_if_known(def.block_type).unwrap_or((1, 1));
+            let blk = stubs::create_stub_block(def.block_type, ins, outs);
             assert!(
                 blk.library_block_path.is_none(),
                 "stub block should have no library_block_path"
@@ -112,7 +114,7 @@ fn icon_lookup_stub_block_initial_system_no_library_path() {
                 cfg.icon,
                 Some(IconSpec::Svg(icon)),
                 "stub block '{}' (Phase 4 lookup) should resolve to icon '{}'",
-                b.name,
+                def.block_type,
                 icon
             );
         }
@@ -226,19 +228,25 @@ fn icon_lookup_cross_product_case_insensitive() {
 
 #[test]
 fn icon_lookup_matrix_library_icons() {
-    for b in rustylink::builtin_libraries::matrix_library::BLOCKS {
-        if let Some(icon) = b.icon {
+    use rustylink::simulink_libraries::types::SimulinkIcon;
+    for def in rustylink::simulink_libraries::libraries::matrix::BLOCKS {
+        if let Some(SimulinkIcon::Svg(icon)) = def.icon {
             let mut blk = rustylink::editor::operations::create_default_block(
                 "SubSystem",
-                b.name,
+                def.block_type,
                 0,
                 0,
                 1,
                 1,
             );
-            blk.library_block_path = Some(format!("matrix_library/{}", b.name));
+            blk.library_block_path = Some(format!("matrix_library/{}", def.block_type));
             let cfg = rustylink::egui_app::get_block_type_cfg(&blk);
-            assert_eq!(cfg.icon, Some(IconSpec::Svg(icon)), "block {}", b.name);
+            assert_eq!(
+                cfg.icon,
+                Some(IconSpec::Svg(icon)),
+                "block {}",
+                def.block_type
+            );
         }
     }
 }
@@ -387,7 +395,7 @@ fn signal_routing_blocks_have_explicit_visible_configs() {
         );
         assert_ne!(
             cfg.shape,
-            rustylink::builtin_libraries::virtual_library::BlockShape::FilledBlack
+            rustylink::simulink_libraries::types::SimulinkShape::FilledBlack
         );
     }
 }

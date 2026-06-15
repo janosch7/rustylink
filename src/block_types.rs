@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-pub use crate::builtin_libraries::virtual_library::BlockShape;
+pub use crate::simulink_libraries::types::SimulinkShape as BlockShape;
 use once_cell::sync::OnceCell;
 
 /// Simple RGB color independent of egui types.
@@ -54,8 +54,7 @@ pub struct BlockTypeConfig {
     /// When non-empty, these override the default evenly-distributed port
     /// layout for the specified ports.  Ports not listed here use the
     /// standard positioning.
-    pub port_position_overrides:
-        Vec<crate::builtin_libraries::virtual_library::PortPositionOverride>,
+    pub port_position_overrides: Vec<crate::simulink_libraries::types::PortPositionOverride>,
     /// Custom names for input ports
     pub input_port_names: Vec<String>,
     /// Custom names for output ports
@@ -122,11 +121,3 @@ where
         f(entry);
     }
 }
-
-/// Register icon configurations for all currently-registered user virtual
-/// libraries.
-///
-/// Currently a no-op: `OwnedVirtualBlock` carries no icon path, so all
-/// user-library blocks fall through to the `"?"` warning path in
-/// `render_block_icon`.  The function is kept for API compatibility.
-pub fn register_user_library_block_types() {}

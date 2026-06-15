@@ -146,11 +146,6 @@ path = "tests/parser_tests.rs"
 required-features = ["egui"]
 
 [[test]]
-name = "user_virtual_library"
-path = "tests/user_virtual_library.rs"
-required-features = ["egui"]
-
-[[test]]
 name = "line_coloring"
 path = "tests/line_coloring.rs"
 required-features = ["egui"]

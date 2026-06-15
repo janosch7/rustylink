@@ -1,4 +1,4 @@
-//! Block catalog for the editor's block browser.
+//! Block-browser catalog: a searchable, categorized view over the catalog.
 //!
 //! The browser is a *view* over the single unified Simulink block-definition
 //! catalog (`crate::simulink_libraries`).  Every searchable, categorized entry
@@ -10,7 +10,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use rustylink::editor::block_catalog::{get_block_catalog, BlockCatalogEntry};
+//! use rustylink::simulink_libraries::browser::{get_block_catalog, BlockCatalogEntry};
 //!
 //! let catalog = get_block_catalog();
 //! // Search for blocks matching "gain"

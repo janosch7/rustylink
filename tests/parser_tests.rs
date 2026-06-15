@@ -2,9 +2,9 @@ use camino::Utf8Path;
 use indexmap::IndexMap;
 use roxmltree::Document;
 use rustylink::block::{parse_block_shallow, parse_line_node};
-use rustylink::builtin_libraries::matrix_library;
 use rustylink::model::System;
 use rustylink::parser::{FsSource, SimulinkParser, is_virtual_library};
+use rustylink::simulink_libraries::stubs;
 
 use rustylink::parser::helpers::clean_whitespace;
 
@@ -53,39 +53,39 @@ fn resolving_virtual_library_does_not_error() {
 
 #[test]
 fn matrix_library_helpers_work() {
+    let port_counts_for = |name: &str| stubs::matrix_port_counts_if_known(name).unwrap_or((1, 1));
+
     // name recognition
-    assert!(matrix_library::is_matrix_library_name("matrix_library"));
-    assert!(matrix_library::is_matrix_library_name(
-        "Matrix_Library/Thing"
-    ));
-    assert!(!matrix_library::is_matrix_library_name("other"));
+    assert!(stubs::is_matrix_library_name("matrix_library"));
+    assert!(stubs::is_matrix_library_name("Matrix_Library/Thing"));
+    assert!(!stubs::is_matrix_library_name("other"));
 
     // port counts for known and unknown names
     // CamelCase names are transparently mapped to the spaced canonical name
     // via humanize_camel_case (e.g. "IdentityMatrix" → "Identity Matrix").
-    assert_eq!(matrix_library::port_counts_for("IdentityMatrix"), (0, 1));
+    assert_eq!(port_counts_for("IdentityMatrix"), (0, 1));
     // All-lowercase with no space can't be mapped to a spaced name, so
     // "crossproduct" is no longer recognised (falls back to the default).
-    assert_eq!(matrix_library::port_counts_for("crossproduct"), (1, 1));
-    assert_eq!(matrix_library::port_counts_for("unknown"), (1, 1));
+    assert_eq!(port_counts_for("crossproduct"), (1, 1));
+    assert_eq!(port_counts_for("unknown"), (1, 1));
 
     // whitespace collapse: multiple spaces are treated the same as a single
     // space, but spaces are not removed entirely.
-    let a = matrix_library::port_counts_for("Cross   Product");
-    let b = matrix_library::port_counts_for("Cross Product");
+    let a = port_counts_for("Cross   Product");
+    let b = port_counts_for("Cross Product");
     assert_eq!(a, b);
     // CamelCase "CrossProduct" is humanized to "Cross Product" and matches.
-    assert_eq!(matrix_library::port_counts_for("CrossProduct"), b);
+    assert_eq!(port_counts_for("CrossProduct"), b);
 
     // block list uses the spaced canonical name
     assert!(
-        matrix_library::BLOCKS
+        stubs::MATRIX_BLOCKS
             .iter()
             .any(|b| b.name == "Identity Matrix")
     );
 
     // stub creation produces a block with the expected fields
-    let stub = matrix_library::create_stub("Foo");
+    let stub = stubs::create_matrix_stub("Foo");
     assert_eq!(stub.block_type, "Foo");
     assert_eq!(stub.ports.len(), 2); // default 1 in + 1 out
 }

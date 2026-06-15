@@ -65,6 +65,23 @@ pub fn minmax_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Function")).map(|s| s.to_lowercase())
 }
 
+/// Instance label for a `Compare To Constant` block, derived from its
+/// `InstanceData` (`relop`/`const`).  Returns e.g. `"≤ 3.0"`, or `None` when the
+/// parameters are absent.
+pub fn compare_to_constant(block: &Block) -> Option<String> {
+    let id = block.instance_data.as_ref()?;
+    let relop = id.properties.get("relop")?;
+    let const_val = id.properties.get("const")?;
+    let sym = match relop.trim() {
+        "<=" => "\u{2264}",
+        ">=" => "\u{2265}",
+        "~=" => "\u{2260}",
+        "==" => "=",
+        other => other,
+    };
+    Some(format!("{} {}", sym, const_val.trim()))
+}
+
 /// Trim a metadata value and discard it if empty.
 fn nonempty(value: Option<&str>) -> Option<String> {
     value

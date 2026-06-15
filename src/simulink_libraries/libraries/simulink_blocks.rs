@@ -81,6 +81,12 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
         .with_icon(icon("\u{0394}")),
 
+    SimulinkBlockDefinition::new("Discrete Derivative", "Discrete")
+        .with_aliases(&["DiscreteDerivative"])
+        .with_description("Discrete-time derivative (Ku/Ts)")
+        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
+        .with_icon(SimulinkIcon::Svg("discrete/discrete_derivative.svg")),
+
     SimulinkBlockDefinition::new("DiscretePulseGenerator", "Sources")
         .with_aliases(&["Discrete Pulse Generator", "Pulse Generator"])
         .with_description("Generate discrete square-pulse signal")
@@ -126,7 +132,8 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Compare To Constant"])
         .with_description("Compare input signal to a constant")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("\u{2264}K")),
+        .with_icon(icon("\u{2264}K"))
+        .with_instance_label(labels::compare_to_constant),
 
     SimulinkBlockDefinition::new("DetectDecrease", "Logic and Bit Operations")
         .with_aliases(&["Detect Decrease"])

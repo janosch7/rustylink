@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         let root = Utf8PathBuf::from("simulink/systems/system_root.xml");
         parser.parse_system_file(&root)?
     } else {
-        let mut parser = SimulinkParser::new(&Utf8PathBuf::from("."), FsSource);
+        let mut parser = SimulinkParser::new(Utf8PathBuf::from("."), FsSource);
         parser.parse_system_file(&path)?
     };
     SimulinkParser::<FsSource>::resolve_library_references(&mut root_system, &lib_paths)

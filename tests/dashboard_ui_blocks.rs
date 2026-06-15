@@ -7,13 +7,13 @@
 //! 4. Display blocks have the correct port counts (1 input, 0 outputs)
 //! 5. Other dashboard blocks have 0 ports
 
-use rustylink::builtin_libraries::simulink_dashboard::{
-    DASHBOARD_BLOCK_TYPES, is_dashboard_block_type, is_simulink_dashboard_name,
-};
 use rustylink::model::{
     DashboardBinding, DashboardTargetPath, SlxArchive, parse_mxarray_binding, parse_rels_xml,
 };
 use rustylink::parser::{SimulinkParser, ZipSource};
+use rustylink::simulink_libraries::stubs::{
+    DASHBOARD_BLOCK_TYPES, is_dashboard_block_type, is_simulink_dashboard_name,
+};
 
 // ── is_dashboard_block_type ────────────────────────────────────────────────
 
@@ -635,7 +635,7 @@ mod visualization_tests {
         // Every entry in DASHBOARD_RENDERERS should be a known dashboard block type
         for &(bt, _) in dashboard_widgets::DASHBOARD_RENDERERS {
             assert!(
-                rustylink::builtin_libraries::simulink_dashboard::is_dashboard_block_type(bt),
+                rustylink::simulink_libraries::stubs::is_dashboard_block_type(bt),
                 "Renderer registered for '{}' but it's not a known dashboard block type",
                 bt
             );
@@ -765,9 +765,8 @@ mod visualization_tests {
         let system = archive.root_system().expect("no root system");
 
         for blk in &system.blocks {
-            if rustylink::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
-                &blk.block_type,
-            ) && blk.block_type != "Display"
+            if rustylink::simulink_libraries::stubs::is_dashboard_block_type(&blk.block_type)
+                && blk.block_type != "Display"
             {
                 assert!(
                     get_interior_renderer(&blk.block_type).is_some(),

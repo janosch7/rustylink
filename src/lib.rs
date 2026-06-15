@@ -12,11 +12,13 @@ pub mod live_values;
 pub mod model;
 pub mod parser;
 
-/// Definitions for built-in virtual libraries used by the parser and UI.
-pub mod builtin_libraries;
-
 /// SLX archive generator – regenerates `.slx` files from the parsed model.
 pub mod generator;
+
+// Unified Simulink block-definition catalog. The rich rendering definitions
+// require the `egui` feature, but the lightweight, parser-facing stub metadata
+// (`simulink_libraries::stubs`) is always available.
+pub mod simulink_libraries;
 
 // Optional mask evaluation feature
 pub mod mask_eval;
@@ -31,11 +33,6 @@ pub mod egui_app;
 #[cfg(feature = "egui")]
 pub mod block_types;
 
-// Unified Simulink block-definition catalog (egui feature). Single source of
-// truth for block metadata, icons, labels, shapes and renderers.
-#[cfg(feature = "egui")]
-pub mod simulink_libraries;
-
 // Comprehensive model editor (egui feature)
 #[cfg(feature = "egui")]
 pub mod editor;
@@ -43,12 +40,11 @@ pub mod editor;
 // Re-export core API so downstream users can easily access/modify the registry
 #[cfg(feature = "egui")]
 pub use block_types::{
-    BlockTypeConfig, IconSpec, Rgb, get_block_type_config_map, register_user_library_block_types,
-    set_block_type_config, update_block_type_config,
+    BlockTypeConfig, IconSpec, Rgb, get_block_type_config_map, set_block_type_config,
+    update_block_type_config,
 };
 
-// Re-export user virtual library API for downstream registration
-pub use builtin_libraries::{
-    OwnedVirtualBlock, PortPlacement, PortPositionOverride, UserVirtualLibrarySpec,
-    register_virtual_library,
-};
+// Re-export the catalog's runtime block-registration API for downstream users
+// who prefer to add a definition in code rather than as a catalog file.
+#[cfg(feature = "egui")]
+pub use simulink_libraries::register_user_definition;

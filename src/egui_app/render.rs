@@ -232,9 +232,7 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
     // Because `register_virtual_keys` pre-registers all normalized forms, these
     // are plain O(1) hash lookups – no linear scan needed.
     for seg in &last_segments {
-        use crate::builtin_libraries::virtual_library::{
-            humanize_camel_case, normalize_block_name,
-        };
+        use crate::simulink_libraries::stubs::{humanize_camel_case, normalize_block_name};
         let seg_norm = normalize_block_name(seg);
         if let Some(cfg) = g.get(seg_norm.as_str()) {
             return cfg.clone();

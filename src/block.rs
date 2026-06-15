@@ -807,7 +807,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
     if blk.port_counts.is_none()
         && blk.ports.is_empty()
         && let Some((ins, outs)) =
-            crate::builtin_libraries::matrix_library::port_counts_if_known(&blk.block_type)
+            crate::simulink_libraries::stubs::matrix_port_counts_if_known(&blk.block_type)
         && (ins > 0 || outs > 0)
     {
         blk.port_counts = Some(crate::model::PortCounts {
@@ -844,7 +844,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
     // BindingPersistence metadata rather than signal lines).
     if blk.port_counts.is_none()
         && blk.ports.is_empty()
-        && crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(&blk.block_type)
+        && crate::simulink_libraries::stubs::is_dashboard_block_type(&blk.block_type)
     {
         let (ins, outs) = if blk.block_type == "Display" {
             (1u32, 0u32)
