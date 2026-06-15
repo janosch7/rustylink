@@ -86,8 +86,10 @@ features = ["tiles", "fft", "parquet"]
 version = "0.17.2"
 optional = true
 
+# Must track the same egui generation as `eframe`/`egui` (0.34) so the
+# `FontDefinitions` types match for `add_to_fonts`.
 [dependencies.egui-phosphor]
-version = "0.7"
+version = "0.12"
 optional = true
 
 [dev-dependencies]

@@ -327,6 +327,7 @@ fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::light());
+            rustylink::egui_app::fonts::install(&cc.egui_ctx);
             Ok(Box::new(app.clone()))
         }),
     )

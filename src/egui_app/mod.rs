@@ -6,6 +6,7 @@
 use eframe::egui::{self, Rect};
 
 pub mod dashboard_widgets;
+pub mod fonts;
 pub mod geometry;
 pub mod icon_assets;
 pub mod navigation;

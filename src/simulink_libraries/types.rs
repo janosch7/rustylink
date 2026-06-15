@@ -92,6 +92,36 @@ impl IOPorts {
     }
 }
 
+/// A block property that the renderer extracts into per-instance metadata,
+/// together with the default value to assume when the SLX omits the property.
+///
+/// This is the data-driven home for block-property defaults (e.g. `Constant`'s
+/// `Value` defaults to `"1"`): the single, general
+/// [`extract_metadata`](super::metadata::extract_metadata) function consults
+/// these entries instead of every label helper hard-coding its own fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MetadataKey {
+    /// SLX property name (e.g. `"Value"`, `"Gain"`, `"Operator"`).
+    pub key: &'static str,
+    /// Value assumed when the property is absent from the model XML.
+    pub default: Option<&'static str>,
+}
+
+impl MetadataKey {
+    /// A property copied verbatim with no default (absent ⇒ absent).
+    pub const fn new(key: &'static str) -> Self {
+        Self { key, default: None }
+    }
+
+    /// A property with a `default` assumed when the model omits it.
+    pub const fn with_default(key: &'static str, default: &'static str) -> Self {
+        Self {
+            key,
+            default: Some(default),
+        }
+    }
+}
+
 /// How the labels for a block's input or output ports are produced.
 ///
 /// One of the three user-requested modes: none, fixed, or metadata-dependent.
@@ -221,8 +251,9 @@ pub struct SimulinkBlockDefinition {
     pub live_renderer: Option<LiveRendererFn>,
     /// Per-port position overrides.
     pub port_position_overrides: &'static [PortPositionOverride],
-    /// Property keys copied verbatim from `block.properties` into metadata.
-    pub metadata_keys: &'static [&'static str],
+    /// Properties extracted from `block.properties` into metadata, each with an
+    /// optional default applied when the model omits the property.
+    pub metadata_keys: &'static [MetadataKey],
     /// Optional extra metadata computation hook.
     pub metadata_fn: Option<fn(&Block, &mut BlockMetadata)>,
     /// Optional per-instance label derived directly from the block (used by
@@ -336,7 +367,7 @@ impl SimulinkBlockDefinition {
         self
     }
 
-    pub const fn with_metadata_keys(mut self, keys: &'static [&'static str]) -> Self {
+    pub const fn with_metadata_keys(mut self, keys: &'static [MetadataKey]) -> Self {
         self.metadata_keys = keys;
         self
     }

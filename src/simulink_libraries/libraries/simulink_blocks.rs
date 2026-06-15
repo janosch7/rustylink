@@ -8,7 +8,7 @@
 
 use crate::simulink_libraries::labels;
 use crate::simulink_libraries::types::{
-    BlockLabelPolicy, IOPorts, SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
+    BlockLabelPolicy, IOPorts, MetadataKey, SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
 };
 
 const fn icon(glyph: &'static str) -> SimulinkIcon {
@@ -94,14 +94,14 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Logical Operator"])
         .with_description("Perform logical operation (AND, OR, NOT, ...)")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_metadata_keys(&["Operator"])
+        .with_metadata_keys(&[MetadataKey::with_default("Operator", "AND")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::logic_operator)),
 
     SimulinkBlockDefinition::new("RelationalOperator", "Logic and Bit Operations")
         .with_aliases(&["Relational Operator"])
         .with_description("Compare two inputs (<=, >=, ==, ~=)")
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_metadata_keys(&["Operator"])
+        .with_metadata_keys(&[MetadataKey::with_default("Operator", "<=")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::relational_operator)),
 
     SimulinkBlockDefinition::new("BitClear", "Logic and Bit Operations")
@@ -178,20 +178,20 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Math Function"])
         .with_description("Apply mathematical function (exp, log, sqrt, ...)")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_metadata_keys(&["Operator"])
+        .with_metadata_keys(&[MetadataKey::with_default("Operator", "exp")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::math_function)),
 
     SimulinkBlockDefinition::new("Trigonometry", "Math Operations")
         .with_aliases(&["Trigonometric Function"])
         .with_description("Trigonometric function (sin, cos, tan, acos, ...)")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_metadata_keys(&["Operator"])
+        .with_metadata_keys(&[MetadataKey::with_default("Operator", "sin")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::trig_function)),
 
     SimulinkBlockDefinition::new("MinMax", "Math Operations")
         .with_description("Output minimum or maximum of inputs")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_metadata_keys(&["Function"])
+        .with_metadata_keys(&[MetadataKey::with_default("Function", "min")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::minmax_function)),
 
     SimulinkBlockDefinition::new("ComplexToMagnitudeAngle", "Math Operations")

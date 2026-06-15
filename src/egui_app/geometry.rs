@@ -36,6 +36,19 @@ pub fn parse_rect_str(pos: &str) -> Option<Rect> {
     }
 }
 
+/// Visual size of a port chevron (the small arrow drawn at an unconnected
+/// port), in screen points: `(height, width, stroke_width)`.
+///
+/// Shared by the editor and viewer so both draw identically and so the block
+/// layout can reserve matching horizontal space.
+pub fn port_chevron_size(font_scale: f32) -> (f32, f32, f32) {
+    let scale = font_scale.max(0.2);
+    let h = (8.0 * scale).max(3.0);
+    let w = (6.0 * scale).max(2.0);
+    let stroke_w = (1.25 * scale).max(0.75);
+    (h, w, stroke_w)
+}
+
 /// Compute a port anchor position on a block's rectangle.
 /// Ports are distributed vertically.
 pub fn port_anchor_pos(r: Rect, side: PortSide, port_index: u32, num_ports: Option<u32>) -> Pos2 {

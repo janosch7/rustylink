@@ -2468,10 +2468,7 @@ pub(crate) fn update_internal(
                 color: Color32,
             ) {
                 use crate::builtin_libraries::virtual_library::PortPlacement;
-                let scale = font_scale.max(0.2);
-                let stroke_w = (4.0 * scale).max(1.0);
-                let h = (8.0 * scale * 4.0).max(3.0 * 4.0);
-                let w = (6.0 * scale * 4.0).max(2.0 * 4.0);
+                let (h, w, stroke_w) = crate::egui_app::geometry::port_chevron_size(font_scale);
 
                 let points = match placement {
                     Some(PortPlacement::Bottom) => {

@@ -53,13 +53,18 @@ impl BlockMetadata {
 
 /// Extract the metadata declared by a definition from the parsed block.
 ///
-/// Copies each `metadata_keys` entry from `block.properties` and then runs the
-/// optional `metadata_fn` hook for computed values.
+/// This is the single, general property-parsing entry point: for each
+/// `metadata_keys` entry it copies the value from `block.properties`, falling
+/// back to the entry's declared default when the model omits the property
+/// (e.g. a `Constant` with no `Value` property resolves to `"1"`).  The
+/// optional `metadata_fn` hook then runs for any computed values.
 pub fn extract_metadata(block: &Block, def: &SimulinkBlockDefinition) -> BlockMetadata {
     let mut meta = BlockMetadata::default();
-    for &key in def.metadata_keys {
-        if let Some(value) = block.properties.get(key) {
-            meta.insert(key, value.clone());
+    for mk in def.metadata_keys {
+        if let Some(value) = block.properties.get(mk.key) {
+            meta.insert(mk.key, value.clone());
+        } else if let Some(default) = mk.default {
+            meta.insert(mk.key, default);
         }
     }
     if let Some(f) = def.metadata_fn {

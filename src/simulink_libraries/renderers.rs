@@ -89,40 +89,7 @@ pub fn static_scope(
     true
 }
 
-/// Static renderer for dashboard blocks (draws the widget's default icon).
-pub fn static_dashboard(
-    painter: &Painter,
-    block: &Block,
-    rect: &Rect,
-    ctx: &RenderContext<'_>,
-) -> bool {
-    if let Some(renderer) =
-        crate::egui_app::dashboard_widgets::get_dashboard_renderer(&block.block_type)
-    {
-        renderer(painter, block, rect, ctx.font_scale, ctx.name_font_factor);
-        true
-    } else {
-        false
-    }
-}
-
-/// Live renderer for dashboard blocks (draws the live value overlay).
-pub fn live_dashboard(
-    painter: &Painter,
-    block: &Block,
-    rect: &Rect,
-    ctx: &RenderContext<'_>,
-) -> bool {
-    let Some(value) = ctx.live_value else {
-        return false;
-    };
-    crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
-        painter,
-        block,
-        rect,
-        ctx.font_scale,
-        value,
-        ctx.live_display_options,
-    );
-    true
-}
+// NOTE: dashboard blocks no longer share a single general renderer hook here.
+// Each dashboard block wires its own per-widget static/live renderer in
+// `libraries::dashboard`, delegating to the matching `dashboard_widgets`
+// drawing routine.

@@ -10,7 +10,7 @@
 use crate::simulink_libraries::labels;
 use crate::simulink_libraries::renderers;
 use crate::simulink_libraries::types::{
-    BlockLabelPolicy, IOPorts, PortLabelPolicy, PortPlacement, PortPositionOverride,
+    BlockLabelPolicy, IOPorts, MetadataKey, PortLabelPolicy, PortPlacement, PortPositionOverride,
     SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
 };
 
@@ -42,13 +42,14 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_description("Multiply input by a constant")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
         .with_shape(SimulinkShape::Triangle)
-        .with_metadata_keys(&["Gain"])
+        .with_metadata_keys(&[MetadataKey::with_default("Gain", "1")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::gain_value)),
     // ── Sources / sinks ────────────────────────────────────────────────
     SimulinkBlockDefinition::new("Constant", "Sources")
         .with_description("Output a constant value")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
-        .with_icon(icon("C")),
+        .with_metadata_keys(&[MetadataKey::with_default("Value", "1")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::constant_value)),
     SimulinkBlockDefinition::new("Scope", "Sinks")
         .with_description("Display signals over time")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
@@ -69,7 +70,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_icon(icon("➡")),
     SimulinkBlockDefinition::new("SubSystem", "Ports & Subsystems")
         .with_description("Group blocks into a subsystem")
-        .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
+        // Subsystem ports are derived from the contained In/Outport blocks, so
+        // the default (used only when the model carries no port info) is 0/0.
+        .with_ports(IOPorts::Variable(0), IOPorts::Variable(0))
         .with_icon(icon(""))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
@@ -78,7 +81,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("MATLAB Function", "User-Defined Functions")
         .with_description("Author block behaviour in MATLAB")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(icon("🖹"))
+        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::FUNCTION))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
@@ -86,7 +89,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("CFunction", "User-Defined Functions")
         .with_description("Author block behaviour in C")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(icon("📁"))
+        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::FILE_C))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
@@ -124,7 +127,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Manual Switch"])
         .with_description("Manually switch between two inputs")
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_icon(icon("🕂"))
+        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROWS_MERGE))
         .with_static_renderer(renderers::static_manual_switch)
         .with_live_renderer(renderers::live_manual_switch),
     SimulinkBlockDefinition::new("Goto", "Signal Routing")
@@ -132,7 +135,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_shape(SimulinkShape::Goto)
         .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROW_RIGHT))
-        .with_metadata_keys(&["GotoTag"])
+        .with_metadata_keys(&[MetadataKey::with_default("GotoTag", "A")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::goto_tag))
         .with_static_renderer(renderers::static_goto_from),
     SimulinkBlockDefinition::new("From", "Signal Routing")
@@ -140,7 +143,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
         .with_shape(SimulinkShape::From)
         .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROW_LEFT))
-        .with_metadata_keys(&["GotoTag"])
+        .with_metadata_keys(&[MetadataKey::with_default("GotoTag", "A")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::goto_tag))
         .with_static_renderer(renderers::static_goto_from),
 ];

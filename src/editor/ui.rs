@@ -979,9 +979,8 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // Draw deferred block labels
 
         for (b, r_screen, bg, font_scale) in deferred_block_labels {
-            let scale = font_scale.max(0.2);
-
-            let chevron_w = (6.0 * scale * 4.0).max(2.0 * 4.0);
+            let (_chevron_h, chevron_w, _chevron_stroke) =
+                crate::egui_app::geometry::port_chevron_size(font_scale);
 
             let in_count = b.port_counts.as_ref().and_then(|p| p.ins).unwrap_or(0);
 
@@ -1825,12 +1824,7 @@ fn draw_port_indicators(
         font_scale: f32,
         color: Color32,
     ) {
-        let scale = font_scale.max(0.2);
-        // enlarge chevrons by factor of 4 relative to prior dot markers
-        // thicker stroke for chevron edges
-        let stroke_w = (4.0 * scale).max(1.0);
-        let h = (8.0 * scale * 4.0).max(3.0 * 4.0);
-        let w = (6.0 * scale * 4.0).max(2.0 * 4.0);
+        let (h, w, stroke_w) = crate::egui_app::geometry::port_chevron_size(font_scale);
 
         let (base_x, tip_x) = if is_left_side {
             let tip_x = outline.x - stroke_w / 2.0;
@@ -2332,7 +2326,9 @@ fn draw_port_interaction_areas(
     };
 
     let scale = font_scale.max(0.2);
-    let hit_size = (12.0 * scale * 4.0).max(8.0);
+    // Keep the clickable target comfortably larger than the (now smaller) visual
+    // chevron without overlapping neighbouring blocks.
+    let hit_size = (16.0 * scale).max(10.0);
 
     let sid = match &block.sid {
         Some(s) => s.clone(),

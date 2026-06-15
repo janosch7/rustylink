@@ -220,7 +220,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     e("WeightedSample", "Signal Attributes", "Weighted Sample Time", 1, 1, "Scale by sample time"),
     e("BusToSignal", "Signal Attributes", "Bus to Signal", 1, 1, "Convert bus to signal"),
     // ──── Subsystems ────
-    e("SubSystem", "Subsystems", "Subsystem", 1, 1, "Group blocks into subsystem"),
+    // Subsystem ports are derived from the contained In/Outport blocks, so the
+    // default (used when the model carries no <PortCounts>) is 0 in / 0 out.
+    e("SubSystem", "Subsystems", "Subsystem", 0, 0, "Group blocks into subsystem"),
     e("AtomicSubSystem", "Subsystems", "Atomic Subsystem", 1, 1, "Atomic (non-virtual) subsystem"),
     e("EnabledSubSystem", "Subsystems", "Enabled Subsystem", 2, 1, "Subsystem with enable port"),
     e("TriggeredSubSystem", "Subsystems", "Triggered Subsystem", 2, 1, "Subsystem with trigger port"),
