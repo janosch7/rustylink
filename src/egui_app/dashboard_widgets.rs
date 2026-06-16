@@ -2448,6 +2448,15 @@ pub fn render_dashboard_widget(
     );
 }
 
+/// Paint a dashboard block's live-value overlay by dispatching through the
+/// block's catalog definition.
+///
+/// There is no block-type branching here: the block's resolved
+/// [`SimulinkBlockDefinition`](crate::simulink_libraries::types::SimulinkBlockDefinition)
+/// carries its own [`LiveRendererFn`](crate::simulink_libraries::types::LiveRendererFn),
+/// which is the single source of truth for how the widget draws.  When the
+/// definition has no live renderer (or it declines to draw), we fall back to the
+/// generic dashboard icon.
 pub fn paint_live_dashboard_value_overlay(
     painter: &egui::Painter,
     block: &Block,
@@ -2456,103 +2465,31 @@ pub fn paint_live_dashboard_value_overlay(
     live_value: f64,
     display_options: Option<&crate::live_values::LiveValueDisplayOptions>,
 ) {
-    match block.block_type.as_str() {
-        "PushButtonBlock" => live_push_button(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "SliderSwitchBlock" => live_slider_switch(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "RadioButtonGroup" => live_radio_button_group(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "ComboBox" => live_combo_box(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "Checkbox" => live_checkbox(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "SliderBlock" | "LinearGaugeBlock" => live_slider_or_linear_gauge(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "EditField" | "DisplayBlock" => live_field_or_display(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "ToggleSwitchBlock" => live_toggle_switch(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "KnobBlock"
-        | "CircularGaugeBlock"
-        | "SemiCircularGaugeBlock"
-        | "QuarterGaugeBlock"
-        | "RotarySwitchBlock" => live_radial_gauge(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "RockerSwitchBlock" => live_rocker_switch(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        "LampBlock" => live_lamp(
-            painter,
-            block,
-            rect,
-            font_scale,
-            live_value,
-            display_options,
-        ),
-        _ => {
-            dashboard_icon_fallback(painter, block, rect, font_scale, live_value);
-        }
+    use crate::simulink_libraries::metadata::extract_metadata;
+    use crate::simulink_libraries::resolve_definition;
+    use crate::simulink_libraries::types::RenderContext;
+
+    let def = resolve_definition(block);
+    let metadata = extract_metadata(block, def);
+    let ctx = RenderContext {
+        live_mode: true,
+        font_scale,
+        name_font_factor: 1.0,
+        metadata: &metadata,
+        live_value: Some(live_value),
+        live_text: None,
+        live_display_options: display_options,
+        port_y: None,
+        port_label_widths: None,
+        text_color: crate::egui_app::render::block_icon_color(block),
+    };
+
+    if let Some(f) = def.live_renderer
+        && f(painter, block, rect, &ctx)
+    {
+        return;
     }
+    dashboard_icon_fallback(painter, block, rect, font_scale, live_value);
 }
 
 /// Draw the small-size icon fallback for dashboard widgets; returns true
