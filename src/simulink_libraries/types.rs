@@ -214,6 +214,51 @@ pub type StaticRendererFn = fn(&Painter, &Block, &eframe::egui::Rect, &RenderCon
 /// `false` falls back to the static renderer / default rendering.
 pub type LiveRendererFn = fn(&Painter, &Block, &eframe::egui::Rect, &RenderContext<'_>) -> bool;
 
+/// How an interactive dashboard control maps its widget value to a queued
+/// control value when the model runs live.
+///
+/// This replaces the former `block_type` match in `dashboard_input_control_kind`
+/// – the kind is now data carried by the block's definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DashboardControlKind {
+    /// Boolean toggle (checkbox, toggle/slider/rocker switch).
+    Bool,
+    /// Momentary pulse (push button).
+    Pulse,
+    /// Discrete selection (combo box, radio group, rotary switch).
+    Discrete,
+    /// Continuous scalar (knob, slider, edit field).
+    Scalar,
+}
+
+impl DashboardControlKind {
+    /// Stable lower-case identifier used by the live-control plumbing.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            DashboardControlKind::Bool => "bool",
+            DashboardControlKind::Pulse => "pulse",
+            DashboardControlKind::Discrete => "discrete",
+            DashboardControlKind::Scalar => "scalar",
+        }
+    }
+}
+
+/// Signature of an **interactive** dashboard control renderer (live mode).
+///
+/// Unlike [`StaticRendererFn`]/[`LiveRendererFn`], an interactive control needs
+/// mutable access to the running app and `egui::Ui` so it can emit widgets and
+/// queue control values.  Carrying it on the definition keeps the live-control
+/// dispatch definition-driven (no `block_type` match in the UI).
+pub type ControlRendererFn = fn(
+    &mut crate::egui_app::state::SubsystemApp,
+    &mut eframe::egui::Ui,
+    &Block,
+    eframe::egui::Rect,
+    f32,
+    f64,
+    Option<&str>,
+) -> bool;
+
 /// A single block type in the unified catalog.
 ///
 /// This is intentionally a plain data struct built with `const` builder methods
@@ -260,6 +305,13 @@ pub struct SimulinkBlockDefinition {
     /// bridged virtual-library blocks that pre-date the metadata system).
     /// Consulted after [`BlockLabelPolicy`] when both are present.
     pub compute_instance_label: Option<fn(&Block) -> Option<String>>,
+    /// For interactive dashboard input controls: how the widget value maps to a
+    /// queued control value when live.  `None` for non-control blocks.
+    pub dashboard_control: Option<DashboardControlKind>,
+    /// Optional interactive control renderer used in live mode for dashboard
+    /// input widgets (needs mutable app/`Ui`).  Consulted before the painter
+    /// based live/static renderers for live, interactive controls.
+    pub control_renderer: Option<ControlRendererFn>,
 }
 
 impl std::fmt::Debug for SimulinkBlockDefinition {
@@ -303,6 +355,8 @@ impl SimulinkBlockDefinition {
             metadata_keys: &[],
             metadata_fn: None,
             compute_instance_label: None,
+            dashboard_control: None,
+            control_renderer: None,
         }
     }
 
@@ -379,6 +433,16 @@ impl SimulinkBlockDefinition {
 
     pub const fn with_instance_label(mut self, f: fn(&Block) -> Option<String>) -> Self {
         self.compute_instance_label = Some(f);
+        self
+    }
+
+    pub const fn with_dashboard_control(mut self, kind: DashboardControlKind) -> Self {
+        self.dashboard_control = Some(kind);
+        self
+    }
+
+    pub const fn with_control_renderer(mut self, f: ControlRendererFn) -> Self {
+        self.control_renderer = Some(f);
         self
     }
 

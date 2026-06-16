@@ -345,32 +345,6 @@ fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Colo
     );
 }
 
-fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
-    #[cfg(not(feature = "dashboard"))]
-    {
-        let _ = block_type;
-        false
-    }
-
-    #[cfg(feature = "dashboard")]
-    {
-        matches!(
-            block_type,
-            "Checkbox"
-                | "ComboBox"
-                | "EditField"
-                | "KnobBlock"
-                | "PushButtonBlock"
-                | "RadioButtonGroup"
-                | "RockerSwitchBlock"
-                | "RotarySwitchBlock"
-                | "SliderBlock"
-                | "SliderSwitchBlock"
-                | "ToggleSwitchBlock"
-        )
-    }
-}
-
 pub(crate) fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
     if value >= 0.5 { "1" } else { "0" }
 }
@@ -2700,8 +2674,15 @@ pub(crate) fn update_internal(
                 let galley = painter.layout_no_wrap(text.clone(), font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
-            } else if app.live_mode_enabled && uses_dashboard_control_widget_renderer(&b.block_type)
+            } else if app.live_mode_enabled
+                && cfg!(feature = "dashboard")
+                && crate::simulink_libraries::resolve_definition(b)
+                    .control_renderer
+                    .is_some()
             {
+                // Definition-driven interactive control dispatch: the block's
+                // resolved definition carries its own `control_renderer`; no
+                // block-type match here.
                 let _ = render_dashboard_control_widget(app, ui, b, *r_screen, font_scale);
             } else if b
                 .value
@@ -3449,15 +3430,17 @@ fn render_dashboard_control_widget(
     rect: Rect,
     font_scale: f32,
 ) -> bool {
+    let Some(f) = crate::simulink_libraries::resolve_definition(block).control_renderer else {
+        return false;
+    };
     let live_value = dashboard_widget_value(app, block);
     let live_text = block_live_text(app, block);
-    crate::egui_app::dashboard_widgets::render_dashboard_control_widget(
+    f(
         app,
         ui,
         block,
         rect,
         font_scale,
-        app.block_name_font_factor,
         live_value,
         live_text.as_deref(),
     )

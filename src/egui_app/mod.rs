@@ -28,8 +28,6 @@ pub use render::wrap_text_to_max_width;
 
 // Helpers which are useful for integration tests
 pub use render::{PortLabelMaxWidths, compute_icon_available_rect};
-// Interior renderer registry access (needed by dashboard visualization tests)
-pub use render::{InteriorRendererFn, get_interior_renderer};
 #[cfg(feature = "dashboard")]
 pub use state::ScopePopout;
 pub use state::{

@@ -31,7 +31,6 @@ const TEXT_DARK: Color32 = Color32::from_rgb(40, 40, 40);
 const ACCENT: Color32 = Color32::from_rgb(60, 120, 215);
 const ACCENT_DARK: Color32 = Color32::from_rgb(40, 80, 180);
 const NEEDLE_RED: Color32 = Color32::from_rgb(200, 40, 40);
-const LAMP_ON: Color32 = Color32::from_rgb(60, 200, 60);
 const SCOPE_BG: Color32 = Color32::from_rgb(250, 250, 250);
 const SCOPE_GRID: Color32 = Color32::from_rgb(220, 220, 220);
 const SCOPE_LINE: Color32 = Color32::from_rgb(30, 100, 200);
@@ -173,125 +172,26 @@ fn paint_dashboard_widget_icon(
     rect: &Rect,
     palette: WidgetPalette,
 ) {
-    let inner = inner_rect(rect, 0.70);
-    let center = inner.center();
-    let stroke = Stroke::new(1.1, palette.border);
-    match block.block_type.as_str() {
-        "Checkbox" => {
-            let box_rect = Rect::from_center_size(
-                center,
-                Vec2::splat(inner.height().min(inner.width()) * 0.6),
-            );
-            painter.rect_stroke(box_rect, 2.0, stroke, egui::StrokeKind::Inside);
-            painter.line_segment(
-                [
-                    Pos2::new(box_rect.left() + 2.0, box_rect.center().y),
-                    Pos2::new(box_rect.center().x, box_rect.bottom() - 2.0),
-                ],
-                Stroke::new(1.2, palette.accent_dark),
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(box_rect.center().x, box_rect.bottom() - 2.0),
-                    Pos2::new(box_rect.right() - 2.0, box_rect.top() + 2.0),
-                ],
-                Stroke::new(1.2, palette.accent_dark),
-            );
-        }
-        "ComboBox" | "EditField" | "DisplayBlock" => {
-            let field = Rect::from_center_size(
-                center,
-                Vec2::new(inner.width() * 0.9, inner.height() * 0.55),
-            );
-            painter.rect_stroke(field, 3.0, stroke, egui::StrokeKind::Inside);
-            if block.block_type == "ComboBox" {
-                let arrow = vec![
-                    Pos2::new(field.right() - 8.0, field.center().y - 2.0),
-                    Pos2::new(field.right() - 3.0, field.center().y - 2.0),
-                    Pos2::new(field.right() - 5.5, field.center().y + 2.0),
-                ];
-                painter.add(egui::Shape::convex_polygon(
-                    arrow,
-                    palette.text,
-                    Stroke::NONE,
-                ));
-            } else {
-                painter.line_segment(
-                    [
-                        Pos2::new(field.left() + 4.0, field.top() + 3.0),
-                        Pos2::new(field.left() + 4.0, field.bottom() - 3.0),
-                    ],
-                    Stroke::new(1.0, palette.text),
-                );
-            }
-        }
-        "SliderBlock" | "LinearGaugeBlock" => {
-            let left = Pos2::new(inner.left() + 4.0, center.y);
-            let right = Pos2::new(inner.right() - 4.0, center.y);
-            painter.line_segment([left, right], stroke);
-            painter.circle_filled(
-                Pos2::new(egui::lerp(left.x..=right.x, 0.5), center.y),
-                3.5,
-                Color32::WHITE,
-            );
-            painter.circle_stroke(
-                Pos2::new(egui::lerp(left.x..=right.x, 0.5), center.y),
-                3.5,
-                stroke,
-            );
-        }
-        "SliderSwitchBlock" => paint_switch_visual(painter, rect, palette, false, false, 1.0),
-        "ToggleSwitchBlock" => paint_switch_visual(painter, rect, palette, false, true, 1.0),
-        "RockerSwitchBlock" => paint_rocker_switch_visual(painter, rect, palette, false, 1.0),
-        "RadioButtonGroup" => {
-            for offset in [-4.0_f32, 4.0] {
-                let c = Pos2::new(center.x - 3.0, center.y + offset);
-                painter.circle_stroke(c, 2.8, stroke);
-                if offset < 0.0 {
-                    painter.circle_filled(c, 1.5, palette.accent);
-                }
-            }
-        }
-        "KnobBlock"
-        | "RotarySwitchBlock"
-        | "CircularGaugeBlock"
-        | "SemiCircularGaugeBlock"
-        | "QuarterGaugeBlock" => {
-            let radius = inner.width().min(inner.height()) * 0.28;
-            painter.circle_stroke(center, radius, stroke);
-            painter.line_segment(
-                [
-                    center,
-                    Pos2::new(center.x + radius * 0.6, center.y - radius * 0.4),
-                ],
-                Stroke::new(1.2, palette.accent_dark),
-            );
-        }
-        "DashboardScope" => {
-            let plot = inner_rect(&inner, 0.95);
-            painter.rect_stroke(plot, 2.0, stroke, egui::StrokeKind::Inside);
-            let pts = [
-                Pos2::new(plot.left() + 2.0, plot.center().y + 2.0),
-                Pos2::new(plot.left() + plot.width() * 0.3, plot.top() + 3.0),
-                Pos2::new(plot.left() + plot.width() * 0.55, plot.bottom() - 3.0),
-                Pos2::new(plot.right() - 2.0, plot.center().y - 1.0),
-            ];
-            for segment in pts.windows(2) {
-                painter.line_segment([segment[0], segment[1]], Stroke::new(1.2, SCOPE_LINE));
-            }
-        }
-        "LampBlock" => {
-            painter.circle_filled(center, inner.width().min(inner.height()) * 0.22, LAMP_ON);
-            painter.circle_stroke(center, inner.width().min(inner.height()) * 0.22, stroke);
-        }
-        _ => {
-            let body = Rect::from_center_size(
-                center,
-                Vec2::new(inner.width() * 0.8, inner.height() * 0.5),
-            );
-            painter.rect_stroke(body, 3.0, stroke, egui::StrokeKind::Inside);
-        }
+    // No block-type branching: draw the block's catalog icon (the single source
+    // of truth for its small-size representation).  When the definition carries
+    // no icon, fall back to a neutral field box.
+    let def = crate::simulink_libraries::resolve_definition(block);
+    if let Some(icon) = def.icon {
+        let spec = crate::simulink_libraries::config::icon_to_spec(icon);
+        crate::egui_app::render::draw_icon_spec(painter, rect, 1.0, &spec, palette.text, None);
+        return;
     }
+    let inner = inner_rect(rect, 0.70);
+    let body = Rect::from_center_size(
+        inner.center(),
+        Vec2::new(inner.width() * 0.8, inner.height() * 0.5),
+    );
+    painter.rect_stroke(
+        body,
+        3.0,
+        Stroke::new(1.1, palette.border),
+        egui::StrokeKind::Inside,
+    );
 }
 
 fn radio_group_metrics(rect: &Rect, font_scale: f32, option_count: usize) -> (f32, f32, f32) {
@@ -1775,13 +1675,10 @@ fn dashboard_input_control_kind(block: &Block) -> Option<&'static str> {
         return None;
     }
 
-    Some(match block.block_type.as_str() {
-        "Checkbox" | "ToggleSwitchBlock" | "SliderSwitchBlock" | "RockerSwitchBlock" => "bool",
-        "PushButtonBlock" => "pulse",
-        "RadioButtonGroup" | "ComboBox" | "RotarySwitchBlock" => "discrete",
-        "KnobBlock" | "SliderBlock" | "EditField" => "scalar",
-        _ => return None,
-    })
+    // The control kind is data on the block's definition, not a block-type match.
+    crate::simulink_libraries::resolve_definition(block)
+        .dashboard_control
+        .map(|kind| kind.as_str())
 }
 
 #[cfg(feature = "dashboard")]
@@ -2323,130 +2220,112 @@ fn render_painted_control_widget(
     }
 }
 
+// ─── Per-block interactive control adapters ─────────────────────────────────
+//
+// Each dashboard input control wires one of these as its definition's
+// `control_renderer`.  They share a single uniform [`ControlRendererFn`]
+// signature so the live UI dispatches purely through the resolved definition,
+// with no `block_type` match.
+
+/// Generate a uniform-signature control adapter that forwards to a per-widget
+/// control routine taking `(app, ui, block, rect, font_scale, live_value)`.
 #[cfg(feature = "dashboard")]
-#[allow(clippy::too_many_arguments)]
-pub fn render_dashboard_control_widget(
+macro_rules! control_adapter {
+    ($name:ident => $inner:ident) => {
+        pub fn $name(
+            app: &mut SubsystemApp,
+            ui: &mut egui::Ui,
+            block: &Block,
+            rect: Rect,
+            font_scale: f32,
+            live_value: f64,
+            _live_text: Option<&str>,
+        ) -> bool {
+            $inner(app, ui, block, rect, font_scale, live_value)
+        }
+    };
+}
+
+#[cfg(feature = "dashboard")]
+control_adapter!(control_checkbox => render_checkbox_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_radio_button_group => render_radio_button_group_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_combo_box => render_combo_box_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_slider => render_slider_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_slider_switch => render_slider_switch_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_toggle_switch => render_toggle_switch_control_widget);
+#[cfg(feature = "dashboard")]
+control_adapter!(control_painted => render_painted_control_widget);
+
+/// Push button has no live value to forward.
+#[cfg(feature = "dashboard")]
+pub fn control_push_button(
     app: &mut SubsystemApp,
     ui: &mut egui::Ui,
     block: &Block,
     rect: Rect,
     font_scale: f32,
-    _name_font_factor: f32,
+    _live_value: f64,
+    _live_text: Option<&str>,
+) -> bool {
+    render_push_button_control_widget(app, ui, block, rect, font_scale)
+}
+
+/// Edit field also consumes the live text representation.
+#[cfg(feature = "dashboard")]
+pub fn control_edit_field(
+    app: &mut SubsystemApp,
+    ui: &mut egui::Ui,
+    block: &Block,
+    rect: Rect,
+    font_scale: f32,
     live_value: f64,
     live_text: Option<&str>,
 ) -> bool {
-    match block.block_type.as_str() {
-        "Checkbox" => render_checkbox_control_widget(app, ui, block, rect, font_scale, live_value),
-        "RadioButtonGroup" => {
-            render_radio_button_group_control_widget(app, ui, block, rect, font_scale, live_value)
+    render_edit_field_control_widget(app, ui, block, rect, font_scale, live_value, live_text)
+}
+
+// Without the `dashboard` feature the catalog still references these adapters
+// (it is `egui`-gated), so provide inert stubs that never claim to draw.
+#[cfg(not(feature = "dashboard"))]
+macro_rules! control_stub {
+    ($name:ident) => {
+        pub fn $name(
+            _app: &mut crate::egui_app::state::SubsystemApp,
+            _ui: &mut egui::Ui,
+            _block: &Block,
+            _rect: Rect,
+            _font_scale: f32,
+            _live_value: f64,
+            _live_text: Option<&str>,
+        ) -> bool {
+            false
         }
-        "ComboBox" => render_combo_box_control_widget(app, ui, block, rect, font_scale, live_value),
-        "EditField" => render_edit_field_control_widget(
-            app, ui, block, rect, font_scale, live_value, live_text,
-        ),
-        "PushButtonBlock" => render_push_button_control_widget(app, ui, block, rect, font_scale),
-        "SliderBlock" => render_slider_control_widget(app, ui, block, rect, font_scale, live_value),
-        "SliderSwitchBlock" => {
-            render_slider_switch_control_widget(app, ui, block, rect, font_scale, live_value)
-        }
-        "ToggleSwitchBlock" => {
-            render_toggle_switch_control_widget(app, ui, block, rect, font_scale, live_value)
-        }
-        "KnobBlock" | "RockerSwitchBlock" | "RotarySwitchBlock" => {
-            render_painted_control_widget(app, ui, block, rect, font_scale, live_value)
-        }
-        _ => false,
-    }
+    };
 }
 
-// ─── Registry ───────────────────────────────────────────────────────────
-
-/// All dashboard block types and their corresponding custom renderers.
-///
-/// The key is the canonical `BlockType` string as it appears in the parsed
-/// model.  The value is the paint function to call instead of the default
-/// icon path.
-pub const DASHBOARD_RENDERERS: &[(&str, super::render::InteriorRendererFn)] = &[
-    ("PushButtonBlock", render_push_button),
-    ("SliderSwitchBlock", render_slider_switch),
-    ("RadioButtonGroup", render_radio_button),
-    ("ComboBox", render_combo_box),
-    ("Checkbox", render_checkbox),
-    ("SliderBlock", render_slider),
-    ("EditField", render_edit_field),
-    ("ToggleSwitchBlock", render_toggle_switch),
-    ("KnobBlock", render_knob),
-    ("RockerSwitchBlock", render_rocker_switch),
-    ("RotarySwitchBlock", render_rotary_switch),
-    ("QuarterGaugeBlock", render_quarter_gauge),
-    ("SemiCircularGaugeBlock", render_semi_circular_gauge),
-    ("LinearGaugeBlock", render_linear_gauge),
-    ("DashboardScope", render_dashboard_scope),
-    ("DisplayBlock", render_display_block),
-    ("CircularGaugeBlock", render_circular_gauge),
-    ("LampBlock", render_lamp),
-];
-
-/// Check if a block type has a dashboard-specific custom renderer.
-pub fn is_dashboard_rendered(block_type: &str) -> bool {
-    DASHBOARD_RENDERERS.iter().any(|(k, _)| *k == block_type)
-}
-
-/// Get the custom renderer for a dashboard block type, if one exists.
-pub fn get_dashboard_renderer(block_type: &str) -> Option<super::render::InteriorRendererFn> {
-    DASHBOARD_RENDERERS
-        .iter()
-        .find(|(k, _)| *k == block_type)
-        .map(|(_, f)| *f)
-}
-
-fn default_dashboard_live_value(block: &Block) -> f64 {
-    block
-        .current_setting
-        .as_ref()
-        .and_then(|value| value.trim().parse::<f64>().ok())
-        .or_else(|| {
-            block
-                .value
-                .as_ref()
-                .and_then(|value| value.trim().parse::<f64>().ok())
-        })
-        .or_else(|| {
-            block
-                .properties
-                .get("Value")
-                .and_then(|value| value.trim().parse::<f64>().ok())
-        })
-        .unwrap_or_else(|| match block.block_type.as_str() {
-            "SliderBlock"
-            | "LinearGaugeBlock"
-            | "KnobBlock"
-            | "CircularGaugeBlock"
-            | "SemiCircularGaugeBlock"
-            | "QuarterGaugeBlock" => {
-                let (min, _) = gauge_range(block);
-                min
-            }
-            _ => 0.0,
-        })
-}
-
-pub fn render_dashboard_widget(
-    painter: &egui::Painter,
-    block: &Block,
-    rect: &Rect,
-    font_scale: f32,
-    _name_font_factor: f32,
-) {
-    paint_live_dashboard_value_overlay(
-        painter,
-        block,
-        rect,
-        font_scale,
-        default_dashboard_live_value(block),
-        None,
-    );
-}
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_checkbox);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_radio_button_group);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_combo_box);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_slider);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_slider_switch);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_toggle_switch);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_painted);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_push_button);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_edit_field);
 
 /// Paint a dashboard block's live-value overlay by dispatching through the
 /// block's catalog definition.
@@ -2498,25 +2377,15 @@ fn dashboard_icon_fallback(
     painter: &egui::Painter,
     block: &Block,
     rect: &Rect,
-    font_scale: f32,
-    live_value: f64,
+    _font_scale: f32,
+    _live_value: f64,
 ) -> bool {
     if !should_render_dashboard_icon(rect) {
         return false;
     }
-    let palette = widget_palette(block);
-    match block.block_type.as_str() {
-        "SliderSwitchBlock" => {
-            paint_switch_visual(painter, rect, palette, live_value >= 0.5, false, font_scale)
-        }
-        "ToggleSwitchBlock" => {
-            paint_switch_visual(painter, rect, palette, live_value >= 0.5, true, font_scale)
-        }
-        "RockerSwitchBlock" => {
-            paint_rocker_switch_visual(painter, rect, palette, live_value >= 0.5, font_scale)
-        }
-        _ => paint_dashboard_widget_icon(painter, block, rect, palette),
-    }
+    // No block-type branching: the catalog icon is the single small-size
+    // representation for every dashboard widget.
+    paint_dashboard_widget_icon(painter, block, rect, widget_palette(block));
     true
 }
 
