@@ -610,7 +610,7 @@ mod visualization_tests {
     }
 
     #[test]
-    fn input_control_blocks_have_control_renderer() {
+    fn input_control_blocks_have_live_renderer() {
         use rustylink::simulink_libraries::resolver::registry;
         const CONTROL_TYPES: &[&str] = &[
             "Checkbox",
@@ -633,9 +633,12 @@ mod visualization_tests {
                 def.dashboard_control.is_some(),
                 "control block '{bt}' should declare a dashboard_control kind"
             );
+            // Interactive controls dispatch through the unified `live_renderer`
+            // (which carries `&mut app`/`&mut Ui`); there is no separate
+            // control-renderer type any more.
             assert!(
-                def.control_renderer.is_some(),
-                "control block '{bt}' should carry a control_renderer"
+                def.live_renderer.is_some(),
+                "control block '{bt}' should carry a live_renderer"
             );
         }
     }

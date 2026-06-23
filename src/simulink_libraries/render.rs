@@ -35,12 +35,17 @@ pub struct InteriorParams<'a> {
 
 /// Render the interior of a block, driven entirely by its definition.
 ///
+/// This is the painter-only path used by the editor and, in the viewer, for
+/// every block that is **not** currently handled by its live renderer.  The
+/// live renderer (which needs `&mut SubsystemApp`/`&mut Ui`) is dispatched by
+/// the viewer before falling back here, so there is no live branch in this
+/// function.
+///
 /// Dispatch order:
 /// 1. `FilledBlack` shapes have no interior.
-/// 2. In live mode, the definition's `live_renderer` (if any).
-/// 3. The definition's `static_renderer` (if any).
-/// 4. A metadata/fixed [`BlockLabelPolicy`] or `compute_instance_label`.
-/// 5. The definition's icon (falling back to the generic icon path).
+/// 2. The definition's `static_renderer` (if any).
+/// 3. A metadata/fixed [`BlockLabelPolicy`] or `compute_instance_label`.
+/// 4. The definition's icon (falling back to the generic icon path).
 pub fn render_block_interior(
     painter: &Painter,
     block: &Block,
@@ -67,22 +72,14 @@ pub fn render_block_interior(
         return;
     }
 
-    // 2. Live renderer.
-    if ctx.live_mode
-        && let Some(f) = def.live_renderer
-        && f(painter, block, rect, &ctx)
-    {
-        return;
-    }
-
-    // 3. Static renderer.
+    // 2. Static renderer.
     if let Some(f) = def.static_renderer
         && f(painter, block, rect, &ctx)
     {
         return;
     }
 
-    // 4. Textual block label.
+    // 3. Textual block label.
     if let Some(label) = block_label_text(block, def, &metadata)
         && !label.is_empty()
     {
@@ -93,7 +90,7 @@ pub fn render_block_interior(
         return;
     }
 
-    // 5. Icon.  The catalog definition is the source of truth: if it carries an
+    // 4. Icon.  The catalog definition is the source of truth: if it carries an
     // icon, draw it directly (this also wins over any stale config-map entry for
     // blocks that also exist in a bridged virtual library).
     if let Some(icon) = def.icon {

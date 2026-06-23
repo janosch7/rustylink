@@ -1904,7 +1904,15 @@ fn render_radio_button_group_control_widget(
         paint_dashboard_widget_icon(ui.painter(), block, &rect, widget_palette(block));
         return false;
     }
-    render_painted_control_widget(app, ui, block, rect, font_scale, live_value)
+    render_painted_control_widget(
+        app,
+        ui,
+        block,
+        rect,
+        font_scale,
+        live_value,
+        live_radio_button_group,
+    )
 }
 
 #[cfg(feature = "dashboard")]
@@ -2059,7 +2067,7 @@ fn render_push_button_control_widget(
     } else {
         0.0
     };
-    paint_live_dashboard_value_overlay(
+    live_push_button(
         &ui.painter().with_clip_rect(rect),
         block,
         &rect,
@@ -2086,41 +2094,18 @@ fn render_push_button_control_widget(
     false
 }
 
+/// A painter-only per-widget live visual: the single concern of "draw this
+/// dashboard widget at `value`".  Interactive controls compose one of these
+/// with their interaction handling; non-interactive widgets use it directly.
 #[cfg(feature = "dashboard")]
-fn render_slider_control_widget(
-    app: &mut SubsystemApp,
-    ui: &mut egui::Ui,
-    block: &Block,
-    rect: Rect,
-    font_scale: f32,
-    live_value: f64,
-) -> bool {
-    render_painted_control_widget(app, ui, block, rect, font_scale, live_value)
-}
-
-#[cfg(feature = "dashboard")]
-fn render_slider_switch_control_widget(
-    app: &mut SubsystemApp,
-    ui: &mut egui::Ui,
-    block: &Block,
-    rect: Rect,
-    font_scale: f32,
-    live_value: f64,
-) -> bool {
-    render_painted_control_widget(app, ui, block, rect, font_scale, live_value)
-}
-
-#[cfg(feature = "dashboard")]
-fn render_toggle_switch_control_widget(
-    app: &mut SubsystemApp,
-    ui: &mut egui::Ui,
-    block: &Block,
-    rect: Rect,
-    font_scale: f32,
-    live_value: f64,
-) -> bool {
-    render_painted_control_widget(app, ui, block, rect, font_scale, live_value)
-}
+type PainterLiveDrawFn = fn(
+    &egui::Painter,
+    &Block,
+    &Rect,
+    f32,
+    f64,
+    Option<&crate::live_values::LiveValueDisplayOptions>,
+);
 
 #[cfg(feature = "dashboard")]
 fn render_painted_control_widget(
@@ -2130,6 +2115,7 @@ fn render_painted_control_widget(
     rect: Rect,
     font_scale: f32,
     live_value: f64,
+    draw: PainterLiveDrawFn,
 ) -> bool {
     let Some(kind) = dashboard_input_control_kind(block) else {
         return false;
@@ -2178,7 +2164,7 @@ fn render_painted_control_widget(
     } else {
         None
     };
-    paint_live_dashboard_value_overlay(
+    draw(
         &ui.painter().with_clip_rect(rect),
         block,
         &rect,
@@ -2220,17 +2206,38 @@ fn render_painted_control_widget(
     }
 }
 
-// ─── Per-block interactive control adapters ─────────────────────────────────
+// ─── Per-block interactive control entry points ─────────────────────────────
 //
-// Each dashboard input control wires one of these as its definition's
-// `control_renderer`.  They share a single uniform [`ControlRendererFn`]
-// signature so the live UI dispatches purely through the resolved definition,
-// with no `block_type` match.
+// Each interactive dashboard control composes its painter-only live visual with
+// its interaction handling.  The catalog wires one of these as the block's
+// (unified) `LiveRendererFn`, so the live UI dispatches purely through the
+// resolved definition — there is no separate control-renderer type and no
+// `block_type` match.  Every entry point shares one signature so the catalog
+// adapter can call them uniformly.
 
-/// Generate a uniform-signature control adapter that forwards to a per-widget
-/// control routine taking `(app, ui, block, rect, font_scale, live_value)`.
+/// A painted control = a painter-only live visual + pointer interaction handled
+/// generically by [`render_painted_control_widget`] (per `dashboard_control`).
 #[cfg(feature = "dashboard")]
-macro_rules! control_adapter {
+macro_rules! painted_control {
+    ($name:ident => $draw:ident) => {
+        pub fn $name(
+            app: &mut SubsystemApp,
+            ui: &mut egui::Ui,
+            block: &Block,
+            rect: Rect,
+            font_scale: f32,
+            live_value: f64,
+            _live_text: Option<&str>,
+        ) -> bool {
+            render_painted_control_widget(app, ui, block, rect, font_scale, live_value, $draw)
+        }
+    };
+}
+
+/// A control that owns its own egui widgets (checkbox/combo/radio) and ignores
+/// the live-text representation.
+#[cfg(feature = "dashboard")]
+macro_rules! simple_control {
     ($name:ident => $inner:ident) => {
         pub fn $name(
             app: &mut SubsystemApp,
@@ -2247,19 +2254,24 @@ macro_rules! control_adapter {
 }
 
 #[cfg(feature = "dashboard")]
-control_adapter!(control_checkbox => render_checkbox_control_widget);
+simple_control!(control_checkbox => render_checkbox_control_widget);
 #[cfg(feature = "dashboard")]
-control_adapter!(control_radio_button_group => render_radio_button_group_control_widget);
+simple_control!(control_combo_box => render_combo_box_control_widget);
 #[cfg(feature = "dashboard")]
-control_adapter!(control_combo_box => render_combo_box_control_widget);
+simple_control!(control_radio_button_group => render_radio_button_group_control_widget);
+
 #[cfg(feature = "dashboard")]
-control_adapter!(control_slider => render_slider_control_widget);
+painted_control!(control_slider => live_slider_or_linear_gauge);
 #[cfg(feature = "dashboard")]
-control_adapter!(control_slider_switch => render_slider_switch_control_widget);
+painted_control!(control_slider_switch => live_slider_switch);
 #[cfg(feature = "dashboard")]
-control_adapter!(control_toggle_switch => render_toggle_switch_control_widget);
+painted_control!(control_toggle_switch => live_toggle_switch);
 #[cfg(feature = "dashboard")]
-control_adapter!(control_painted => render_painted_control_widget);
+painted_control!(control_rocker_switch => live_rocker_switch);
+#[cfg(feature = "dashboard")]
+painted_control!(control_rotary_switch => live_radial_gauge);
+#[cfg(feature = "dashboard")]
+painted_control!(control_knob => live_radial_gauge);
 
 /// Push button has no live value to forward.
 #[cfg(feature = "dashboard")]
@@ -2289,8 +2301,8 @@ pub fn control_edit_field(
     render_edit_field_control_widget(app, ui, block, rect, font_scale, live_value, live_text)
 }
 
-// Without the `dashboard` feature the catalog still references these adapters
-// (it is `egui`-gated), so provide inert stubs that never claim to draw.
+// Without the `dashboard` feature the catalog still references these entry
+// points (it is `egui`-gated), so provide inert stubs that never claim to draw.
 #[cfg(not(feature = "dashboard"))]
 macro_rules! control_stub {
     ($name:ident) => {
@@ -2321,55 +2333,15 @@ control_stub!(control_slider_switch);
 #[cfg(not(feature = "dashboard"))]
 control_stub!(control_toggle_switch);
 #[cfg(not(feature = "dashboard"))]
-control_stub!(control_painted);
+control_stub!(control_rocker_switch);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_rotary_switch);
+#[cfg(not(feature = "dashboard"))]
+control_stub!(control_knob);
 #[cfg(not(feature = "dashboard"))]
 control_stub!(control_push_button);
 #[cfg(not(feature = "dashboard"))]
 control_stub!(control_edit_field);
-
-/// Paint a dashboard block's live-value overlay by dispatching through the
-/// block's catalog definition.
-///
-/// There is no block-type branching here: the block's resolved
-/// [`SimulinkBlockDefinition`](crate::simulink_libraries::types::SimulinkBlockDefinition)
-/// carries its own [`LiveRendererFn`](crate::simulink_libraries::types::LiveRendererFn),
-/// which is the single source of truth for how the widget draws.  When the
-/// definition has no live renderer (or it declines to draw), we fall back to the
-/// generic dashboard icon.
-pub fn paint_live_dashboard_value_overlay(
-    painter: &egui::Painter,
-    block: &Block,
-    rect: &Rect,
-    font_scale: f32,
-    live_value: f64,
-    display_options: Option<&crate::live_values::LiveValueDisplayOptions>,
-) {
-    use crate::simulink_libraries::metadata::extract_metadata;
-    use crate::simulink_libraries::resolve_definition;
-    use crate::simulink_libraries::types::RenderContext;
-
-    let def = resolve_definition(block);
-    let metadata = extract_metadata(block, def);
-    let ctx = RenderContext {
-        live_mode: true,
-        font_scale,
-        name_font_factor: 1.0,
-        metadata: &metadata,
-        live_value: Some(live_value),
-        live_text: None,
-        live_display_options: display_options,
-        port_y: None,
-        port_label_widths: None,
-        text_color: crate::egui_app::render::block_icon_color(block),
-    };
-
-    if let Some(f) = def.live_renderer
-        && f(painter, block, rect, &ctx)
-    {
-        return;
-    }
-    dashboard_icon_fallback(painter, block, rect, font_scale, live_value);
-}
 
 /// Draw the small-size icon fallback for dashboard widgets; returns true
 /// when it handled drawing (block too small for a full live widget).

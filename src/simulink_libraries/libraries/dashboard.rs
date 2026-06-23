@@ -10,9 +10,10 @@
 
 #![cfg(feature = "egui")]
 
-use eframe::egui::{Painter, Rect};
+use eframe::egui::{Painter, Rect, Ui};
 
 use crate::egui_app::dashboard_widgets as dw;
+use crate::egui_app::state::SubsystemApp;
 use crate::model::Block;
 use crate::simulink_libraries::types::{
     DashboardControlKind, IOPorts, RenderContext, SimulinkBlockDefinition, SimulinkIcon,
@@ -34,16 +35,55 @@ macro_rules! static_adapter {
     };
 }
 
-/// Generate a per-block live interior renderer that draws the live value
-/// overlay; falls back to the static renderer when no live value is present.
-macro_rules! live_adapter {
+/// Generate a non-interactive live renderer that paints the widget's live value
+/// (gauges, lamps, displays).  It ignores `app` and draws via `ui.painter()`;
+/// returns `false` when there is no live value so the static renderer is used.
+macro_rules! live_view {
     ($name:ident => $draw:ident) => {
-        fn $name(p: &Painter, b: &Block, r: &Rect, ctx: &RenderContext<'_>) -> bool {
+        fn $name(
+            _app: &mut SubsystemApp,
+            ui: &mut Ui,
+            b: &Block,
+            r: &Rect,
+            ctx: &RenderContext<'_>,
+        ) -> bool {
             let Some(value) = ctx.live_value else {
                 return false;
             };
-            dw::$draw(p, b, r, ctx.font_scale, value, ctx.live_display_options);
+            dw::$draw(
+                &ui.painter().with_clip_rect(*r),
+                b,
+                r,
+                ctx.font_scale,
+                value,
+                ctx.live_display_options,
+            );
             true
+        }
+    };
+}
+
+/// Generate an interactive live renderer for a dashboard input control: it
+/// draws the widget and handles user interaction (emitting control values)
+/// using the mutable `app`/`Ui` carried by the unified [`LiveRendererFn`].
+macro_rules! live_control {
+    ($name:ident => $inner:ident) => {
+        fn $name(
+            app: &mut SubsystemApp,
+            ui: &mut Ui,
+            b: &Block,
+            r: &Rect,
+            ctx: &RenderContext<'_>,
+        ) -> bool {
+            dw::$inner(
+                app,
+                ui,
+                b,
+                *r,
+                ctx.font_scale,
+                ctx.live_value.unwrap_or(0.0),
+                ctx.live_text,
+            )
         }
     };
 }
@@ -68,19 +108,25 @@ static_adapter!(static_lamp => render_lamp);
 static_adapter!(static_display => render_display_block);
 static_adapter!(static_dashboard_scope => render_dashboard_scope);
 
-// ── Per-block live renderers (one per widget; gauges/field pairs combined) ──
-live_adapter!(live_push_button => live_push_button);
-live_adapter!(live_checkbox => live_checkbox);
-live_adapter!(live_combo_box => live_combo_box);
-live_adapter!(live_radio_button_group => live_radio_button_group);
-live_adapter!(live_slider_switch => live_slider_switch);
-live_adapter!(live_toggle_switch => live_toggle_switch);
-live_adapter!(live_rocker_switch => live_rocker_switch);
-live_adapter!(live_lamp => live_lamp);
-// Combined live renderers for near-identical widget families.
-live_adapter!(live_radial_gauge => live_radial_gauge);
-live_adapter!(live_slider_or_linear_gauge => live_slider_or_linear_gauge);
-live_adapter!(live_field_or_display => live_field_or_display);
+// ── Non-interactive live renderers (gauges / lamps / displays) ──────────────
+// Near-identical widget families share one painter routine.
+live_view!(view_radial_gauge => live_radial_gauge);
+live_view!(view_linear_gauge => live_slider_or_linear_gauge);
+live_view!(view_field_or_display => live_field_or_display);
+live_view!(view_lamp => live_lamp);
+
+// ── Interactive live renderers (one per input control) ──────────────────────
+live_control!(live_push_button => control_push_button);
+live_control!(live_checkbox => control_checkbox);
+live_control!(live_combo_box => control_combo_box);
+live_control!(live_edit_field => control_edit_field);
+live_control!(live_radio_button_group => control_radio_button_group);
+live_control!(live_slider => control_slider);
+live_control!(live_slider_switch => control_slider_switch);
+live_control!(live_toggle_switch => control_toggle_switch);
+live_control!(live_rocker_switch => control_rocker_switch);
+live_control!(live_rotary_switch => control_rotary_switch);
+live_control!(live_knob => control_knob);
 
 /// A dashboard widget definition with its own static and live renderers.
 const fn widget(
@@ -109,7 +155,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_icon(icon("📟"))
         .with_static_renderer(static_display)
-        .with_live_renderer(live_field_or_display),
+        .with_live_renderer(view_field_or_display),
     widget(
         "DisplayBlock",
         "Dashboard Display",
@@ -117,7 +163,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "📟",
         IOPorts::Fixed(1),
         static_display,
-        live_field_or_display,
+        view_field_or_display,
     ),
     // Controls (inputs).
     widget(
@@ -129,8 +175,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_push_button,
         live_push_button,
     )
-    .with_dashboard_control(DashboardControlKind::Pulse)
-    .with_control_renderer(dw::control_push_button),
+    .with_dashboard_control(DashboardControlKind::Pulse),
     widget(
         "Checkbox",
         "Checkbox",
@@ -140,8 +185,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_checkbox,
         live_checkbox,
     )
-    .with_dashboard_control(DashboardControlKind::Bool)
-    .with_control_renderer(dw::control_checkbox),
+    .with_dashboard_control(DashboardControlKind::Bool),
     widget(
         "ComboBox",
         "Combo Box",
@@ -151,8 +195,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_combo_box,
         live_combo_box,
     )
-    .with_dashboard_control(DashboardControlKind::Discrete)
-    .with_control_renderer(dw::control_combo_box),
+    .with_dashboard_control(DashboardControlKind::Discrete),
     widget(
         "EditField",
         "Edit Field",
@@ -160,10 +203,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "✎",
         IOPorts::None,
         static_edit_field,
-        live_field_or_display,
+        live_edit_field,
     )
-    .with_dashboard_control(DashboardControlKind::Scalar)
-    .with_control_renderer(dw::control_edit_field),
+    .with_dashboard_control(DashboardControlKind::Scalar),
     widget(
         "RadioButtonGroup",
         "Radio Button Group",
@@ -173,8 +215,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_radio_button_group,
         live_radio_button_group,
     )
-    .with_dashboard_control(DashboardControlKind::Discrete)
-    .with_control_renderer(dw::control_radio_button_group),
+    .with_dashboard_control(DashboardControlKind::Discrete),
     widget(
         "SliderBlock",
         "Slider",
@@ -182,10 +223,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "⎯●",
         IOPorts::None,
         static_slider,
-        live_slider_or_linear_gauge,
+        live_slider,
     )
-    .with_dashboard_control(DashboardControlKind::Scalar)
-    .with_control_renderer(dw::control_slider),
+    .with_dashboard_control(DashboardControlKind::Scalar),
     widget(
         "SliderSwitchBlock",
         "Slider Switch",
@@ -195,8 +235,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_slider_switch,
         live_slider_switch,
     )
-    .with_dashboard_control(DashboardControlKind::Bool)
-    .with_control_renderer(dw::control_slider_switch),
+    .with_dashboard_control(DashboardControlKind::Bool),
     widget(
         "ToggleSwitchBlock",
         "Toggle Switch",
@@ -206,8 +245,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_toggle_switch,
         live_toggle_switch,
     )
-    .with_dashboard_control(DashboardControlKind::Bool)
-    .with_control_renderer(dw::control_toggle_switch),
+    .with_dashboard_control(DashboardControlKind::Bool),
     widget(
         "RockerSwitchBlock",
         "Rocker Switch",
@@ -217,8 +255,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         static_rocker_switch,
         live_rocker_switch,
     )
-    .with_dashboard_control(DashboardControlKind::Bool)
-    .with_control_renderer(dw::control_painted),
+    .with_dashboard_control(DashboardControlKind::Bool),
     widget(
         "RotarySwitchBlock",
         "Rotary Switch",
@@ -226,10 +263,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "◎",
         IOPorts::None,
         static_rotary_switch,
-        live_radial_gauge,
+        live_rotary_switch,
     )
-    .with_dashboard_control(DashboardControlKind::Discrete)
-    .with_control_renderer(dw::control_painted),
+    .with_dashboard_control(DashboardControlKind::Discrete),
     widget(
         "KnobBlock",
         "Knob",
@@ -237,10 +273,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "◎",
         IOPorts::None,
         static_knob,
-        live_radial_gauge,
+        live_knob,
     )
-    .with_dashboard_control(DashboardControlKind::Scalar)
-    .with_control_renderer(dw::control_painted),
+    .with_dashboard_control(DashboardControlKind::Scalar),
     // Gauges / indicators (outputs/displays).
     widget(
         "CircularGaugeBlock",
@@ -249,7 +284,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "◔",
         IOPorts::Fixed(1),
         static_circular_gauge,
-        live_radial_gauge,
+        view_radial_gauge,
     ),
     widget(
         "SemiCircularGaugeBlock",
@@ -258,7 +293,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "◑",
         IOPorts::Fixed(1),
         static_semi_circular_gauge,
-        live_radial_gauge,
+        view_radial_gauge,
     ),
     widget(
         "QuarterGaugeBlock",
@@ -267,7 +302,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "◕",
         IOPorts::Fixed(1),
         static_quarter_gauge,
-        live_radial_gauge,
+        view_radial_gauge,
     ),
     widget(
         "LinearGaugeBlock",
@@ -276,7 +311,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "▮",
         IOPorts::Fixed(1),
         static_linear_gauge,
-        live_slider_or_linear_gauge,
+        view_linear_gauge,
     ),
     widget(
         "LampBlock",
@@ -285,7 +320,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "💡",
         IOPorts::Fixed(1),
         static_lamp,
-        live_lamp,
+        view_lamp,
     ),
     // DashboardScope's live view is an interactive liveplot tile owned by the
     // UI; the static fallback is a simple waveform glyph.

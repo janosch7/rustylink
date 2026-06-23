@@ -435,6 +435,34 @@ fn block_live_value(_app: &SubsystemApp, _block: &crate::model::Block) -> Option
     None
 }
 
+/// Live value fed to a block's unified `LiveRendererFn`.
+///
+/// Interactive dashboard controls (those carrying a `dashboard_control` kind)
+/// resolve a value through the selector-aware [`dashboard_widget_value`] so the
+/// widget reflects/edits the bound parameter; every other block uses the plain
+/// signal value.
+#[cfg(feature = "dashboard")]
+fn live_block_value_for_renderer(
+    app: &SubsystemApp,
+    block: &crate::model::Block,
+    def: &crate::simulink_libraries::types::SimulinkBlockDefinition,
+) -> Option<f64> {
+    if def.dashboard_control.is_some() {
+        Some(dashboard_widget_value(app, block))
+    } else {
+        block_live_value(app, block)
+    }
+}
+
+#[cfg(not(feature = "dashboard"))]
+fn live_block_value_for_renderer(
+    app: &SubsystemApp,
+    block: &crate::model::Block,
+    _def: &crate::simulink_libraries::types::SimulinkBlockDefinition,
+) -> Option<f64> {
+    block_live_value(app, block)
+}
+
 pub(crate) fn update_internal(
     app: &mut SubsystemApp,
     ui: &mut egui::Ui,
@@ -2674,16 +2702,6 @@ pub(crate) fn update_internal(
                 let galley = painter.layout_no_wrap(text.clone(), font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
-            } else if app.live_mode_enabled
-                && cfg!(feature = "dashboard")
-                && crate::simulink_libraries::resolve_definition(b)
-                    .control_renderer
-                    .is_some()
-            {
-                // Definition-driven interactive control dispatch: the block's
-                // resolved definition carries its own `control_renderer`; no
-                // block-type match here.
-                let _ = render_dashboard_control_widget(app, ui, b, *r_screen, font_scale);
             } else if b
                 .value
                 .as_ref()
@@ -2751,26 +2769,56 @@ pub(crate) fn update_internal(
                 // block-type-specific code here: the block's resolved
                 // `SimulinkBlockDefinition` selects the static/live renderer,
                 // block label and icon.
+                //
+                // In live mode the definition's single `LiveRendererFn` (the
+                // unified live hook — interactive controls *and* non-interactive
+                // gauges) is dispatched here with mutable `app`/`ui`.  Whatever
+                // it declines, plus every non-live block, falls through to the
+                // painter-only static path in `render_block_interior`.
                 let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
-                let live_value = if app.live_mode_enabled {
-                    block_live_value(app, b)
+                let def = crate::simulink_libraries::resolve_definition(b);
+                let live_handled = if app.live_mode_enabled {
+                    if let Some(live_fn) = def.live_renderer {
+                        let live_value = live_block_value_for_renderer(app, b, def);
+                        let live_text = block_live_text(app, b);
+                        let display_opts = app.live_display_defaults.clone();
+                        let metadata =
+                            crate::simulink_libraries::metadata::extract_metadata(b, def);
+                        let ctx = crate::simulink_libraries::types::RenderContext {
+                            live_mode: true,
+                            font_scale,
+                            name_font_factor: app.block_name_font_factor,
+                            metadata: &metadata,
+                            live_value,
+                            live_text: live_text.as_deref(),
+                            live_display_options: Some(&display_opts),
+                            port_y: coords_ref,
+                            port_label_widths: icon_port_label_widths,
+                            text_color: fg,
+                        };
+                        live_fn(app, ui, b, r_screen, &ctx)
+                    } else {
+                        false
+                    }
                 } else {
-                    None
+                    false
                 };
-                let params = crate::simulink_libraries::render::InteriorParams {
-                    live_mode: app.live_mode_enabled,
-                    font_scale,
-                    name_font_factor: app.block_name_font_factor,
-                    live_value,
-                    live_text: None,
-                    live_display_options: Some(&app.live_display_defaults),
-                    port_y: coords_ref,
-                    port_label_widths: icon_port_label_widths,
-                    text_color: fg,
-                };
-                crate::simulink_libraries::render::render_block_interior(
-                    &painter, b, r_screen, &params,
-                );
+                if !live_handled {
+                    let params = crate::simulink_libraries::render::InteriorParams {
+                        live_mode: app.live_mode_enabled,
+                        font_scale,
+                        name_font_factor: app.block_name_font_factor,
+                        live_value: None,
+                        live_text: None,
+                        live_display_options: Some(&app.live_display_defaults),
+                        port_y: coords_ref,
+                        port_label_widths: icon_port_label_widths,
+                        text_color: fg,
+                    };
+                    crate::simulink_libraries::render::render_block_interior(
+                        &painter, b, r_screen, &params,
+                    );
+                }
             }
 
             let live_hover_key = app.live_value_key_for_block(b);
@@ -3376,15 +3424,10 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
         return None;
     }
 
-    let kind = match block.block_type.as_str() {
-        "Checkbox" | "ToggleSwitchBlock" | "SliderSwitchBlock" | "RockerSwitchBlock" => "bool",
-        "PushButtonBlock" => "pulse",
-        "RadioButtonGroup" | "ComboBox" | "RotarySwitchBlock" => "discrete",
-        "KnobBlock" | "SliderBlock" | "EditField" => "scalar",
-        _ => return None,
-    };
-
-    Some(kind)
+    // The control kind is data on the block's definition, not a block-type match.
+    crate::simulink_libraries::resolve_definition(block)
+        .dashboard_control
+        .map(|kind| kind.as_str())
 }
 
 #[cfg(feature = "dashboard")]
@@ -3420,41 +3463,6 @@ fn dashboard_widget_value(app: &SubsystemApp, block: &crate::model::Block) -> f6
             Some("scalar") => dashboard_scalar_range(block).0,
             _ => 0.0,
         })
-}
-
-#[cfg(feature = "dashboard")]
-fn render_dashboard_control_widget(
-    app: &mut SubsystemApp,
-    ui: &mut egui::Ui,
-    block: &crate::model::Block,
-    rect: Rect,
-    font_scale: f32,
-) -> bool {
-    let Some(f) = crate::simulink_libraries::resolve_definition(block).control_renderer else {
-        return false;
-    };
-    let live_value = dashboard_widget_value(app, block);
-    let live_text = block_live_text(app, block);
-    f(
-        app,
-        ui,
-        block,
-        rect,
-        font_scale,
-        live_value,
-        live_text.as_deref(),
-    )
-}
-
-#[cfg(not(feature = "dashboard"))]
-fn render_dashboard_control_widget(
-    _app: &mut SubsystemApp,
-    _ui: &mut egui::Ui,
-    _block: &crate::model::Block,
-    _rect: Rect,
-    _font_scale: f32,
-) -> bool {
-    false
 }
 
 #[cfg(feature = "dashboard")]

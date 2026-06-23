@@ -55,9 +55,11 @@ pub fn static_manual_switch(
 }
 
 /// Live renderer for the ManualSwitch block: reflect the live signal value in
-/// the drawn switch position.
+/// the drawn switch position.  Non-interactive, so `app` is ignored and drawing
+/// goes through `ui.painter()`.
 pub fn live_manual_switch(
-    painter: &Painter,
+    _app: &mut crate::egui_app::state::SubsystemApp,
+    ui: &mut eframe::egui::Ui,
     block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
@@ -69,7 +71,7 @@ pub fn live_manual_switch(
     live_block.current_setting =
         Some(crate::egui_app::ui::update::manual_switch_setting_from_live_value(value).to_string());
     crate::egui_app::render::render_manual_switch(
-        painter,
+        &ui.painter().with_clip_rect(*rect),
         &live_block,
         rect,
         ctx.font_scale,
