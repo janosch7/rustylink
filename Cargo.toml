@@ -87,7 +87,7 @@ version = "0.17.2"
 optional = true
 
 [dependencies.egui-phosphor]
-version = "0.7"
+version = "0.12"
 optional = true
 
 [dev-dependencies]
