@@ -3907,6 +3907,7 @@ mod tests {
             ConnectionTarget {
                 path: "Model/A".to_string(),
                 signal_name: Some("alpha".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
@@ -3917,6 +3918,7 @@ mod tests {
             ConnectionTarget {
                 path: "Model/B".to_string(),
                 signal_name: Some("beta".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
@@ -3928,6 +3930,7 @@ mod tests {
         let mux_targets = vec![ConnectionTarget {
             path: "Model/A".to_string(),
             signal_name: Some("alpha".to_string()),
+            signal_names: Vec::new(),
             resolve: Some(ConnectionTargetResolve::Index(1)),
             element_index: Some(1),
             origin: ConnectionTargetOrigin::Mux,
@@ -3945,6 +3948,7 @@ mod tests {
         let normal_targets = vec![ConnectionTarget {
             path: "Model/A".to_string(),
             signal_name: Some("alpha".to_string()),
+            signal_names: Vec::new(),
             resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
             element_index: None,
             origin: ConnectionTargetOrigin::SourceBlock,
@@ -3956,6 +3960,7 @@ mod tests {
             ConnectionTarget {
                 path: "Model/A".to_string(),
                 signal_name: Some("alpha".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
@@ -3966,6 +3971,7 @@ mod tests {
             ConnectionTarget {
                 path: "Model/B".to_string(),
                 signal_name: Some("beta".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,

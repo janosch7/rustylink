@@ -34,6 +34,12 @@ pub enum ConnectionTargetResolve {
 pub struct ConnectionTarget {
     pub path: String,
     pub signal_name: Option<String>,
+    /// Every signal name this target carries along the traced signal line,
+    /// including names picked up crossing subsystem In/Outport boundaries and
+    /// passing through Bus/Mux/Demux blocks. Order-preserving and deduplicated;
+    /// `signal_name` (when set) is always included as the primary alias.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signal_names: Vec<String>,
     pub resolve: Option<ConnectionTargetResolve>,
     pub element_index: Option<u32>,
     pub origin: ConnectionTargetOrigin,
@@ -974,6 +980,9 @@ fn merge_upstream_metadata(
                 .or(propagated_name)
                 .or(target.signal_name.clone()),
         );
+        for candidate in &propagated {
+            merge_signal_aliases(target, &candidate.signal_names);
+        }
         target.testpoint = explicit_testpoint
             || target.testpoint
             || propagated.iter().any(|candidate| candidate.testpoint);
@@ -1022,7 +1031,28 @@ fn metadata_paths_match(
 }
 
 fn set_signal_name_only(target: &mut ConnectionTarget, signal_name: Option<String>) {
-    target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+    let normalized = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+    if let Some(name) = &normalized {
+        push_signal_alias(target, name);
+    }
+    target.signal_name = normalized;
+}
+
+/// Record `name` as one of the signal names this target carries, keeping
+/// insertion order and skipping duplicates. `name` is expected to already be a
+/// normalized path segment.
+fn push_signal_alias(target: &mut ConnectionTarget, name: &str) {
+    if !target.signal_names.iter().any(|existing| existing == name) {
+        target.signal_names.push(name.to_string());
+    }
+}
+
+/// Union `aliases` into `target.signal_names`, preserving order and dropping
+/// duplicates.
+fn merge_signal_aliases(target: &mut ConnectionTarget, aliases: &[String]) {
+    for alias in aliases {
+        push_signal_alias(target, alias);
+    }
 }
 
 fn set_signal_resolve(target: &mut ConnectionTarget, signal_name: Option<String>) {
@@ -1347,6 +1377,7 @@ pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
         if let Some(index) = seen.get(&key).copied() {
             if let Some(existing) = out.get_mut(index) {
                 existing.testpoint = existing.testpoint || target.testpoint;
+                merge_signal_aliases(existing, &target.signal_names);
             }
         } else {
             seen.insert(key, out.len());
