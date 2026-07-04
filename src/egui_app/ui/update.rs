@@ -926,9 +926,14 @@ pub(crate) fn update_internal(
             Pos2::new(x, y)
         };
 
-        // In-canvas font scaling: baseline is 400% zoom -> scale = zoom / 4.0
-        // User requested double font size, so we use / 2.0 instead of / 4.0
-        let font_scale: f32 = (staged_zoom / 2.0).max(0.01);
+        // In-canvas text/icon scaling is coupled to the model's measurement
+        // unit: `base_scale * staged_zoom` is the screen-pixels-per-model-unit
+        // scale (identical to the one used for block geometry), so names and
+        // icons grow and shrink exactly with the on-screen block size. Smaller
+        // models (fewer blocks, each drawn larger) therefore get proportionally
+        // larger text than big, space-filling models. The `*_font_factor`
+        // values remain the size relative to the blocks.
+        let font_scale: f32 = (base_scale * staged_zoom / 2.0).max(0.01);
 
         // Draw blocks and setup interaction maps
         let mut sid_map: HashMap<String, Rect> = HashMap::new();

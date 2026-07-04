@@ -44,7 +44,11 @@ pub fn show_zoom_controls(
                         *reset_requested = true;
                     }
 
-                    let percent = (*zoom * 100.0).round() as i32;
+                    // The readout is expressed in the model's measurement unit:
+                    // 100% == one screen pixel per model unit. `base_scale * zoom`
+                    // is exactly that screen-pixels-per-model-unit scale, so the
+                    // value is decoupled from the fit-to-view factor.
+                    let percent = (base_scale * *zoom * 100.0).round() as i32;
                     ui.label(format!("{}%", percent));
                 });
             });

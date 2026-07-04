@@ -343,7 +343,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             Pos2::new(x, y)
         };
 
-        let font_scale: f32 = (zoom / 2.0).max(0.01);
+        // Coupled to the model's measurement unit: `base_scale * zoom` is the
+        // screen-pixels-per-model-unit scale used for block geometry, so text
+        // and icons scale exactly with the on-screen block size.
+        let font_scale: f32 = (base_scale * zoom / 2.0).max(0.01);
 
         // Draw grid
         if state.show_grid {
