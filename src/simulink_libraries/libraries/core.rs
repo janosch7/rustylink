@@ -63,10 +63,12 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Inport", "Ports & Subsystems")
         .with_description("Create an input port for a subsystem")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
+        .with_shape(SimulinkShape::Obround)
         .with_icon(icon("⬅")),
     SimulinkBlockDefinition::new("Outport", "Ports & Subsystems")
         .with_description("Create an output port for a subsystem")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
+        .with_shape(SimulinkShape::Obround)
         .with_icon(icon("➡")),
     SimulinkBlockDefinition::new("SubSystem", "Ports & Subsystems")
         .with_description("Group blocks into a subsystem")

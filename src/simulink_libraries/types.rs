@@ -48,6 +48,9 @@ pub enum SimulinkShape {
     Goto,
     /// Rectangle with a triangular tab pointing right (From).
     From,
+    /// Obround / stadium: a rectangle whose short ends are full semicircles
+    /// (used for subsystem In/Outport blocks).
+    Obround,
 }
 
 /// Where a port sits on a block body.

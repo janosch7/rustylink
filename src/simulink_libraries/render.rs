@@ -95,13 +95,14 @@ pub fn render_block_interior(
     // blocks that also exist in a bridged virtual library).
     if let Some(icon) = def.icon {
         let spec = super::config::icon_to_spec(icon);
-        let color = crate::egui_app::render::block_icon_color(block);
+        // Use the contrast color derived from the block's actual fill (which may
+        // be the neutral gray of "less colorful" mode) so glyphs stay legible.
         crate::egui_app::render::draw_icon_spec(
             painter,
             rect,
             ctx.font_scale,
             &spec,
-            color,
+            params.text_color,
             ctx.port_label_widths,
         );
         return;
@@ -122,6 +123,7 @@ pub fn render_block_interior(
         block,
         rect,
         ctx.font_scale,
+        params.text_color,
         ctx.port_label_widths,
     );
 }

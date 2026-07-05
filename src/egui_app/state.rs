@@ -456,6 +456,14 @@ pub struct SubsystemApp {
     /// Per-block override: `Block::show_name = Some(true/false)`.
     pub show_block_names_default: bool,
 
+    /// "Less colorful" rendering mode.
+    ///
+    /// When enabled, every block body is drawn with a neutral light-gray fill
+    /// (bordered so it stays visible in light themes) and signal lines are drawn
+    /// in neutral gray, regardless of block-type/signal coloring.  Area
+    /// annotations keep their model-defined colors.
+    pub monochrome: bool,
+
     /// Block-name font size as a factor of the port chevron height.
     ///
     /// A value of ~1.0 makes the text approximately the same height as the chevrons.
@@ -605,6 +613,7 @@ impl SubsystemApp {
             subsystem_change_listeners: Vec::new(),
             block_click_handler: None,
             show_block_names_default: true,
+            monochrome: false,
             block_name_font_factor: 0.4,
             block_name_extend_factor: 3.0,
             block_value_font_factor: 0.8,

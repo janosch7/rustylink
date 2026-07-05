@@ -33,7 +33,10 @@ use super::state::{DragMode, EditorState};
 // Color utilities — re-exported from canonical `egui_app::ui::colors`
 // ────────────────────────────────────────────────────────────────────────────
 
-use crate::egui_app::colors::{block_base_color, contrast_color};
+use crate::egui_app::colors::{
+    area_annotation_border, area_annotation_fill, block_base_color, contrast_color,
+    monochrome_block_border, monochrome_block_fill, monochrome_line_color,
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -153,6 +156,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             ui.separator();
             ui.checkbox(&mut state.app.show_block_names_default, "Block names");
+            ui.checkbox(&mut state.app.monochrome, "Less color")
+                .on_hover_text(
+                    "Render blocks and signal lines in neutral gray (areas keep their colors)",
+                );
             ui.label("Name size");
             ui.add(
                 egui::DragValue::new(&mut state.app.block_name_font_factor)
@@ -348,6 +355,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // and icons scale exactly with the on-screen block size.
         let font_scale: f32 = (base_scale * zoom / 2.0).max(0.01);
 
+        let dark_mode = ui.visuals().dark_mode;
+        let monochrome = state.app.monochrome;
+
         // Draw grid
         if state.show_grid {
             draw_grid(
@@ -386,6 +396,23 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         } else {
             None
         };
+
+        // Draw area annotations (colored regions) behind the blocks.  Areas
+        // keep their model-defined colors even in "less colorful" mode.
+        for (a, r_model) in &annotations {
+            if let Some(fill) = area_annotation_fill(a) {
+                let r_screen = Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
+                ui.painter().rect_filled(r_screen, 2.0, fill);
+                if let Some(border) = area_annotation_border(a) {
+                    ui.painter().rect_stroke(
+                        r_screen,
+                        2.0,
+                        Stroke::new(1.0, border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        }
 
         // Draw blocks
         for (block_idx, (b, r)) in blocks.iter().enumerate() {
@@ -443,7 +470,11 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 sid_screen_map.insert(sid.clone(), r_screen);
             }
             let cfg = get_block_type_cfg(b);
-            let bg = block_base_color(b, &cfg);
+            let bg = if monochrome {
+                monochrome_block_fill(dark_mode)
+            } else {
+                block_base_color(b, &cfg)
+            };
 
             let is_selected = state.selection.is_block_selected(block_idx);
 
@@ -478,15 +509,17 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Body outline (shape-aware, shared with the viewer).
             if !b.commented {
-                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                let border_color = if monochrome {
+                    monochrome_block_border(dark_mode)
+                } else {
+                    let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                    Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+                };
                 crate::egui_app::render::stroke_block_body(
                     ui.painter(),
                     r_screen,
                     cfg.shape,
-                    Stroke::new(
-                        1.5,
-                        Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
-                    ),
+                    Stroke::new(1.5, border_color),
                 );
             }
 
@@ -811,7 +844,11 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 screen_pts.push(to_screen(dst_pt));
             }
 
-            let color = line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN)
+            };
             let is_selected = state.selection.is_line_selected(li);
             let stroke_width = if is_selected { 3.5 } else { 2.0 };
             let stroke = Stroke::new(stroke_width, color);

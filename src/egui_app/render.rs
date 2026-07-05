@@ -105,6 +105,11 @@ pub fn fill_block_body(
         BlockShape::Rectangle => {
             painter.rect_filled(rect, 6.0, bg);
         }
+        BlockShape::Obround => {
+            // Fully rounded short ends (egui clamps the corner radius to half the
+            // shortest side, giving a stadium/obround).
+            painter.rect_filled(rect, rect.height() * 0.5, bg);
+        }
     }
     bg
 }
@@ -162,6 +167,9 @@ pub fn stroke_block_body(
         }
         BlockShape::Rectangle => {
             painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+        }
+        BlockShape::Obround => {
+            painter.rect_stroke(rect, rect.height() * 0.5, stroke, egui::StrokeKind::Inside);
         }
     }
 }
@@ -809,15 +817,15 @@ pub fn render_block_icon(
     block: &Block,
     rect: &Rect,
     font_scale: f32,
+    icon_color: Color32,
     port_label_widths: Option<PortLabelMaxWidths>,
 ) {
     // Always prefer library-specific identifiers (library path / SourceBlock)
     // over generic `block_type` mappings.
     let cfg = get_block_type_cfg(block);
-    // Glyph icons adapt to the block's background for contrast (SVGs keep their
-    // own colors).
-    let dark_icon =
-        super::ui::colors::contrast_color(super::ui::colors::block_base_color(block, &cfg));
+    // Glyph icons use the caller-provided contrast color (matching the actual
+    // block fill); SVGs keep their own colors.
+    let dark_icon = icon_color;
     if let Some(icon) = cfg.icon {
         draw_icon_spec(
             painter,

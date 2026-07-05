@@ -138,5 +138,13 @@ pub fn render_block_icon(
     font_scale: f32,
     port_label_widths: Option<PortLabelMaxWidths>,
 ) {
-    render::render_block_icon(painter, block, rect, font_scale, port_label_widths);
+    let icon_color = render::block_icon_color(block);
+    render::render_block_icon(
+        painter,
+        block,
+        rect,
+        font_scale,
+        icon_color,
+        port_label_widths,
+    );
 }

@@ -1,4 +1,7 @@
-use super::colors::{block_base_color, contrast_color};
+use super::colors::{
+    area_annotation_border, area_annotation_fill, block_base_color, contrast_color,
+    monochrome_block_border, monochrome_block_fill, monochrome_line_color,
+};
 use super::corner_ops;
 use super::helpers::{is_block_subsystem, record_interaction};
 use super::line_coloring;
@@ -935,6 +938,30 @@ pub(crate) fn update_internal(
         // values remain the size relative to the blocks.
         let font_scale: f32 = (base_scale * staged_zoom / 2.0).max(0.01);
 
+        let monochrome = app.monochrome;
+        let dark_mode = ui.visuals().dark_mode;
+
+        // Draw area annotations (colored regions) behind the blocks.  Areas keep
+        // their model-defined colors even in "less colorful" mode.
+        for (a, r_model) in &annotations {
+            if let Some(fill) = area_annotation_fill(a) {
+                let r_screen =
+                    Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
+                if !r_screen.intersects(viewport_rect) {
+                    continue;
+                }
+                ui.painter().rect_filled(r_screen, 2.0, fill);
+                if let Some(border) = area_annotation_border(a) {
+                    ui.painter().rect_stroke(
+                        r_screen,
+                        2.0,
+                        Stroke::new(1.0, border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        }
+
         // Draw blocks and setup interaction maps
         let mut sid_map: HashMap<String, Rect> = HashMap::new();
         let mut sid_screen_map: HashMap<String, Rect> = HashMap::new();
@@ -991,7 +1018,11 @@ pub(crate) fn update_internal(
             };
             let resp = ui.allocate_rect(r_screen, block_sense);
             let cfg = get_block_type_cfg(b);
-            let bg = block_base_color(b, &cfg);
+            let bg = if monochrome {
+                monochrome_block_fill(dark_mode)
+            } else {
+                block_base_color(b, &cfg)
+            };
 
             if app.move_mode_enabled && resp.drag_started()
                 && let Some(sid) = &b.sid {
@@ -1275,10 +1306,15 @@ pub(crate) fn update_internal(
             block_views.push((b, r_screen, resp.clicked(), effective_bg));
         }
 
-        // Draw annotations (convert HTML-rich content to plain text) without background
+        // Draw annotations (convert HTML-rich content to plain text).  Area
+        // annotations (whose colored background is drawn behind the blocks) get
+        // a text color that contrasts with their fill.
         for (a, r_model) in &annotations {
             let r_screen = Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
             let _resp = ui.allocate_rect(r_screen, Sense::hover());
+            let text_color = area_annotation_fill(a)
+                .map(contrast_color)
+                .unwrap_or(Color32::WHITE);
             let raw = a.text.clone().unwrap_or_default();
             let parsed =
                 crate::egui_app::text::annotation_to_rich_text(&raw, a.interpreter.as_deref());
@@ -1288,7 +1324,7 @@ pub(crate) fn update_internal(
             let galley = ui.painter().layout_job(job.clone());
             let paint_pos = r_screen.left_top();
             if galley.size().x <= r_screen.width() {
-                ui.painter().galley(paint_pos, galley, Color32::WHITE);
+                ui.painter().galley(paint_pos, galley, text_color);
             } else {
                 job.wrap.max_width = r_screen.width();
                 let job_for_wrap = job.clone();
@@ -1296,7 +1332,7 @@ pub(crate) fn update_internal(
                     let wrapped = child_ui.painter().layout_job(job_for_wrap);
                     child_ui
                         .painter()
-                        .galley(paint_pos, wrapped, Color32::WHITE);
+                        .galley(paint_pos, wrapped, text_color);
                 });
             }
             // no special tooltip; text is directly visible inside the rectangle
@@ -1659,10 +1695,14 @@ pub(crate) fn update_internal(
 
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
             let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
             let show_testpoint_marker = line_has_testpoint(&line_targets);
             let stroke = Stroke::new(
                 line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
@@ -2249,10 +2289,14 @@ pub(crate) fn update_internal(
 
         for (line, screen_pts, main_anchor, _resp, li, _segments_all) in &line_views {
             let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
             draw_line_labels(line, &line_targets, screen_pts, *main_anchor, color, *li);
         }
 
@@ -2459,11 +2503,13 @@ pub(crate) fn update_internal(
         // Finish blocks (border, icon/value, labels) and click handling
         for (b, r_screen, _clicked, bg) in &block_views {
             let cfg = get_block_type_cfg(b);
-            let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
-            let stroke = Stroke::new(
-                2.0,
-                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
-            );
+            let border_color = if monochrome {
+                monochrome_block_border(dark_mode)
+            } else {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+            };
+            let stroke = Stroke::new(2.0, border_color);
             crate::egui_app::render::stroke_block_body(&painter, *r_screen, cfg.shape, stroke);
 
             fn paint_port_chevron_placed(
