@@ -34,8 +34,8 @@ use super::state::{DragMode, EditorState};
 // ────────────────────────────────────────────────────────────────────────────
 
 use crate::egui_app::colors::{
-    area_annotation_border, area_annotation_fill, block_base_color, contrast_color,
-    monochrome_block_border, monochrome_block_fill, monochrome_line_color,
+    area_annotation_border, area_annotation_fill, block_fill_color, block_has_model_color,
+    contrast_color, monochrome_block_border, monochrome_line_color,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -470,11 +470,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 sid_screen_map.insert(sid.clone(), r_screen);
             }
             let cfg = get_block_type_cfg(b);
-            let bg = if monochrome {
-                monochrome_block_fill(dark_mode)
-            } else {
-                block_base_color(b, &cfg)
-            };
+            let bg = block_fill_color(b, &cfg, monochrome, dark_mode);
 
             let is_selected = state.selection.is_block_selected(block_idx);
 
@@ -509,7 +505,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Body outline (shape-aware, shared with the viewer).
             if !b.commented {
-                let border_color = if monochrome {
+                let border_color = if monochrome && !block_has_model_color(b) {
                     monochrome_block_border(dark_mode)
                 } else {
                     let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));

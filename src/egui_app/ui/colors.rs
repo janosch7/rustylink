@@ -129,6 +129,43 @@ pub fn block_base_color(
     hash_color(&block.block_type, 0.35, 0.90)
 }
 
+/// True when the block carries an explicit, model-authored background color
+/// that [`parse_model_color`] understands.  Such colors are treated as
+/// *semantic* (deliberately set in the model) and are preserved even in "less
+/// colorful" mode.
+pub fn block_has_model_color(block: &crate::model::Block) -> bool {
+    block
+        .background_color
+        .as_deref()
+        .and_then(parse_model_color)
+        .is_some()
+}
+
+/// Block fill color honoring "less colorful" mode.
+///
+/// A model-authored `BackgroundColor` is always kept (buttons, deliberately
+/// colored blocks).  Only the *automatic* type-based coloring (catalog default
+/// or type hash) is replaced with neutral gray when `monochrome` is set.
+pub fn block_fill_color(
+    block: &crate::model::Block,
+    cfg: &crate::block_types::BlockTypeConfig,
+    monochrome: bool,
+    dark_mode: bool,
+) -> Color32 {
+    if let Some(ref color_str) = block.background_color
+        && let Some(c) = parse_model_color(color_str)
+    {
+        return c;
+    }
+    if monochrome {
+        return monochrome_block_fill(dark_mode);
+    }
+    if let Some(bg) = cfg.background {
+        return Color32::from_rgb(bg.0, bg.1, bg.2);
+    }
+    hash_color(&block.block_type, 0.35, 0.90)
+}
+
 /// Neutral block fill used in "less colorful" mode.  A light gray in both
 /// themes; kept slightly lighter in dark mode so the body stays visible.
 pub fn monochrome_block_fill(dark_mode: bool) -> Color32 {

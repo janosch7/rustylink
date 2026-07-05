@@ -1,6 +1,6 @@
 use super::colors::{
-    area_annotation_border, area_annotation_fill, block_base_color, contrast_color,
-    monochrome_block_border, monochrome_block_fill, monochrome_line_color,
+    area_annotation_border, area_annotation_fill, block_fill_color, block_has_model_color,
+    contrast_color, monochrome_block_border, monochrome_line_color,
 };
 use super::corner_ops;
 use super::helpers::{is_block_subsystem, record_interaction};
@@ -1018,11 +1018,7 @@ pub(crate) fn update_internal(
             };
             let resp = ui.allocate_rect(r_screen, block_sense);
             let cfg = get_block_type_cfg(b);
-            let bg = if monochrome {
-                monochrome_block_fill(dark_mode)
-            } else {
-                block_base_color(b, &cfg)
-            };
+            let bg = block_fill_color(b, &cfg, monochrome, dark_mode);
 
             if app.move_mode_enabled && resp.drag_started()
                 && let Some(sid) = &b.sid {
@@ -2503,7 +2499,9 @@ pub(crate) fn update_internal(
         // Finish blocks (border, icon/value, labels) and click handling
         for (b, r_screen, _clicked, bg) in &block_views {
             let cfg = get_block_type_cfg(b);
-            let border_color = if monochrome {
+            // Neutral border only for blocks whose fill was actually grayed
+            // (i.e. no model-authored color); model-colored blocks keep theirs.
+            let border_color = if monochrome && !block_has_model_color(b) {
                 monochrome_block_border(dark_mode)
             } else {
                 let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
