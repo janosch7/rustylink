@@ -786,10 +786,11 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} resolve={:?} index={:?} signals_only={} testpoint={}",
+            "    - path='{}' origin={:?} signal={:?} signal_names={:?} resolve={:?} index={:?} signals_only={} testpoint={}",
             target.path,
             target.origin,
             target.signal_name,
+            target.signal_names,
             target.resolve,
             target.element_index,
             target.signals_only,
