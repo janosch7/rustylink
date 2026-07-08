@@ -4,6 +4,7 @@ use crate::egui_app::state::{BlockDialog, ChartView, SignalDialog, SubsystemApp}
 use crate::egui_app::text::matlab_syntax_job;
 use crate::model::EndpointRef;
 use eframe::egui::{self, Color32, RichText};
+use std::sync::Arc;
 
 fn build_chart_view_for_block(
     app: &SubsystemApp,
@@ -71,13 +72,13 @@ pub fn apply_update_response(app: &mut SubsystemApp, response: &UpdateResponse) 
                 app.chart_view = Some(cv);
                 app.block_view = Some(BlockDialog {
                     title: title_cleaned.clone(),
-                    block: block.clone(),
+                    block: Arc::new(block.clone()),
                     open: true,
                 });
             } else {
                 app.block_view = Some(BlockDialog {
                     title: title_cleaned.clone(),
-                    block: block.clone(),
+                    block: Arc::new(block.clone()),
                     open: true,
                 });
             }
@@ -275,7 +276,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
 fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
     if let Some(bd) = &app.block_view {
         let mut open_flag = bd.open;
-        let block = bd.block.clone();
+        let block = &bd.block;
         // the title was cleaned when the dialog was created; normalize again just
         // in case the string was mutated by a custom button handler.
         let win_title = crate::parser::helpers::clean_whitespace(&bd.title);

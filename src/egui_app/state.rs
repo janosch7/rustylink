@@ -209,7 +209,7 @@ pub struct SignalDialog {
 #[derive(Clone)]
 pub struct BlockDialog {
     pub title: String,
-    pub block: Block,
+    pub block: Arc<Block>,
     pub open: bool,
 }
 

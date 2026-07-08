@@ -15,6 +15,7 @@
 #![cfg(feature = "egui")]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
@@ -1542,7 +1543,7 @@ fn block_context_menu(
         // Show block info
         state.app.block_view = Some(BlockDialog {
             title: format!("Block: {}", block.name),
-            block: block.clone(),
+            block: Arc::new(block.clone()),
             open: true,
         });
         ui.close();
