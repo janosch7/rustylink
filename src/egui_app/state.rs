@@ -345,6 +345,9 @@ pub struct ComputedViewCache {
     /// so it is reused across subsystem navigation and layout-only edits and is
     /// rebuilt only when this signature changes.
     cached_resolver_sig: Option<u64>,
+    /// Generation at which the topology signature was last computed.
+    /// Avoids re-hashing the entire tree every frame when the model is unchanged.
+    cached_sig_gen: u64,
     /// The subsystem path for which this cache was computed.
     cached_path: Vec<String>,
     /// Model generation at which the cache was computed.
@@ -361,6 +364,7 @@ impl Default for ComputedViewCache {
             connected_ports: std::collections::HashSet::new(),
             connection_target_resolver: None,
             cached_resolver_sig: None,
+            cached_sig_gen: 0,
             cached_path: Vec::new(),
             cached_gen: 0,
         }
@@ -396,12 +400,17 @@ impl ComputedViewCache {
         &mut self,
         root: &System,
     ) -> Arc<crate::connection_targets::ConnectionTargetResolver> {
-        let sig = crate::connection_targets::model_topology_signature(root);
-        if self.connection_target_resolver.is_none() || self.cached_resolver_sig != Some(sig) {
-            self.connection_target_resolver = Some(Arc::new(
-                crate::connection_targets::ConnectionTargetResolver::new(root),
-            ));
-            self.cached_resolver_sig = Some(sig);
+        // Only re-hash the topology when the model generation has changed.
+        // This avoids walking the entire system tree every frame.
+        if self.connection_target_resolver.is_none() || self.cached_sig_gen != self.generation {
+            let sig = crate::connection_targets::model_topology_signature(root);
+            self.cached_sig_gen = self.generation;
+            if self.connection_target_resolver.is_none() || self.cached_resolver_sig != Some(sig) {
+                self.connection_target_resolver = Some(Arc::new(
+                    crate::connection_targets::ConnectionTargetResolver::new(root),
+                ));
+                self.cached_resolver_sig = Some(sig);
+            }
         }
         self.connection_target_resolver
             .clone()

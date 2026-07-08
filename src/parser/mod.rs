@@ -440,8 +440,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                     self.link_system_refs(&mut sub_cloned, sub_base_dir);
                     blk.subsystem = Some(Box::new(sub_cloned));
                 }
-            }
-            if let Some(ref mut sub) = blk.subsystem {
+            } else if let Some(ref mut sub) = blk.subsystem {
                 self.link_system_refs(sub, current_base);
             }
         }

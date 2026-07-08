@@ -638,6 +638,37 @@ pub(crate) fn update_internal(
                 }
             }
 
+            ui.separator();
+            // Open the folder containing the source model in the OS file explorer
+            if ui
+                .add_enabled(app.source_model_path.is_some(), egui::Button::new("📂 Open folder"))
+                .on_hover_text("Open the folder containing this model in the file explorer")
+                .clicked()
+            {
+                if let Some(model_path) = app.source_model_path.as_ref() {
+                    let dir = model_path.parent().unwrap_or(model_path.as_path());
+                    #[cfg(target_os = "linux")]
+                    let cmd = "xdg-open";
+                    #[cfg(target_os = "macos")]
+                    let cmd = "open";
+                    #[cfg(target_os = "windows")]
+                    let cmd = "explorer";
+                    if let Err(err) = std::process::Command::new(cmd).arg(dir.as_str()).spawn() {
+                        app.show_notification(format!("Failed to open folder: {err}"), 5000);
+                    }
+                }
+            }
+
+            ui.separator();
+            let mono_label = if app.monochrome {
+                "Monochrome"
+            } else {
+                "Color"
+            };
+            if ui.selectable_label(app.monochrome, mono_label).clicked() {
+                app.monochrome = !app.monochrome;
+            }
+
             // Render transient in-GUI notification (right-aligned in the top bar)
             if let Some((msg, expiry)) = &app.transient_notification {
                 if std::time::Instant::now() > *expiry {
