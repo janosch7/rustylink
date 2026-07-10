@@ -26,6 +26,15 @@ use crate::egui_app::{get_block_type_cfg, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::collections::{BTreeSet, HashMap};
 
+/// Shallow clone of a block that skips the expensive subsystem tree.
+/// Used for rendering to avoid deep-cloning entire subsystem contents every frame.
+fn shallow_clone_block(b: &crate::model::Block) -> crate::model::Block {
+    let mut clone = b.clone();
+    // Skip subsystem content - it's not needed for rendering and is very expensive to clone
+    clone.subsystem = None;
+    clone
+}
+
 pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     let mut text = format!("{value:.6}");
     while text.contains('.') && text.ends_with('0') {
@@ -703,14 +712,8 @@ pub(crate) fn update_internal(
         }
     });
 
-    // Borrow system reference (zero-cost, no cloning)
-    let system_opt = app.current_system();
-    let system_valid = system_opt.is_some();
-    // Snapshot the current system name (prefer system properties, fall back to last path segment or <root>)
-    let system_name_snapshot: String = system_opt
-        .and_then(|s| s.properties.get("Name").cloned())
-        .or_else(|| path_snapshot.last().cloned())
-        .unwrap_or_else(|| "<root>".to_string());
+    // Check if current system is valid (zero-cost, no cloning)
+    let system_valid = app.current_system().is_some();
 
     let mut staged_zoom = app.zoom;
     let mut staged_pan = app.pan;
@@ -837,20 +840,13 @@ pub(crate) fn update_internal(
             .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
             .cloned()
             .collect();
-        // Compute blocks with positions from snapshot. Also inject SystemName
-        // into a temporary, enriched block clone so later code can read it from properties.
-        let system_name = system_name_snapshot.clone();
-        let mut enriched_blocks: Vec<crate::model::Block> =
-            Vec::with_capacity(sys.blocks.len());
-        for b in &sys.blocks {
-            let mut bc = b.clone();
-            // Do not overwrite if already present
-            bc.properties
-                .entry("SystemName".to_string())
-                .or_insert(system_name.clone());
-            enriched_blocks.push(bc);
-        }
-        let blocks: Vec<(&crate::model::Block, Rect)> = enriched_blocks
+        // Shallow-clone blocks (skip subsystem trees) to avoid borrow conflicts
+        // with &mut app in the closure below, while minimizing clone cost.
+        let owned_blocks: Vec<crate::model::Block> = sys.blocks.iter()
+            .filter(|b| parse_block_rect(b).is_some())
+            .map(shallow_clone_block)
+            .collect();
+        let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
             .iter()
             .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
             .collect::<Vec<_>>();
@@ -1454,7 +1450,7 @@ pub(crate) fn update_internal(
                     let num_dst = port_counts
                         .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
                         .copied();
-                    let mirrored_dst = enriched_blocks
+                    let mirrored_dst = owned_blocks
                         .iter()
                         .find(|b| b.sid.as_ref() == Some(&dst.sid))
                         .and_then(|b| b.block_mirror)

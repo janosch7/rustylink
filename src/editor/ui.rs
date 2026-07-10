@@ -234,23 +234,13 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             return;
         }
     };
-    let system_name: String = sys
-        .properties
-        .get("Name")
-        .cloned()
-        .or_else(|| path_snapshot.last().cloned())
-        .unwrap_or_else(|| "<root>".to_string());
-
-    // Enrich blocks with SystemName
-    let mut enriched_blocks: Vec<crate::model::Block> = Vec::with_capacity(sys.blocks.len());
-    for b in &sys.blocks {
-        let mut bc = b.clone();
-        bc.properties
-            .entry("SystemName".to_string())
-            .or_insert(system_name.clone());
-        enriched_blocks.push(bc);
-    }
-    let blocks: Vec<(&crate::model::Block, Rect)> = enriched_blocks
+    // Shallow-clone blocks (skip subsystem trees) to avoid borrow conflicts
+    // with &mut state in the closure below, while minimizing clone cost.
+    let owned_blocks: Vec<crate::model::Block> = sys.blocks.iter()
+        .filter(|b| parse_block_rect(b).is_some())
+        .map(|b| { let mut c = b.clone(); c.subsystem = None; c })
+        .collect();
+    let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
         .iter()
         .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
         .collect();
