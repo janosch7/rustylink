@@ -373,10 +373,10 @@ fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
 #[cfg(feature = "dashboard")]
 fn first_input_signal_name(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) -> Option<String> {
     let sid = block.sid.as_deref()?;
-    entities.lines.iter().find_map(|line| {
+    lines.iter().find_map(|line| {
         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
         let branched = line
             .branches
@@ -393,7 +393,7 @@ fn first_input_signal_name(
 #[cfg(feature = "dashboard")]
 fn scope_title_for_block(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) -> String {
     if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
         block.dashboard_binding.as_ref()
@@ -402,14 +402,14 @@ fn scope_title_for_block(
         return signal_name.clone();
     }
 
-    first_input_signal_name(block, entities).unwrap_or_else(|| block.name.clone())
+    first_input_signal_name(block, lines).unwrap_or_else(|| block.name.clone())
 }
 
 #[cfg(feature = "dashboard")]
 fn update_scope_live_sample(
     app: &mut SubsystemApp,
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) {
     if !matches!(block.block_type.as_str(), "Scope" | "DashboardScope") {
         return;
@@ -420,7 +420,7 @@ fn update_scope_live_sample(
     };
 
     let scope_key = app.scope_key_for_block(block);
-    let scope_title = scope_title_for_block(block, entities);
+    let scope_title = scope_title_for_block(block, lines);
     let mut scopes = app.scope_instances.lock().unwrap();
     let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
         crate::egui_app::scope_widget::MiniScope::new((
@@ -703,12 +703,11 @@ pub(crate) fn update_internal(
         }
     });
 
-    // Owned snapshot for use inside the UI closure to avoid immutable borrows of `app`
-    let entities_opt = app.current_entities();
-    let system_valid = entities_opt.is_some();
+    // Borrow system reference (zero-cost, no cloning)
+    let system_opt = app.current_system();
+    let system_valid = system_opt.is_some();
     // Snapshot the current system name (prefer system properties, fall back to last path segment or <root>)
-    let system_name_snapshot: String = app
-        .current_system()
+    let system_name_snapshot: String = system_opt
         .and_then(|s| s.properties.get("Name").cloned())
         .or_else(|| path_snapshot.last().cloned())
         .unwrap_or_else(|| "<root>".to_string());
@@ -800,9 +799,6 @@ pub(crate) fn update_internal(
             ui.label("Hints: use -L <dir> to add library search paths, or open the library .slx directly.");
             return;
         }
-        // Use entities snapshot for this frame
-        let entities = entities_opt.as_ref().unwrap();
-
         // ── Keyboard shortcuts for undo/redo ──
         if app.move_mode_enabled {
             let undo_requested = ui.input(|i| {
@@ -829,12 +825,24 @@ pub(crate) fn update_internal(
                 app.view_cache.invalidate();
             }
         }
+        // Get system reference AFTER undo/redo (which may mutate app.root)
+        let sys = match resolve_subsystem_by_vec(&app.root, &app.path) {
+            Some(s) => s,
+            None => return,
+        };
+        // Clone lines for use inside the closure (avoids borrowing app.root across closure)
+        let sys_lines: Vec<crate::model::Line> = sys.lines.clone();
+        // Clone annotations for use inside the closure
+        let sys_annotations: Vec<crate::model::Annotation> = sys.annotations.iter()
+            .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+            .cloned()
+            .collect();
         // Compute blocks with positions from snapshot. Also inject SystemName
         // into a temporary, enriched block clone so later code can read it from properties.
         let system_name = system_name_snapshot.clone();
         let mut enriched_blocks: Vec<crate::model::Block> =
-            Vec::with_capacity(entities.blocks.len());
-        for b in &entities.blocks {
+            Vec::with_capacity(sys.blocks.len());
+        for b in &sys.blocks {
             let mut bc = b.clone();
             // Do not overwrite if already present
             bc.properties
@@ -846,21 +854,15 @@ pub(crate) fn update_internal(
             .iter()
             .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
             .collect::<Vec<_>>();
-        let annotations: Vec<(&crate::model::Annotation, Rect)> = entities_opt
-            .as_ref()
-            .map(|entities| {
-                entities
-                    .annotations
-                    .iter()
-                    .filter_map(|a| {
-                        a.position
-                            .as_deref()
-                            .and_then(parse_rect_str)
-                            .map(|pos| (a, pos))
-                    })
-                    .collect()
+        let annotations: Vec<(&crate::model::Annotation, Rect)> = sys_annotations
+            .iter()
+            .filter_map(|a| {
+                a.position
+                    .as_deref()
+                    .and_then(parse_rect_str)
+                    .map(|pos| (a, pos))
             })
-            .unwrap_or_default();
+            .collect();
         if blocks.is_empty() && annotations.is_empty() {
             ui.colored_label(
                 Color32::YELLOW,
@@ -1116,14 +1118,14 @@ pub(crate) fn update_internal(
                             &b.block_type,
                         ) || matches!(b.block_type.as_str(), "Scope" | "Display")
                         {
-                            print_dashboard_connected_signals(b, entities);
+                            print_dashboard_connected_signals(b, &sys_lines);
                         }
                         // Open a scope popout window when a Scope/DashboardScope is clicked.
                         #[cfg(feature = "dashboard")]
                         if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
                             let key = app.scope_key_for_block(b);
                             app.scope_popout = Some(crate::egui_app::state::ScopePopout {
-                                title: scope_title_for_block(b, entities),
+                                title: scope_title_for_block(b, &sys_lines),
                                 scope_key: key,
                                 open: true,
                             });
@@ -1380,13 +1382,13 @@ pub(crate) fn update_internal(
         // Use cached line colors and port info when possible; recompute on model change.
         let cache_gen = app.view_cache.generation;
         if !app.view_cache.is_valid(&app.path, cache_gen) {
-            let line_adjacency = line_coloring::compute_line_adjacency(&entities.lines);
+            let line_adjacency = line_coloring::compute_line_adjacency(&sys_lines);
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
 
             let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
-                &entities.lines,
+                &sys_lines,
                 &block_refs.iter().cloned().cloned().collect::<Vec<_>>(),
             );
             app.view_cache.port_counts = pc;
@@ -1418,7 +1420,7 @@ pub(crate) fn update_internal(
                 sid_mirrored.insert(sid.clone(), b.block_mirror.unwrap_or(false));
             }
         }
-        for (li, line) in entities.lines.iter().enumerate() {
+        for (li, line) in sys_lines.iter().enumerate() {
             let Some(src) = line.src.as_ref() else {
                 continue;
             };
@@ -1452,8 +1454,7 @@ pub(crate) fn update_internal(
                     let num_dst = port_counts
                         .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
                         .copied();
-                    let mirrored_dst = entities
-                        .blocks
+                    let mirrored_dst = enriched_blocks
                         .iter()
                         .find(|b| b.sid.as_ref() == Some(&dst.sid))
                         .and_then(|b| b.block_mirror)
@@ -2371,7 +2372,7 @@ pub(crate) fn update_internal(
                         app.selected_block_sids.clear();
                     }
                 } else {
-                    let line = &entities.lines[*li];
+                    let line = &sys_lines[*li];
                     record_interaction(
                         &mut interaction,
                         UpdateResponse::Signal {
@@ -2426,7 +2427,7 @@ pub(crate) fn update_internal(
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
-                        let line = &entities.lines[*li];
+                        let line = &sys_lines[*li];
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Signal {
@@ -2438,7 +2439,7 @@ pub(crate) fn update_internal(
                         );
                         ui.close();
                     }
-                    let line_ref = &entities.lines[*li];
+                    let line_ref = &sys_lines[*li];
                     for item in &signal_menu_items_snapshot {
                         if (item.filter)(line_ref)
                             && ui.button(&item.label).clicked() {
@@ -2673,11 +2674,11 @@ pub(crate) fn update_internal(
             }
             let fg = contrast_color(*bg);
             #[cfg(feature = "dashboard")]
-            update_scope_live_sample(app, b, entities);
+            update_scope_live_sample(app, b, &sys_lines);
             let display_signal_label = if b.block_type == "Display" {
                 let sid = b.sid.as_deref();
                 sid.and_then(|sid| {
-                    entities.lines.iter().find_map(|line| {
+                    sys_lines.iter().find_map(|line| {
                         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
                         let branched = line.branches.iter().any(|br| branch_hits_sid(br, sid));
                         if direct || branched {
@@ -2833,7 +2834,7 @@ pub(crate) fn update_internal(
                         let key = app.scope_key_for_block(b);
                         deferred_scope_rects.push((
                             key,
-                            scope_title_for_block(b, entities),
+                            scope_title_for_block(b, &sys_lines),
                             scope_rect,
                         ));
                     } else {
@@ -3348,7 +3349,7 @@ pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
 /// current subsystem's lines for connections to/from this block.
 fn print_dashboard_connected_signals(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) {
     println!(
         "  [Dashboard UI] Block '{}' (type: {})",
@@ -3392,7 +3393,7 @@ fn print_dashboard_connected_signals(
                 print_dashboard_binding_debug(block);
             }
             // Fall back to line-based connection scanning
-            print_line_based_connections(block, entities);
+            print_line_based_connections(block, &[], lines);
         }
     }
 }
@@ -3566,7 +3567,8 @@ fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
 /// Scan lines in the current subsystem for connections to/from the given block.
 fn print_line_based_connections(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    blocks: &[crate::model::Block],
+    lines: &[crate::model::Line],
 ) {
     let block_sid = match &block.sid {
         Some(s) => s.as_str(),
@@ -3595,15 +3597,14 @@ fn print_line_based_connections(
     }
 
     // Build a SID→name lookup for blocks in this subsystem.
-    let block_name_by_sid: std::collections::HashMap<&str, &str> = entities
-        .blocks
+    let block_name_by_sid: std::collections::HashMap<&str, &str> = blocks
         .iter()
         .filter_map(|b| b.sid.as_deref().map(|s| (s, b.name.as_str())))
         .collect();
 
     let mut found_any = false;
 
-    for line in &entities.lines {
+    for line in lines {
         let signal_name = line.name.as_deref().unwrap_or("<unnamed>");
 
         // Check if this block is a source of the line

@@ -21,6 +21,7 @@ use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, V
 
 use crate::model::EndpointRef;
 
+use crate::egui_app::navigation::resolve_subsystem_by_vec;
 use crate::egui_app::{
     BlockDialog, SignalDialog, endpoint_pos_maybe_mirrored, get_block_type_cfg,
     highlight_query_job, parse_block_rect, parse_rect_str, show_zoom_controls,
@@ -223,25 +224,26 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         }
     });
 
-    // Resolve current system
-    let entities_opt = state.app.current_entities();
-    if entities_opt.is_none() {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.colored_label(Color32::RED, "Invalid path — nothing to render");
-        });
-        return;
-    }
-    let entities = entities_opt.unwrap();
-    let system_name: String = state
-        .app
-        .current_system()
-        .and_then(|s| s.properties.get("Name").cloned())
+    // Resolve current system (borrowed from state.app.root — only borrows root, not all of state)
+    let sys = match resolve_subsystem_by_vec(&state.app.root, &state.app.path) {
+        Some(s) => s,
+        None => {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.colored_label(Color32::RED, "Invalid path — nothing to render");
+            });
+            return;
+        }
+    };
+    let system_name: String = sys
+        .properties
+        .get("Name")
+        .cloned()
         .or_else(|| path_snapshot.last().cloned())
         .unwrap_or_else(|| "<root>".to_string());
 
     // Enrich blocks with SystemName
-    let mut enriched_blocks: Vec<crate::model::Block> = Vec::with_capacity(entities.blocks.len());
-    for b in &entities.blocks {
+    let mut enriched_blocks: Vec<crate::model::Block> = Vec::with_capacity(sys.blocks.len());
+    for b in &sys.blocks {
         let mut bc = b.clone();
         bc.properties
             .entry("SystemName".to_string())
@@ -252,8 +254,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         .iter()
         .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
         .collect();
-    let annotations: Vec<(&crate::model::Annotation, Rect)> = entities
+    // Clone annotations for use inside the closure
+    let sys_annotations: Vec<crate::model::Annotation> = sys
         .annotations
+        .iter()
+        .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+        .cloned()
+        .collect();
+    let annotations: Vec<(&crate::model::Annotation, Rect)> = sys_annotations
         .iter()
         .filter_map(|a| {
             a.position
@@ -262,6 +270,8 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 .map(|pos| (a, pos))
         })
         .collect();
+    // Clone lines for use inside the closure (avoids borrowing state.app.root across closure)
+    let sys_lines: Vec<crate::model::Line> = sys.lines.clone();
 
     if blocks.is_empty() && annotations.is_empty() {
         egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -795,7 +805,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 reg_branch(sub, port_counts);
             }
         }
-        for line in &entities.lines {
+        for line in &sys_lines {
             if let Some(src) = &line.src {
                 reg_ep(src, &mut port_counts);
             }
@@ -808,9 +818,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         }
 
         // Color lines with graph coloring
-        let line_colors = compute_line_colors(&entities.lines, &port_counts);
+        let line_colors = compute_line_colors(&sys_lines, &port_counts);
 
-        for (li, line) in entities.lines.iter().enumerate() {
+        for (li, line) in sys_lines.iter().enumerate() {
             let Some(src) = line.src.as_ref() else {
                 continue;
             };

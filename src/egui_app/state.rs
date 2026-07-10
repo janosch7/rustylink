@@ -245,12 +245,14 @@ pub struct BlockContextMenuItem {
     pub on_click: Arc<dyn Fn(&Block) + Send + Sync>,
 }
 
-/// Snapshot of all entities within the currently displayed subsystem.
-#[derive(Clone)]
-pub struct SubsystemEntities {
-    pub blocks: Vec<Block>,
-    pub lines: Vec<Line>,
-    pub annotations: Vec<Annotation>,
+/// Borrowed view of all entities within the currently displayed subsystem.
+///
+/// This holds references into the model tree, avoiding expensive per-frame
+/// clones of all blocks, lines, and annotations.
+pub struct SubsystemEntities<'a> {
+    pub blocks: &'a [Block],
+    pub lines: &'a [Line],
+    pub annotations: Vec<&'a Annotation>,
 }
 
 /// State for a scope popout window.
@@ -454,7 +456,7 @@ pub struct SubsystemApp {
     pub library_search_paths: Vec<Utf8PathBuf>,
     /// Registered listeners to be notified whenever the displayed subsystem changes.
     #[allow(clippy::type_complexity)]
-    subsystem_change_listeners: Vec<Arc<dyn Fn(&[String], &SubsystemEntities) + Send + Sync>>, // private to encourage using the API
+    subsystem_change_listeners: Vec<Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>>, // private to encourage using the API
     /// Optional click handler to override default action when clicking a block.
     /// Return true from the handler to indicate the click was handled and suppress the default behavior.
     #[allow(clippy::type_complexity)]
@@ -672,19 +674,21 @@ impl SubsystemApp {
         app
     }
 
-    /// Return a snapshot of entities (blocks, lines, annotations) in the current subsystem.
-    pub fn current_entities(&self) -> Option<SubsystemEntities> {
-        self.current_system().map(|sys| SubsystemEntities {
-            blocks: sys.blocks.clone(),
-            lines: sys.lines.clone(),
-            annotations: {
-                // Combine system-level and block-attached annotations into a single list
-                let mut anns = sys.annotations.clone();
-                for b in &sys.blocks {
-                    anns.extend(b.annotations.clone());
-                }
-                anns
-            },
+    /// Return a borrowed view of entities (blocks, lines, annotations) in the current subsystem.
+    ///
+    /// This returns references into the model tree, avoiding expensive per-frame
+    /// clones of all blocks, lines, and annotations.
+    pub fn current_entities(&self) -> Option<SubsystemEntities<'_>> {
+        let sys = self.current_system()?;
+        let annotations = sys
+            .annotations
+            .iter()
+            .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+            .collect();
+        Some(SubsystemEntities {
+            blocks: &sys.blocks,
+            lines: &sys.lines,
+            annotations,
         })
     }
 
@@ -692,7 +696,7 @@ impl SubsystemApp {
     /// The callback receives the new path (relative to root) and an entity snapshot.
     pub fn add_subsystem_change_listener<F>(&mut self, f: F)
     where
-        F: Fn(&[String], &SubsystemEntities) + Send + Sync + 'static,
+        F: for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync + 'static,
     {
         self.subsystem_change_listeners.push(Arc::new(f));
     }
