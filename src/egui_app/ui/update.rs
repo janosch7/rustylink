@@ -391,10 +391,7 @@ fn first_input_signal_name(
 }
 
 #[cfg(feature = "dashboard")]
-fn scope_title_for_block(
-    block: &crate::model::Block,
-    lines: &[crate::model::Line],
-) -> String {
+fn scope_title_for_block(block: &crate::model::Block, lines: &[crate::model::Line]) -> String {
     if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
         block.dashboard_binding.as_ref()
         && !signal_name.trim().is_empty()
@@ -641,33 +638,29 @@ pub(crate) fn update_internal(
             ui.separator();
             // Open the folder containing the source model in the OS file explorer
             if ui
-                .add_enabled(app.source_model_path.is_some(), egui::Button::new("📂 Open folder"))
+                .add_enabled(
+                    app.source_model_path.is_some(),
+                    egui::Button::new("📂 Open folder"),
+                )
                 .on_hover_text("Open the folder containing this model in the file explorer")
                 .clicked()
+                && let Some(model_path) = app.source_model_path.as_ref()
             {
-                if let Some(model_path) = app.source_model_path.as_ref() {
-                    let dir = model_path.parent().unwrap_or(model_path.as_path());
-                    #[cfg(target_os = "linux")]
-                    let cmd = "xdg-open";
-                    #[cfg(target_os = "macos")]
-                    let cmd = "open";
-                    #[cfg(target_os = "windows")]
-                    let cmd = "explorer";
-                    if let Err(err) = std::process::Command::new(cmd).arg(dir.as_str()).spawn() {
-                        app.show_notification(format!("Failed to open folder: {err}"), 5000);
-                    }
+                let dir = model_path.parent().unwrap_or(model_path.as_path());
+                #[cfg(target_os = "linux")]
+                let cmd = "xdg-open";
+                #[cfg(target_os = "macos")]
+                let cmd = "open";
+                #[cfg(target_os = "windows")]
+                let cmd = "explorer";
+                if let Err(err) = std::process::Command::new(cmd).arg(dir.as_str()).spawn() {
+                    app.show_notification(format!("Failed to open folder: {err}"), 5000);
                 }
             }
 
-            ui.separator();
-            let mono_label = if app.monochrome {
-                "Monochrome"
-            } else {
-                "Color"
-            };
-            if ui.selectable_label(app.monochrome, mono_label).clicked() {
-                app.monochrome = !app.monochrome;
-            }
+            // "Less color" and "Dark" toggles live in the floating zoom-controls
+            // overlay (shared by editor and viewer), so they are not duplicated
+            // here.
 
             // Render transient in-GUI notification (right-aligned in the top bar)
             if let Some((msg, expiry)) = &app.transient_notification {
@@ -3355,10 +3348,7 @@ pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
 /// For blocks that use traditional signal lines instead of BindingPersistence
 /// (e.g., `Display`, `Scope`), this function falls back to scanning the
 /// current subsystem's lines for connections to/from this block.
-fn print_dashboard_connected_signals(
-    block: &crate::model::Block,
-    lines: &[crate::model::Line],
-) {
+fn print_dashboard_connected_signals(block: &crate::model::Block, lines: &[crate::model::Line]) {
     println!(
         "  [Dashboard UI] Block '{}' (type: {})",
         block.name, block.block_type

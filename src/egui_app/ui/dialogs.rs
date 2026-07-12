@@ -442,8 +442,8 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new("Actions").strong());
                     ui.horizontal_wrapped(|ui| {
                         for btn in &app.block_buttons {
-                            if (btn.filter)(&block) && ui.button(&btn.label).clicked() {
-                                (btn.on_click)(&block);
+                            if (btn.filter)(block) && ui.button(&btn.label).clicked() {
+                                (btn.on_click)(block);
                             }
                         }
                     });
