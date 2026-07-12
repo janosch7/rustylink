@@ -456,7 +456,8 @@ pub struct SubsystemApp {
     pub library_search_paths: Vec<Utf8PathBuf>,
     /// Registered listeners to be notified whenever the displayed subsystem changes.
     #[allow(clippy::type_complexity)]
-    subsystem_change_listeners: Vec<Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>>, // private to encourage using the API
+    subsystem_change_listeners:
+        Vec<Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>>, // private to encourage using the API
     /// Optional click handler to override default action when clicking a block.
     /// Return true from the handler to indicate the click was handled and suppress the default behavior.
     #[allow(clippy::type_complexity)]
