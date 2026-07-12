@@ -881,7 +881,7 @@ pub(crate) fn update_internal(
             content_bb = content_bb.union(*r);
         }
 
-        let bb = match staged_view_bounds {
+        let mut bb = match staged_view_bounds {
             Some(bounds) if !staged_reset => bounds,
             _ => {
                 let fitted = content_bb.expand(20.0);
@@ -899,13 +899,7 @@ pub(crate) fn update_internal(
         let height = (bb.height()).max(1.0);
         let sx = (avail_size.x - 2.0 * margin) / width;
         let sy = (avail_size.y - 2.0 * margin) / height;
-        let base_scale = sx.min(sy).max(0.1);
-
-        if staged_reset {
-            staged_zoom = 1.0;
-            staged_pan = Vec2::ZERO;
-            staged_reset = false;
-        }
+        let mut base_scale = sx.min(sy).max(0.1);
 
         let canvas_sense = if app.move_mode_enabled {
             Sense::click()
@@ -946,13 +940,27 @@ pub(crate) fn update_internal(
             Pos2::new(avail.left() + margin, avail.top() + margin),
             avail.center(),
             &mut staged_reset,
+            &mut app.monochrome,
         );
 
-        if staged_reset && app.apply_authored_navigation_view_state_for_current_path() {
-            staged_zoom = app.zoom;
-            staged_pan = app.pan;
-            staged_view_bounds = app.view_bounds;
+        // Reset always fits every block into the viewport, recomputing the
+        // fit from the fresh content bounds in the same frame the button is
+        // pressed (no stale authored view, no multi-frame delay).
+        if staged_reset {
+            let fitted = content_bb.expand(20.0);
+            staged_view_bounds = Some(fitted);
+            bb = fitted;
+            let w = bb.width().max(1.0);
+            let h = bb.height().max(1.0);
+            let sx = (avail_size.x - 2.0 * margin) / w;
+            let sy = (avail_size.y - 2.0 * margin) / h;
+            base_scale = sx.min(sy).max(0.1);
+            staged_zoom = 1.0;
+            let extra_x = (avail_size.x - 2.0 * margin - bb.width() * base_scale).max(0.0);
+            let extra_y = (avail_size.y - 2.0 * margin - bb.height() * base_scale).max(0.0);
+            staged_pan = Vec2::new(extra_x * 0.5, extra_y * 0.5);
             staged_reset = false;
+            ui.ctx().request_repaint();
         }
 
         let to_screen = |p: Pos2| -> Pos2 {

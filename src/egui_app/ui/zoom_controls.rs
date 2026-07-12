@@ -12,6 +12,7 @@ pub fn show_zoom_controls(
     origin: Pos2,
     center: Pos2,
     reset_requested: &mut bool,
+    monochrome: &mut bool,
 ) {
     egui::Area::new(area_id)
         .fixed_pos(fixed_pos)
@@ -50,6 +51,24 @@ pub fn show_zoom_controls(
                     // value is decoupled from the fit-to-view factor.
                     let percent = (base_scale * *zoom * 100.0).round() as i32;
                     ui.label(format!("{}%", percent));
+
+                    ui.separator();
+                    ui.checkbox(monochrome, "Less color").on_hover_text(
+                        "Flat Simulink-style blocks: white bodies with thin \
+                         borders (areas keep their model colors)",
+                    );
+                    let mut dark = ui.visuals().dark_mode;
+                    if ui
+                        .checkbox(&mut dark, "Dark")
+                        .on_hover_text("Toggle a dark canvas theme (signal lines stay visible)")
+                        .changed()
+                    {
+                        ui.ctx().set_visuals(if dark {
+                            egui::Visuals::dark()
+                        } else {
+                            egui::Visuals::light()
+                        });
+                    }
                 });
             });
         });
