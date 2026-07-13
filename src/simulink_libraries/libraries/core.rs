@@ -31,11 +31,20 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Product", "Math Operations")
         .with_description("Multiply or divide inputs")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon("×")),
+        .with_icon(icon("×"))
+        .with_metadata_keys(&[
+            MetadataKey::with_default("Inputs", "**"),
+            MetadataKey::with_default("Multiplication", "Element-wise(.*)"),
+        ])
+        .with_static_renderer(renderers::static_product),
     SimulinkBlockDefinition::new("Sum", "Math Operations")
         .with_description("Add or subtract inputs")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_shape(SimulinkShape::Circle)
+        .with_shape(SimulinkShape::None)
+        .with_metadata_keys(&[
+            MetadataKey::with_default("IconShape", "round"),
+            MetadataKey::with_default("Inputs", "++"),
+        ])
         .with_port_overrides(SUM_PORT_OVERRIDES)
         .with_static_renderer(renderers::static_sum),
     SimulinkBlockDefinition::new("Gain", "Math Operations")
@@ -53,7 +62,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Scope", "Sinks")
         .with_description("Display signals over time")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
-        .with_icon(icon("〰"))
+        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::WAVEFORM))
         .with_static_renderer(renderers::static_scope),
     SimulinkBlockDefinition::new("Terminator", "Sinks")
         .with_description("Terminate an unconnected output port")

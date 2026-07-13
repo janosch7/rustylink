@@ -31,6 +31,10 @@ pub struct InteriorParams<'a> {
     pub port_label_widths: Option<crate::egui_app::render::PortLabelMaxWidths>,
     /// Foreground/contrast color used for plain-text labels.
     pub text_color: Color32,
+    /// Resolved body fill color (for shape-`None` self-painting renderers).
+    pub fill_color: Color32,
+    /// Resolved body outline color (for shape-`None` self-painting renderers).
+    pub border_color: Color32,
 }
 
 /// Render the interior of a block, driven entirely by its definition.
@@ -65,6 +69,8 @@ pub fn render_block_interior(
         port_y: params.port_y,
         port_label_widths: params.port_label_widths,
         text_color: params.text_color,
+        fill_color: params.fill_color,
+        border_color: params.border_color,
     };
 
     // 1. Solid-fill blocks (BusCreator/BusSelector) draw nothing inside.

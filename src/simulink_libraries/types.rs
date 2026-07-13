@@ -51,6 +51,11 @@ pub enum SimulinkShape {
     /// Obround / stadium: a rectangle whose short ends are full semicircles
     /// (used for subsystem In/Outport blocks).
     Obround,
+    /// No body drawn by the shared fill/stroke passes: the block's
+    /// `static_renderer` paints the entire body (fill + outline + interior)
+    /// itself.  Used for metadata-dependent bodies such as Logic gates, whose
+    /// outline changes per instance (rectangular text box vs. distinctive gate).
+    None,
 }
 
 /// Where a port sits on a block body.
@@ -202,6 +207,13 @@ pub struct RenderContext<'a> {
     pub port_label_widths: Option<crate::egui_app::render::PortLabelMaxWidths>,
     /// Foreground/contrast color for plain-text labels drawn by renderers.
     pub text_color: eframe::egui::Color32,
+    /// Background/fill color of the block body (already resolved for the active
+    /// theme and less-color mode).  Renderers that paint their own body (shape
+    /// [`SimulinkShape::None`]) fill with this.
+    pub fill_color: eframe::egui::Color32,
+    /// Outline color of the block body (already resolved for the active theme
+    /// and less-color mode).  Used by self-painting renderers.
+    pub border_color: eframe::egui::Color32,
 }
 
 /// Signature of an interior renderer used when **live mode is OFF**.

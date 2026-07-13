@@ -110,6 +110,9 @@ pub fn fill_block_body(
             // shortest side, giving a stadium/obround).
             painter.rect_filled(rect, rect.height() * 0.5, bg);
         }
+        BlockShape::None => {
+            // The block's static renderer paints its own body; nothing here.
+        }
     }
     bg
 }
@@ -170,6 +173,9 @@ pub fn stroke_block_body(
         }
         BlockShape::Obround => {
             painter.rect_stroke(rect, rect.height() * 0.5, stroke, egui::StrokeKind::Inside);
+        }
+        BlockShape::None => {
+            // The block's static renderer paints its own outline; nothing here.
         }
     }
 }
@@ -1091,42 +1097,328 @@ pub fn render_manual_switch(
 /// operators in order ('+' or '-').
 pub fn render_sum_block(
     painter: &egui::Painter,
-    block: &Block,
     rect: &Rect,
     font_scale: f32,
-    _name_font_factor: f32,
+    operators: &[char],
+    round: bool,
+    colors: BodyColors,
 ) {
-    let operators: Vec<char> = block
-        .properties
-        .get("Inputs")
-        .map(|s| s.chars().skip(1).collect())
-        .unwrap_or_default();
-    let left_op = operators.first().copied().unwrap_or('+');
-    let bottom_op = operators.get(1).copied().unwrap_or('+');
+    let stroke = Stroke::new((1.6 * font_scale).clamp(1.0, 3.0), colors.border);
+    if round {
+        let radius = rect.size().min_elem() / 2.0;
+        painter.circle(rect.center(), radius, colors.fill, stroke);
+    } else {
+        painter.rect_filled(*rect, 4.0, colors.fill);
+        painter.rect_stroke(*rect, 4.0, stroke, egui::StrokeKind::Inside);
+    }
 
-    let font_size = (rect.height() * 0.32).clamp(8.0, 22.0) * font_scale;
-    let color = Color32::from_rgb(32, 32, 32);
-    let font_id = egui::FontId::monospace(font_size);
+    let font_size = (rect.height() * 0.34).clamp(8.0, 22.0) * font_scale;
+    let font_id = egui::FontId::proportional(font_size);
+    let text = colors.text;
 
-    // Left input operator – left quarter of the circle, vertically centred
-    let left_pos = Pos2::new(rect.left() + rect.width() * 0.22, rect.center().y);
-    painter.text(
-        left_pos,
-        egui::Align2::CENTER_CENTER,
-        left_op.to_string(),
-        font_id.clone(),
-        color,
+    if round {
+        // Classic round Sum: first operator on the left, second at the bottom
+        // (matching the bottom-placed second input port).
+        let left_op = operators.first().copied().unwrap_or('+');
+        let bottom_op = operators.get(1).copied().unwrap_or('+');
+        painter.text(
+            Pos2::new(rect.left() + rect.width() * 0.26, rect.center().y),
+            Align2::CENTER_CENTER,
+            sign_str(left_op),
+            font_id.clone(),
+            text,
+        );
+        painter.text(
+            Pos2::new(rect.center().x, rect.bottom() - rect.height() * 0.24),
+            Align2::CENTER_CENTER,
+            sign_str(bottom_op),
+            font_id,
+            text,
+        );
+    } else {
+        // Rectangular Add: stack the per-input signs down the left edge.
+        let ops: &[char] = if operators.is_empty() {
+            &['+', '+']
+        } else {
+            operators
+        };
+        let n = ops.len();
+        for (i, op) in ops.iter().enumerate() {
+            let f = (i as f32 + 1.0) / (n as f32 + 1.0);
+            painter.text(
+                Pos2::new(
+                    rect.left() + rect.width() * 0.24,
+                    rect.top() + f * rect.height(),
+                ),
+                Align2::CENTER_CENTER,
+                sign_str(*op),
+                font_id.clone(),
+                text,
+            );
+        }
+    }
+}
+
+/// Resolved body colors (fill / outline / interior text) passed to the
+/// self-painting metadata-aware renderers (Sum, Logic, Product …).
+#[derive(Clone, Copy)]
+pub struct BodyColors {
+    pub fill: Color32,
+    pub border: Color32,
+    pub text: Color32,
+}
+
+/// Map a Sum/Product operator char to a display glyph (proper minus / division
+/// signs instead of the ASCII forms).
+fn sign_str(op: char) -> &'static str {
+    match op {
+        '-' => "\u{2212}", // −
+        '/' => "\u{00F7}", // ÷
+        '*' => "\u{00D7}", // ×
+        _ => "+",
+    }
+}
+
+/// Parse a Simulink `Inputs` string into per-port operator chars.
+///
+/// Accepts numeric forms (`"2"` → two `+`), sign strings (`"+-"`, `"|++"` –
+/// the `|` spacer and other layout chars are ignored) for Sum, and `*`/`/`
+/// forms for Product.
+pub fn parse_input_operators(inputs: &str, default: char) -> Vec<char> {
+    let s = inputs.trim();
+    if s.is_empty() {
+        return vec![default, default];
+    }
+    if let Ok(n) = s.parse::<usize>() {
+        return vec![default; n.max(1)];
+    }
+    let ops: Vec<char> = s
+        .chars()
+        .filter(|c| matches!(c, '+' | '-' | '*' | '/'))
+        .collect();
+    if ops.is_empty() {
+        vec![default, default]
+    } else {
+        ops
+    }
+}
+
+/// Draw a Product/Divide block interior (the shared passes draw the body).
+///
+/// When every input multiplies, a single centred `×` is shown (Simulink's
+/// element-wise product icon).  When any input divides, the per-port `×`/`÷`
+/// signs are stacked down the left edge.  Matrix multiplication adds brackets.
+pub fn render_product_block(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    operators: &[char],
+    matrix: bool,
+    text: Color32,
+) {
+    let has_div = operators.contains(&'/');
+    if !has_div {
+        let font_size = (rect.height() * 0.5).clamp(9.0, 30.0) * font_scale;
+        let font_id = egui::FontId::proportional(font_size);
+        let glyph = if matrix { "[\u{00D7}]" } else { "\u{00D7}" };
+        painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font_id, text);
+        return;
+    }
+    let font_size = (rect.height() * 0.34).clamp(8.0, 22.0) * font_scale;
+    let font_id = egui::FontId::proportional(font_size);
+    let n = operators.len().max(1);
+    for (i, op) in operators.iter().enumerate() {
+        let f = (i as f32 + 1.0) / (n as f32 + 1.0);
+        painter.text(
+            Pos2::new(
+                rect.left() + rect.width() * 0.30,
+                rect.top() + f * rect.height(),
+            ),
+            Align2::CENTER_CENTER,
+            sign_str(*op),
+            font_id.clone(),
+            text,
+        );
+    }
+}
+
+/// Draw a Logic (Logical Operator) block.
+///
+/// `icon_shape` selects between the rectangular text box (`"rectangular"`,
+/// Simulink's default) and the distinctive IEEE gate symbol (`"distinctive"`).
+/// `operator` selects the gate (AND/OR/NOT/NAND/NOR/XOR/NXOR).  The block owns
+/// its whole body (shape [`crate::simulink_libraries::types::SimulinkShape::None`]).
+pub fn render_logic_block(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    operator: &str,
+    icon_shape: &str,
+    colors: BodyColors,
+) {
+    let stroke = Stroke::new((1.6 * font_scale).clamp(1.0, 3.0), colors.border);
+    let op = operator.trim().to_uppercase();
+
+    if !icon_shape.eq_ignore_ascii_case("distinctive") {
+        painter.rect_filled(*rect, 4.0, colors.fill);
+        painter.rect_stroke(*rect, 4.0, stroke, egui::StrokeKind::Inside);
+        let label = if op.is_empty() { "AND".to_string() } else { op };
+        let font_size = (rect.height() * 0.30).clamp(7.0, 20.0) * font_scale;
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(font_size),
+            colors.text,
+        );
+        return;
+    }
+
+    let (base, negated) = match op.as_str() {
+        "NAND" => (GateBase::And, true),
+        "NOR" => (GateBase::Or, true),
+        "NXOR" | "XNOR" => (GateBase::Xor, true),
+        "XOR" => (GateBase::Xor, false),
+        "OR" => (GateBase::Or, false),
+        "NOT" => (GateBase::Not, true),
+        _ => (GateBase::And, false),
+    };
+
+    let bubble_r = (rect.height() * 0.10).clamp(2.0, 6.0);
+    let body = if negated {
+        Rect::from_min_max(
+            rect.min,
+            Pos2::new(rect.right() - 2.0 * bubble_r, rect.bottom()),
+        )
+    } else {
+        *rect
+    };
+
+    let (points, extra_arc) = match base {
+        GateBase::And => (and_gate_path(&body), None),
+        GateBase::Or => (or_gate_path(&body, false), None),
+        GateBase::Xor => (or_gate_path(&body, false), Some(xor_back_arc(&body))),
+        GateBase::Not => (not_gate_path(&body), None),
+    };
+
+    painter.add(egui::Shape::Path(egui::epaint::PathShape {
+        points,
+        closed: true,
+        fill: colors.fill,
+        stroke: stroke.into(),
+    }));
+    if let Some(arc) = extra_arc {
+        painter.add(egui::Shape::line(arc, stroke));
+    }
+    if negated {
+        let c = Pos2::new(body.right() + bubble_r, body.center().y);
+        painter.circle(c, bubble_r, colors.fill, stroke);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GateBase {
+    And,
+    Or,
+    Xor,
+    Not,
+}
+
+fn quad_bezier(p0: Pos2, ctrl: Pos2, p1: Pos2, n: usize) -> Vec<Pos2> {
+    (0..=n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let u = 1.0 - t;
+            Pos2::new(
+                u * u * p0.x + 2.0 * u * t * ctrl.x + t * t * p1.x,
+                u * u * p0.y + 2.0 * u * t * ctrl.y + t * t * p1.y,
+            )
+        })
+        .collect()
+}
+
+/// D-shaped AND gate outline (flat left/top/bottom, semicircular right).
+fn and_gate_path(r: &Rect) -> Vec<Pos2> {
+    let (l, rt, t, b, cy, h) = (
+        r.left(),
+        r.right(),
+        r.top(),
+        r.bottom(),
+        r.center().y,
+        r.height(),
     );
+    let rad = h * 0.5;
+    let flat_x = (rt - rad).max(l + r.width() * 0.15);
+    let center = Pos2::new(flat_x, cy);
+    let mut pts = vec![Pos2::new(l, t), Pos2::new(flat_x, t)];
+    let n = 16;
+    for i in 0..=n {
+        let th = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * (i as f32 / n as f32);
+        pts.push(Pos2::new(
+            center.x + rad * th.cos(),
+            center.y + rad * th.sin(),
+        ));
+    }
+    pts.push(Pos2::new(l, b));
+    pts
+}
 
-    // Bottom input operator – horizontally centred, bottom quarter of the circle
-    let bottom_pos = Pos2::new(rect.center().x, rect.bottom() - rect.height() * 0.22);
-    painter.text(
-        bottom_pos,
-        egui::Align2::CENTER_CENTER,
-        bottom_op.to_string(),
-        font_id,
-        color,
+/// Curved OR gate outline (pointed right, concave left back edge).
+fn or_gate_path(r: &Rect, _xor: bool) -> Vec<Pos2> {
+    let (l, rt, t, b, cy, w) = (
+        r.left(),
+        r.right(),
+        r.top(),
+        r.bottom(),
+        r.center().y,
+        r.width(),
     );
+    let tip = Pos2::new(rt, cy);
+    let mut pts = Vec::new();
+    // Top edge: top-left → tip.
+    pts.extend(quad_bezier(
+        Pos2::new(l, t),
+        Pos2::new(l + w * 0.60, t),
+        tip,
+        14,
+    ));
+    // Bottom edge: tip → bottom-left.
+    pts.extend(quad_bezier(
+        tip,
+        Pos2::new(l + w * 0.60, b),
+        Pos2::new(l, b),
+        14,
+    ));
+    // Back (left) concave edge: bottom-left → top-left, bulging right.
+    pts.extend(quad_bezier(
+        Pos2::new(l, b),
+        Pos2::new(l + w * 0.22, cy),
+        Pos2::new(l, t),
+        12,
+    ));
+    pts
+}
+
+/// The extra concave back stroke drawn to the left of an XOR gate.
+fn xor_back_arc(r: &Rect) -> Vec<Pos2> {
+    let (l, t, b, cy, w) = (r.left(), r.top(), r.bottom(), r.center().y, r.width());
+    let x = l - w * 0.12;
+    quad_bezier(
+        Pos2::new(x, t),
+        Pos2::new(x + w * 0.22, cy),
+        Pos2::new(x, b),
+        12,
+    )
+}
+
+/// Right-pointing triangle for the NOT (buffer) gate; the inversion bubble is
+/// drawn separately by the caller.
+fn not_gate_path(r: &Rect) -> Vec<Pos2> {
+    vec![
+        Pos2::new(r.left(), r.top()),
+        Pos2::new(r.right(), r.center().y),
+        Pos2::new(r.left(), r.bottom()),
+    ]
 }
 
 /// Render Goto/From blocks with their GotoTag label instead of port labels

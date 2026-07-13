@@ -14,14 +14,81 @@ use crate::model::Block;
 
 use super::types::RenderContext;
 
-/// Static renderer for the Sum block (draws the +/- operators).
-pub fn static_sum(painter: &Painter, block: &Block, rect: &Rect, ctx: &RenderContext<'_>) -> bool {
+/// Resolved body colors for a self-painting renderer.
+fn body_colors(ctx: &RenderContext<'_>) -> crate::egui_app::render::BodyColors {
+    crate::egui_app::render::BodyColors {
+        fill: ctx.fill_color,
+        border: ctx.border_color,
+        text: ctx.text_color,
+    }
+}
+
+/// Static renderer for the Sum block. Reads `IconShape` (round vs rectangular)
+/// and `Inputs` (per-port +/- signs) from metadata and paints its own body.
+pub fn static_sum(painter: &Painter, _block: &Block, rect: &Rect, ctx: &RenderContext<'_>) -> bool {
+    let round = !ctx.metadata.get("IconShape").is_some_and(|s| {
+        let s = s.trim();
+        s.eq_ignore_ascii_case("rectangular") || s.eq_ignore_ascii_case("rect")
+    });
+    let ops = crate::egui_app::render::parse_input_operators(
+        ctx.metadata.get("Inputs").unwrap_or_default(),
+        '+',
+    );
     crate::egui_app::render::render_sum_block(
         painter,
-        block,
         rect,
         ctx.font_scale,
-        ctx.name_font_factor,
+        &ops,
+        round,
+        body_colors(ctx),
+    );
+    true
+}
+
+/// Static renderer for the Logic (Logical Operator) block. Reads `Operator`
+/// (gate kind) and `IconShape` (rectangular text vs distinctive gate).
+pub fn static_logic(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let operator = ctx.metadata.get("Operator").unwrap_or("AND");
+    let icon_shape = ctx.metadata.get("IconShape").unwrap_or("rectangular");
+    crate::egui_app::render::render_logic_block(
+        painter,
+        rect,
+        ctx.font_scale,
+        operator,
+        icon_shape,
+        body_colors(ctx),
+    );
+    true
+}
+
+/// Static renderer for the Product block. Reads `Inputs` (×/÷ per port) and
+/// `Multiplication` (element-wise vs matrix). The shared passes draw the body.
+pub fn static_product(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let ops = crate::egui_app::render::parse_input_operators(
+        ctx.metadata.get("Inputs").unwrap_or_default(),
+        '*',
+    );
+    let matrix = ctx
+        .metadata
+        .get("Multiplication")
+        .is_some_and(|s| s.to_lowercase().contains("matrix"));
+    crate::egui_app::render::render_product_block(
+        painter,
+        rect,
+        ctx.font_scale,
+        &ops,
+        matrix,
+        ctx.text_color,
     );
     true
 }

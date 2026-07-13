@@ -7,6 +7,7 @@
 #![cfg(feature = "egui")]
 
 use crate::simulink_libraries::labels;
+use crate::simulink_libraries::renderers;
 use crate::simulink_libraries::types::{
     BlockLabelPolicy, IOPorts, MetadataKey, SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
 };
@@ -100,8 +101,12 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Logical Operator"])
         .with_description("Perform logical operation (AND, OR, NOT, ...)")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_metadata_keys(&[MetadataKey::with_default("Operator", "AND")])
-        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::logic_operator)),
+        .with_shape(SimulinkShape::None)
+        .with_metadata_keys(&[
+            MetadataKey::with_default("Operator", "AND"),
+            MetadataKey::with_default("IconShape", "rectangular"),
+        ])
+        .with_static_renderer(renderers::static_logic),
 
     SimulinkBlockDefinition::new("RelationalOperator", "Logic and Bit Operations")
         .with_aliases(&["Relational Operator"])

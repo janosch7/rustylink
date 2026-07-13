@@ -489,6 +489,12 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 b.commented,
             );
             let fg = contrast_color(body_bg);
+            let border_color = if monochrome && !block_has_model_color(b) {
+                monochrome_block_border(dark_mode)
+            } else {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+            };
             let params = crate::simulink_libraries::render::InteriorParams {
                 live_mode: false,
                 font_scale,
@@ -499,6 +505,8 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 port_y: None,
                 port_label_widths: None,
                 text_color: fg,
+                fill_color: body_bg,
+                border_color,
             };
             crate::simulink_libraries::render::render_block_interior(
                 ui.painter(),
@@ -509,12 +517,6 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Body outline (shape-aware, shared with the viewer).
             if !b.commented {
-                let border_color = if monochrome && !block_has_model_color(b) {
-                    monochrome_block_border(dark_mode)
-                } else {
-                    let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
-                    Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
-                };
                 crate::egui_app::render::stroke_block_body(
                     ui.painter(),
                     r_screen,

@@ -2873,6 +2873,8 @@ pub(crate) fn update_internal(
                             port_y: coords_ref,
                             port_label_widths: icon_port_label_widths,
                             text_color: fg,
+                            fill_color: *bg,
+                            border_color,
                         };
                         live_fn(app, ui, b, r_screen, &ctx)
                     } else {
@@ -2892,6 +2894,8 @@ pub(crate) fn update_internal(
                         port_y: coords_ref,
                         port_label_widths: icon_port_label_widths,
                         text_color: fg,
+                        fill_color: *bg,
+                        border_color,
                     };
                     crate::simulink_libraries::render::render_block_interior(
                         &painter, b, r_screen, &params,
