@@ -155,7 +155,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             collect_branch_dsts(b, &mut outputs);
                         }
                         egui::CollapsingHeader::new("Inputs")
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
                                 if let Some(src) = &line.src {
                                     let bname = sys
@@ -200,7 +200,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                                 }
                             });
                         egui::CollapsingHeader::new("Outputs")
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
                                 if outputs.is_empty() {
                                     ui.label("<none>");

@@ -345,7 +345,7 @@ fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Colo
     painter.rect_stroke(
         marker_rect,
         4.0,
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -542,8 +542,8 @@ pub(crate) fn update_internal(
                 app.move_mode_enabled = !app.move_mode_enabled;
             }
             if app.move_mode_enabled {
-                let undo_btn = egui::Button::new("Undo");
-                let redo_btn = egui::Button::new("Redo");
+                let undo_btn = egui::Button::new(format!("{} Undo", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE));
+                let redo_btn = egui::Button::new(format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE));
                 if ui
                     .add_enabled(app.viewer_history.can_undo(), undo_btn)
                     .clicked()
@@ -984,7 +984,7 @@ pub(crate) fn update_internal(
                     ui.painter().rect_stroke(
                         r_screen,
                         2.0,
-                        Stroke::new(1.0, border),
+                        Stroke::new(1.0_f32, border),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -1395,7 +1395,7 @@ pub(crate) fn update_internal(
         let port_counts = app.view_cache.port_counts.clone();
         let connected_ports = app.view_cache.connected_ports.clone();
 
-        let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
+        let line_stroke_default = Stroke::new(2.0_f32, Color32::LIGHT_GREEN);
 
         // Build lines in screen space and interactive hit rects
         #[allow(clippy::type_complexity)]
@@ -1912,7 +1912,7 @@ pub(crate) fn update_internal(
                     ui.painter().rect_stroke(
                         handle_rect.shrink(2.0),
                         1.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                         egui::StrokeKind::Outside,
                     );
                     if resp.drag_started() {
@@ -1998,7 +1998,7 @@ pub(crate) fn update_internal(
                     ui.painter().circle_stroke(
                         handle_rect.center(),
                         4.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                     );
                     if resp.drag_started() {
                         app.viewer_drag_state = ViewerDragState::BranchPointDrag {
@@ -2535,7 +2535,7 @@ pub(crate) fn update_internal(
                 let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
                 Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
             };
-            let stroke = Stroke::new(2.0, border_color);
+            let stroke = Stroke::new(2.0_f32, border_color);
             crate::egui_app::render::stroke_block_body(&painter, *r_screen, cfg.shape, stroke);
 
             fn paint_port_chevron_placed(
@@ -3225,7 +3225,7 @@ fn draw_viewer_resize_handles(
         ui.painter().rect_stroke(
             handle_rect.shrink(2.0),
             1.0,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
         if resp.drag_started() {
@@ -3316,7 +3316,7 @@ pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
     }
     painter.rect_filled(inner, 2.0, Color32::from_rgb(30, 30, 30));
     let color = Color32::from_rgb(50, 200, 50);
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let n = 40;
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {

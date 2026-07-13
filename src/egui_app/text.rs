@@ -126,7 +126,7 @@ impl AnnotationRichText {
                     fmt.italics = true;
                 }
                 if span.style.underline || line.resolved_style.underline {
-                    fmt.underline = Stroke::new(1.0, color);
+                    fmt.underline = Stroke::new(1.0_f32, color);
                 }
                 job.append(&span.text, 0.0, fmt);
             }

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, ARROW_CLOCKWISE};
 
 use crate::model::EndpointRef;
 
@@ -94,11 +95,11 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // Toolbar row
         ui.horizontal(|ui| {
             // Undo / redo
-            let undo_btn = ui.add_enabled(state.history.can_undo(), egui::Button::new("↶ Undo"));
+            let undo_btn = ui.add_enabled(state.history.can_undo(), egui::Button::new(format!("{ARROW_COUNTER_CLOCKWISE} Undo")));
             if undo_btn.clicked() {
                 state.undo();
             }
-            let redo_btn = ui.add_enabled(state.history.can_redo(), egui::Button::new("↷ Redo"));
+            let redo_btn = ui.add_enabled(state.history.can_redo(), egui::Button::new(format!("{ARROW_CLOCKWISE} Redo")));
             if redo_btn.clicked() {
                 state.redo();
             }
@@ -408,7 +409,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     ui.painter().rect_stroke(
                         r_screen,
                         2.0,
-                        Stroke::new(1.0, border),
+                        Stroke::new(1.0_f32, border),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -516,7 +517,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     ui.painter(),
                     r_screen,
                     cfg.shape,
-                    Stroke::new(1.5, border_color),
+                    Stroke::new(1.5_f32, border_color),
                 );
             }
 
@@ -525,7 +526,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 ui.painter().rect_stroke(
                     r_screen.expand(2.0),
                     6.0,
-                    Stroke::new(2.5, Color32::from_rgb(0, 120, 255)),
+                    Stroke::new(2.5_f32, Color32::from_rgb(0, 120, 255)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -847,7 +848,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN)
             };
             let is_selected = state.selection.is_line_selected(li);
-            let stroke_width = if is_selected { 3.5 } else { 2.0 };
+            let stroke_width = if is_selected { 3.5_f32 } else { 2.0_f32 };
             let stroke = Stroke::new(stroke_width, color);
 
             // Draw segments
@@ -882,7 +883,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 for seg in screen_pts.windows(2) {
                     ui.painter().line_segment(
                         [seg[0], seg[1]],
-                        Stroke::new(5.0, Color32::from_rgba_unmultiplied(0, 120, 255, 60)),
+                        Stroke::new(5.0_f32, Color32::from_rgba_unmultiplied(0, 120, 255, 60)),
                     );
                 }
 
@@ -1256,7 +1257,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             if let Some(start) = start_screen {
                 let end = to_screen(Pos2::new(current_x, current_y));
                 let conn_color = Color32::from_rgb(80, 200, 80);
-                let conn_stroke = Stroke::new(2.5, conn_color);
+                let conn_stroke = Stroke::new(2.5_f32, conn_color);
 
                 // Draw orthogonal routing preview
                 let mid_x = (start.x + end.x) / 2.0;
@@ -1282,7 +1283,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                         ui.painter().circle_stroke(
                             snap_screen,
                             8.0,
-                            Stroke::new(2.0, Color32::from_rgb(50, 255, 50)),
+                            Stroke::new(2.0_f32, Color32::from_rgb(50, 255, 50)),
                         );
                         ui.painter().circle_filled(
                             snap_screen,
@@ -1311,7 +1312,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             ui.painter().rect_stroke(
                 sel_rect,
                 0.0,
-                Stroke::new(1.0, Color32::from_rgb(0, 120, 255)),
+                Stroke::new(1.0_f32, Color32::from_rgb(0, 120, 255)),
                 egui::StrokeKind::Outside,
             );
         }
@@ -1942,7 +1943,7 @@ fn draw_grid(
     let end_y = (br.y / grid).ceil() as i32 * grid_size;
 
     let grid_color = Color32::from_rgba_unmultiplied(100, 100, 100, 30);
-    let grid_stroke = Stroke::new(0.5, grid_color);
+    let grid_stroke = Stroke::new(0.5_f32, grid_color);
 
     let mut x = start_x;
     while x <= end_x {
@@ -2229,7 +2230,7 @@ fn draw_resize_handles(
         ui.painter().rect_stroke(
             Rect::from_center_size(*pos, Vec2::splat(handle_size)),
             0.0,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
 

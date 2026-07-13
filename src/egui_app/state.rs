@@ -351,9 +351,9 @@ pub struct ComputedViewCache {
     /// Avoids re-hashing the entire tree every frame when the model is unchanged.
     cached_sig_gen: u64,
     /// The subsystem path for which this cache was computed.
-    cached_path: Vec<String>,
+    pub cached_path: Vec<String>,
     /// Model generation at which the cache was computed.
-    cached_gen: u64,
+    pub cached_gen: u64,
 }
 
 impl Default for ComputedViewCache {
