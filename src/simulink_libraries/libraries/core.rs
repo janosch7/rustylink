@@ -58,7 +58,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Terminator", "Sinks")
         .with_description("Terminate an unconnected output port")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
-        .with_icon(icon("⏹")),
+        .with_icon(icon("⊣")),
     // ── Ports & subsystems ─────────────────────────────────────────────
     SimulinkBlockDefinition::new("Inport", "Ports & Subsystems")
         .with_description("Create an input port for a subsystem")

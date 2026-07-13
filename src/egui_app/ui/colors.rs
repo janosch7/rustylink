@@ -166,32 +166,38 @@ pub fn block_fill_color(
     hash_color(&block.block_type, 0.35, 0.90)
 }
 
-/// Neutral block fill used in "less colorful" mode.  A light gray in both
-/// themes; kept slightly lighter in dark mode so the body stays visible.
+/// Neutral block fill used in the flat "less colorful" (Simulink-style) mode.
+///
+/// Light mode uses near-white bodies (like real Simulink), so blocks read as
+/// flat white cards delineated only by a thin border.  Dark mode uses a light
+/// gray body that stays clearly visible against the dark canvas.
 pub fn monochrome_block_fill(dark_mode: bool) -> Color32 {
     if dark_mode {
-        Color32::from_rgb(200, 202, 208)
+        Color32::from_rgb(210, 212, 216)
     } else {
-        Color32::from_rgb(224, 226, 230)
+        Color32::from_rgb(250, 250, 250)
     }
 }
 
-/// Border for blocks drawn in "less colorful" mode, so a light-gray body stays
-/// distinguishable from the canvas (especially in light themes).
+/// Thin border for blocks drawn in the flat "less colorful" mode: a crisp
+/// near-black outline in light mode (matching Simulink's flat block look), and
+/// a mid-gray outline in dark mode to delineate the light-gray body edges.
 pub fn monochrome_block_border(dark_mode: bool) -> Color32 {
     if dark_mode {
-        Color32::from_rgb(150, 152, 158)
-    } else {
         Color32::from_rgb(120, 122, 130)
+    } else {
+        Color32::from_rgb(90, 92, 100)
     }
 }
 
-/// Neutral signal-line color used in "less colorful" mode.
+/// Neutral signal-line color used in the flat "less colorful" mode.  Near-black
+/// in light mode (visible on the light canvas and white blocks) and light gray
+/// in dark mode (visible on the dark canvas).
 pub fn monochrome_line_color(dark_mode: bool) -> Color32 {
     if dark_mode {
-        Color32::from_rgb(170, 172, 178)
+        Color32::from_rgb(188, 190, 196)
     } else {
-        Color32::from_rgb(105, 107, 115)
+        Color32::from_rgb(70, 72, 80)
     }
 }
 

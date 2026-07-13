@@ -159,10 +159,6 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             ui.separator();
             ui.checkbox(&mut state.app.show_block_names_default, "Block names");
-            ui.checkbox(&mut state.app.monochrome, "Less color")
-                .on_hover_text(
-                    "Render blocks and signal lines in neutral gray (areas keep their colors)",
-                );
             ui.label("Name size");
             ui.add(
                 egui::DragValue::new(&mut state.app.block_name_font_factor)
@@ -297,9 +293,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let base_scale = sx.min(sy).max(0.1);
 
     if state.app.reset_view {
+        // Fit every block into the viewport and centre the fitted content so
+        // all blocks are visible in the screen rect (not anchored to a corner).
         state.app.zoom = 1.0;
-        state.app.pan = Vec2::ZERO;
+        let extra_x = (avail_size.x - 2.0 * margin - bb.width() * base_scale).max(0.0);
+        let extra_y = (avail_size.y - 2.0 * margin - bb.height() * base_scale).max(0.0);
+        state.app.pan = Vec2::new(extra_x * 0.5, extra_y * 0.5);
         state.app.reset_view = false;
+        ui.ctx().request_repaint();
     }
 
     // Central panel rendering
@@ -384,6 +385,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             Pos2::new(avail.left() + margin, avail.top() + margin),
             avail.center(),
             &mut state.app.reset_view,
+            &mut state.app.monochrome,
         );
 
         // Build SID maps
@@ -1047,10 +1049,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 state.app.block_name_font_factor,
             );
 
+            // Block-name labels sit on the canvas (not on the block body), so
+            // they must contrast with the canvas background — otherwise a dark
+            // glyph (chosen for a light block fill) is invisible in dark mode.
+            let _ = bg;
             let fg = if b.commented {
                 Color32::GRAY
             } else {
-                contrast_color(bg)
+                contrast_color(ui.visuals().panel_fill)
             };
 
             let left = r_screen.left() - left_extra;
