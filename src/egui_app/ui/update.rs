@@ -3,7 +3,7 @@ use super::colors::{
     contrast_color, monochrome_block_border, monochrome_line_color,
 };
 use super::corner_ops;
-use super::helpers::{is_block_subsystem, record_interaction};
+use super::helpers::record_interaction;
 use super::line_coloring;
 use super::signal_routing;
 use super::types::{ClickAction, UpdateResponse};
@@ -826,19 +826,36 @@ pub(crate) fn update_internal(
             Some(s) => s,
             None => return,
         };
-        // Clone lines for use inside the closure (avoids borrowing app.root across closure)
-        let sys_lines: Vec<crate::model::Line> = sys.lines.clone();
-        // Clone annotations for use inside the closure
-        let sys_annotations: Vec<crate::model::Annotation> = sys.annotations.iter()
-            .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
-            .cloned()
-            .collect();
-        // Shallow-clone blocks (skip subsystem trees) to avoid borrow conflicts
-        // with &mut app in the closure below, while minimizing clone cost.
-        let owned_blocks: Vec<crate::model::Block> = sys.blocks.iter()
-            .filter(|b| parse_block_rect(b).is_some())
-            .map(shallow_clone_block)
-            .collect();
+        // Use cached cloned data when the path and generation haven't changed,
+        // avoiding expensive per-frame cloning of all blocks, lines, and annotations.
+        // We use std::mem::take to move data out of the cache (zero-clone) and
+        // restore it after the closure. If we return early, the cache is
+        // invalidated and will be rebuilt next frame.
+        let cache_gen = app.view_cache.generation;
+        let cache_valid = app.view_cache.is_valid(&app.path, cache_gen)
+            && !app.view_cache.cached_owned_blocks.is_empty();
+        if !cache_valid {
+            app.view_cache.cached_sys_lines = sys.lines.clone();
+            app.view_cache.cached_sys_annotations = sys.annotations.iter()
+                .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+                .cloned()
+                .collect();
+            app.view_cache.cached_owned_blocks = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .map(shallow_clone_block)
+                .collect();
+            app.view_cache.cached_subsystem_block_lookup = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
+                    && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+                .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
+                .collect();
+        }
+        // Move data out of cache to avoid cloning — will be restored after closure.
+        let sys_lines: Vec<crate::model::Line> = std::mem::take(&mut app.view_cache.cached_sys_lines);
+        let sys_annotations: Vec<crate::model::Annotation> = std::mem::take(&mut app.view_cache.cached_sys_annotations);
+        let owned_blocks: Vec<crate::model::Block> = std::mem::take(&mut app.view_cache.cached_owned_blocks);
+        let subsystem_block_lookup: HashMap<String, crate::model::Block> = std::mem::take(&mut app.view_cache.cached_subsystem_block_lookup);
         let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
             .iter()
             .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
@@ -857,6 +874,11 @@ pub(crate) fn update_internal(
                 Color32::YELLOW,
                 "No blocks or annotations with positions to render",
             );
+            // Restore cache data before early return.
+            app.view_cache.cached_sys_lines = sys_lines;
+            app.view_cache.cached_sys_annotations = sys_annotations;
+            app.view_cache.cached_owned_blocks = owned_blocks;
+            app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
             return;
         }
         let mut content_bb = blocks.first()
@@ -1199,11 +1221,15 @@ pub(crate) fn update_internal(
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
+                        let block_for_response = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .unwrap_or_else(|| (*b).clone());
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Block {
                                 action: ClickAction::Secondary,
-                                block: (*b).clone(),
+                                block: block_for_response,
                                 handled: false,
                             },
                         );
@@ -1239,9 +1265,13 @@ pub(crate) fn update_internal(
                             deferred_constant_edits.push((sid.clone(), r_screen));
                             handled = true;
                         }
-                    if !handled && is_block_subsystem(b) {
-                        // Normal subsystem open
-                        block_to_open_subsystem = Some((*b).clone());
+                    if !handled && b.sid.as_ref().is_some_and(|sid| subsystem_block_lookup.contains_key(sid)) {
+                        // Normal subsystem open — use original block with subsystem intact
+                        block_to_open_subsystem = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .or_else(|| Some((*b).clone()));
+                        handled = true;
                     } else if !handled && b.block_type == "Reference" && b.subsystem.is_none() {
                         // Inform user when a Reference block can't be opened because the
                         // referenced library/subsystem was not resolved.
@@ -1263,11 +1293,15 @@ pub(crate) fn update_internal(
                         app.show_notification(msg, 5000);
                     }
                 }
+                let block_for_response = b.sid.as_ref()
+                    .and_then(|sid| subsystem_block_lookup.get(sid))
+                    .cloned()
+                    .unwrap_or_else(|| (*b).clone());
                 record_interaction(
                     &mut interaction,
                     UpdateResponse::Block {
                         action,
-                        block: (*b).clone(),
+                        block: block_for_response,
                         handled,
                     },
                 );
@@ -1383,18 +1417,18 @@ pub(crate) fn update_internal(
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
 
-            let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
                 &sys_lines,
-                &block_refs.iter().cloned().cloned().collect::<Vec<_>>(),
+                &owned_blocks,
             );
             app.view_cache.port_counts = pc;
             app.view_cache.connected_ports = cp;
             app.view_cache.mark_valid(&app.path, cache_gen);
         }
-        let line_colors = app.view_cache.line_colors.clone();
-        let port_counts = app.view_cache.port_counts.clone();
-        let connected_ports = app.view_cache.connected_ports.clone();
+        // Move cached computed values out to avoid per-frame cloning.
+        let line_colors = std::mem::take(&mut app.view_cache.line_colors);
+        let port_counts = std::mem::take(&mut app.view_cache.port_counts);
+        let connected_ports = std::mem::take(&mut app.view_cache.connected_ports);
 
         let line_stroke_default = Stroke::new(2.0_f32, Color32::LIGHT_GREEN);
 
@@ -3182,6 +3216,14 @@ pub(crate) fn update_internal(
                 );
             }
         }
+        // Restore cache data moved out before the closure (zero-clone round-trip).
+        app.view_cache.cached_sys_lines = sys_lines;
+        app.view_cache.cached_sys_annotations = sys_annotations;
+        app.view_cache.cached_owned_blocks = owned_blocks;
+        app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
+        app.view_cache.line_colors = line_colors;
+        app.view_cache.port_counts = port_counts;
+        app.view_cache.connected_ports = connected_ports;
     });
 
     // After the UI closure, call open_block_if_subsystem if needed

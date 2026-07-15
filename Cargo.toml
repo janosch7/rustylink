@@ -50,8 +50,8 @@ optional = true
 [dependencies.eframe]
 version = "0.34"
 optional = true
-default-features = true
-features = ["wgpu"]
+default-features = false
+features = ["glow", "default_fonts", "wayland", "x11"]
 
 [dependencies.syntect]
 version = "5.3"

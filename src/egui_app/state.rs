@@ -342,6 +342,15 @@ pub struct ComputedViewCache {
     /// Cached connection target graph reused across paint passes until invalidated.
     pub connection_target_resolver:
         Option<Arc<crate::connection_targets::ConnectionTargetResolver>>,
+    /// Cached shallow-cloned blocks for the current subsystem view.
+    /// Avoids re-cloning all blocks every frame when the path/model hasn't changed.
+    pub cached_owned_blocks: Vec<crate::model::Block>,
+    /// Cached cloned lines for the current subsystem view.
+    pub cached_sys_lines: Vec<crate::model::Line>,
+    /// Cached annotations (system + block-level) for the current subsystem view.
+    pub cached_sys_annotations: Vec<crate::model::Annotation>,
+    /// Cached subsystem block lookup map (SID → full block with subsystem).
+    pub cached_subsystem_block_lookup: HashMap<String, crate::model::Block>,
     /// Topology signature the cached resolver was built from.  The resolver
     /// depends only on model topology (not geometry) and spans the whole tree,
     /// so it is reused across subsystem navigation and layout-only edits and is
@@ -367,6 +376,10 @@ impl Default for ComputedViewCache {
             connection_target_resolver: None,
             cached_resolver_sig: None,
             cached_sig_gen: 0,
+            cached_owned_blocks: Vec::new(),
+            cached_sys_lines: Vec::new(),
+            cached_sys_annotations: Vec::new(),
+            cached_subsystem_block_lookup: HashMap::new(),
             cached_path: Vec::new(),
             cached_gen: 0,
         }
@@ -1013,7 +1026,7 @@ impl SubsystemApp {
         self.pan = Vec2::ZERO;
         self.view_bounds = None;
         self.zoom = self.default_zoom_by_path.get(&key).copied().unwrap_or(1.0);
-        self.reset_view = false;
+        self.reset_view = true;
     }
 
     pub fn remember_current_navigation_view_state(&mut self) {
