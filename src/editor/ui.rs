@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, ARROW_CLOCKWISE};
+use egui_phosphor::regular::{ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE};
 
 use crate::model::EndpointRef;
 
@@ -95,11 +95,17 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // Toolbar row
         ui.horizontal(|ui| {
             // Undo / redo
-            let undo_btn = ui.add_enabled(state.history.can_undo(), egui::Button::new(format!("{ARROW_COUNTER_CLOCKWISE} Undo")));
+            let undo_btn = ui.add_enabled(
+                state.history.can_undo(),
+                egui::Button::new(format!("{ARROW_COUNTER_CLOCKWISE} Undo")),
+            );
             if undo_btn.clicked() {
                 state.undo();
             }
-            let redo_btn = ui.add_enabled(state.history.can_redo(), egui::Button::new(format!("{ARROW_CLOCKWISE} Redo")));
+            let redo_btn = ui.add_enabled(
+                state.history.can_redo(),
+                egui::Button::new(format!("{ARROW_CLOCKWISE} Redo")),
+            );
             if redo_btn.clicked() {
                 state.redo();
             }
@@ -233,9 +239,15 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     };
     // Shallow-clone blocks (skip subsystem trees) to avoid borrow conflicts
     // with &mut state in the closure below, while minimizing clone cost.
-    let owned_blocks: Vec<crate::model::Block> = sys.blocks.iter()
+    let owned_blocks: Vec<crate::model::Block> = sys
+        .blocks
+        .iter()
         .filter(|b| parse_block_rect(b).is_some())
-        .map(|b| { let mut c = b.clone(); c.subsystem = None; c })
+        .map(|b| {
+            let mut c = b.clone();
+            c.subsystem = None;
+            c
+        })
         .collect();
     let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
         .iter()

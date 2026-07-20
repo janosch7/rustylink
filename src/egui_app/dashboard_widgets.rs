@@ -247,7 +247,11 @@ fn paint_slider_visual(
     let handle_x = egui::lerp(track.left()..=track.right(), fraction.clamp(0.0, 1.0));
     let handle_center = Pos2::new(handle_x, track.center().y);
     painter.circle_filled(handle_center, handle_r, Color32::WHITE);
-    painter.circle_stroke(handle_center, handle_r, Stroke::new(1.2_f32, palette.border));
+    painter.circle_stroke(
+        handle_center,
+        handle_r,
+        Stroke::new(1.2_f32, palette.border),
+    );
 
     let tick_top = track.bottom() + 2.0;
     let tick_bottom = tick_top + safe_clamp_f32(inner.height() * 0.10, 2.0, 6.0);
@@ -805,7 +809,11 @@ pub fn render_radio_button(
             break; // Don't overflow the rect
         }
         let cx = inner.left() + radio_r + 4.0;
-        painter.circle_stroke(Pos2::new(cx, y), radio_r, Stroke::new(1.0_f32, palette.border));
+        painter.circle_stroke(
+            Pos2::new(cx, y),
+            radio_r,
+            Stroke::new(1.0_f32, palette.border),
+        );
         if i == 0 {
             painter.circle_filled(Pos2::new(cx, y), radio_r * 0.55, palette.accent);
         }
@@ -1427,7 +1435,12 @@ pub fn render_linear_gauge(
         Pos2::new(inner.right(), cy + bar_h / 2.0),
     );
     painter.rect_filled(bar, 2.0, Color32::from_rgb(220, 220, 225));
-    painter.rect_stroke(bar, 2.0, Stroke::new(1.0_f32, BORDER), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        bar,
+        2.0,
+        Stroke::new(1.0_f32, BORDER),
+        egui::StrokeKind::Inside,
+    );
 
     // Scale ticks below bar
     let n_ticks = 11;
@@ -2447,7 +2460,11 @@ pub fn live_radio_button_group(
             break; // Don't overflow
         }
         let cx = inner.left() + radio_r + 4.0;
-        painter.circle_stroke(Pos2::new(cx, y), radio_r, Stroke::new(1.0_f32, palette.border));
+        painter.circle_stroke(
+            Pos2::new(cx, y),
+            radio_r,
+            Stroke::new(1.0_f32, palette.border),
+        );
         if index == selected {
             painter.circle_filled(Pos2::new(cx, y), radio_r * 0.55, palette.accent);
         }
@@ -2594,7 +2611,12 @@ pub fn live_slider_or_linear_gauge(
             Pos2::new(inner.right(), cy + bar_h / 2.0),
         );
         painter.rect_filled(bar, 2.0, Color32::from_rgb(220, 220, 225));
-        painter.rect_stroke(bar, 2.0, Stroke::new(1.0_f32, BORDER), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            bar,
+            2.0,
+            Stroke::new(1.0_f32, BORDER),
+            egui::StrokeKind::Inside,
+        );
         let n_ticks = 11;
         for index in 0..n_ticks {
             let tick_t = index as f32 / (n_ticks - 1) as f32;

@@ -539,8 +539,12 @@ pub(crate) fn update_internal(
                 app.move_mode_enabled = !app.move_mode_enabled;
             }
             if app.move_mode_enabled {
-                let undo_btn = egui::Button::new(format!("{} Undo", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE));
-                let redo_btn = egui::Button::new(format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE));
+                let undo_btn = egui::Button::new(format!(
+                    "{} Undo",
+                    egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE
+                ));
+                let redo_btn =
+                    egui::Button::new(format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE));
                 if ui
                     .add_enabled(app.viewer_history.can_undo(), undo_btn)
                     .clicked()
