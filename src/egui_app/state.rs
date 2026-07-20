@@ -784,7 +784,7 @@ impl SubsystemApp {
         self.block_click_handler = None;
     }
 
-    pub fn egui_id(&self, key: impl std::hash::Hash) -> egui::Id {
+    pub fn egui_id(&self, key: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
         egui::Id::new(("rustylink_viewer", self.instance_id, key))
     }
 
@@ -1177,7 +1177,7 @@ impl SubsystemApp {
 
 impl eframe::App for SubsystemApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             super::ui::update_with_info(self, ui);
         });
     }

@@ -110,7 +110,7 @@ pub fn clear_popout_state(viewer_instance_id: u64, scope_key: &str) {
 
 impl MiniScope {
     /// Create a new `MiniScope`.
-    pub fn new(_id: impl std::hash::Hash) -> Self {
+    pub fn new(_id: impl std::hash::Hash + std::fmt::Debug) -> Self {
         Self {
             signal_name: String::new(),
             next_x: 0.0,

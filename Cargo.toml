@@ -44,11 +44,11 @@ mask = []
 dashboard = ["egui"]
 
 [dependencies.egui]
-version = "0.34"
+version = "0.35"
 optional = true
 
 [dependencies.eframe]
-version = "0.34"
+version = "0.35"
 optional = true
 default-features = false
 features = ["glow", "default_fonts", "wayland", "x11"]
@@ -58,7 +58,7 @@ version = "5.3"
 optional = true
 
 [dependencies.egui_extras]
-version = "0.34"
+version = "0.35"
 optional = true
 default-features = false
 features = ["svg"]
@@ -75,9 +75,7 @@ optional = true
 features = ["compression"]
 
 [dependencies.liveplot]
-#git = "https://github.com/ulikoehler/liveplot-rs"
-#branch = "master"
-version = "2.0.6"
+path = "../liveplot-rs"
 optional = true
 default-features = false
 features = ["tiles", "fft", "parquet"]
@@ -86,7 +84,7 @@ features = ["tiles", "fft", "parquet"]
 version = "0.17.2"
 optional = true
 
-# Must track the same egui generation as `eframe`/`egui` (0.34) so the
+# Must track the same egui generation as `eframe`/`egui` (0.35) so the
 # `FontDefinitions` types match for `add_to_fonts`.
 [dependencies.egui-phosphor]
 version = "0.12"

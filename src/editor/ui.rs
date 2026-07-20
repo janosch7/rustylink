@@ -68,7 +68,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let path_snapshot = state.app.path.clone();
 
     // Top panel: breadcrumbs + search + edit toolbar
-    egui::Panel::top(state.app.egui_id("editor_top")).show_inside(ui, |ui| {
+    egui::Panel::top(state.app.egui_id("editor_top")).show(ui, |ui| {
         ui.horizontal(|ui| {
             let up_label = egui::RichText::new("⬆ Up");
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
@@ -231,7 +231,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let sys = match resolve_subsystem_by_vec(&state.app.root, &state.app.path) {
         Some(s) => s,
         None => {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.colored_label(Color32::RED, "Invalid path — nothing to render");
             });
             return;
@@ -285,7 +285,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let sys_lines: Vec<crate::model::Line> = sys.lines.clone();
 
     if blocks.is_empty() && annotations.is_empty() {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.colored_label(
                 Color32::YELLOW,
                 "No blocks with positions to render. Press 'A' to add blocks.",
@@ -328,7 +328,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     }
 
     // Central panel rendering
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         let avail = ui.available_rect_before_wrap();
 
         // Canvas interaction

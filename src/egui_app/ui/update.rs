@@ -482,7 +482,7 @@ pub(crate) fn update_internal(
     let mut clear_search = false;
     let path_snapshot = app.path.clone();
 
-    egui::Panel::top(app.egui_id("top_panel")).show_inside(ui, |ui| {
+    egui::Panel::top(app.egui_id("top_panel")).show(ui, |ui| {
         ui.horizontal(|ui| {
             let up_label = egui::RichText::new("⬆ Up");
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
@@ -724,7 +724,7 @@ pub(crate) fn update_internal(
     let block_menu_items_snapshot = app.block_menu_items.clone();
     let signal_menu_items_snapshot = app.signal_menu_items.clone();
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         if !system_valid {
             // Provide detailed diagnostics to help the user resolve missing subsystems / libraries.
             let requested = if app.path.is_empty() {
