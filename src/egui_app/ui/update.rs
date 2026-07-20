@@ -1124,7 +1124,7 @@ pub(crate) fn update_internal(
                 crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
-                        if let Some(enabled) = toggle_manual_switch_setting(app, b) {
+                        if toggle_manual_switch_setting(app, b) {
                                 #[cfg(feature = "dashboard")]
                                 {
                             app.queue_dashboard_control(
