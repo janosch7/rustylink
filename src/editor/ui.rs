@@ -251,10 +251,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         .collect();
     // Keep original blocks (with subsystem intact) for subsystem blocks so
     // that is_subsystem_block() checks in context menus and double-click work.
-    let subsystem_block_lookup: HashMap<String, crate::model::Block> = sys.blocks.iter()
+    let subsystem_block_lookup: HashMap<String, crate::model::Block> = sys
+        .blocks
+        .iter()
         .filter(|b| parse_block_rect(b).is_some())
-        .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
-            && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+        .filter(|b| {
+            (b.block_type == "SubSystem" || b.block_type == "Reference")
+                && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none())
+        })
         .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
         .collect();
     let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
@@ -1552,10 +1556,14 @@ fn block_context_menu(
         }
         ui.separator();
     }
-    let is_subsystem = block.sid.as_ref()
+    let is_subsystem = block
+        .sid
+        .as_ref()
         .is_some_and(|sid| subsystem_block_lookup.contains_key(sid));
     if is_subsystem && ui.button("Open Subsystem").clicked() {
-        let full_block: crate::model::Block = block.sid.as_ref()
+        let full_block: crate::model::Block = block
+            .sid
+            .as_ref()
             .and_then(|sid| subsystem_block_lookup.get(sid))
             .cloned()
             .unwrap_or_else(|| block.clone());
@@ -1879,8 +1887,14 @@ fn handle_block_double_click(
 ) {
     if is_code_block(block) {
         open_code_editor(state, block_idx, block);
-    } else if block.sid.as_ref().is_some_and(|sid| subsystem_block_lookup.contains_key(sid)) {
-        let full_block: crate::model::Block = block.sid.as_ref()
+    } else if block
+        .sid
+        .as_ref()
+        .is_some_and(|sid| subsystem_block_lookup.contains_key(sid))
+    {
+        let full_block: crate::model::Block = block
+            .sid
+            .as_ref()
             .and_then(|sid| subsystem_block_lookup.get(sid))
             .cloned()
             .unwrap_or_else(|| block.clone());

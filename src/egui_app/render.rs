@@ -987,6 +987,43 @@ pub fn draw_icon_spec(
     }
 }
 
+/// Draw a single-glyph [`IconSpec`] (Utf8 / Phosphor) rotated 90° clockwise,
+/// centered in `rect`.  Used only by the far-zoom dashboard fallback for the
+/// Toggle/Rocker switches, which Simulink draws vertically.  Non-glyph specs
+/// (Svg / Math) fall back to the unrotated [`draw_icon_spec`].
+pub fn draw_icon_spec_rotated_quarter(
+    painter: &egui::Painter,
+    rect: &Rect,
+    icon: &block_types::IconSpec,
+    color: Color32,
+) {
+    let glyph: &str = match icon {
+        block_types::IconSpec::Utf8(g) => g,
+        block_types::IconSpec::Phosphor(n) => n,
+        _ => {
+            draw_icon_spec(painter, rect, 1.0, icon, color, None);
+            return;
+        }
+    };
+    let avail = compute_icon_available_rect(rect, 1.0, None);
+    // The glyph is rotated, so its unrotated height must fit the available
+    // width (and vice versa) — size against the smaller dimension.
+    let target = avail.size().min_elem();
+    if target <= 1.0 {
+        return;
+    }
+    let font_id = egui::FontId::proportional(target * 0.7);
+    let galley = painter.layout_no_wrap(glyph.to_owned(), font_id, color);
+    let angle = std::f32::consts::FRAC_PI_2;
+    let rot = egui::emath::Rot2::from_angle(angle);
+    // TextShape rotates the galley around its `pos` (top-left); offset so the
+    // galley's visual center lands on the available rect's center.
+    let pos = avail.center() - rot * (galley.size() * 0.5);
+    let mut shape = egui::epaint::TextShape::new(pos, galley, color);
+    shape.angle = angle;
+    painter.add(shape);
+}
+
 /// Contrast color for a glyph icon drawn on this block's background.
 pub fn block_icon_color(block: &Block) -> Color32 {
     let cfg = get_block_type_cfg(block);

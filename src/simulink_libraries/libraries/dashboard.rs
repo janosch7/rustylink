@@ -236,7 +236,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "SliderSwitchBlock",
         "Slider Switch",
         "Two-position slider switch",
-        icon("⇅"),
+        // Same switch glyph as the Toggle/Rocker fallbacks, but drawn upright
+        // (the far-zoom path rotates only the Toggle/Rocker switches 90°).
+        ph(egui_phosphor::regular::TOGGLE_LEFT),
         IOPorts::None,
         static_slider_switch,
         live_slider_switch,

@@ -108,7 +108,10 @@ impl ConnectionTargetResolver {
         block: &Block,
     ) -> &[ConnectionTarget] {
         let key = block_cache_key(system_path, block);
-        self.block_targets.get(&key).map(Vec::as_slice).unwrap_or(&[])
+        self.block_targets
+            .get(&key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn line_targets_for_line(
@@ -127,7 +130,10 @@ impl ConnectionTargetResolver {
         line: &Line,
     ) -> &[ConnectionTarget] {
         let key = line_cache_key(system_path, line);
-        self.line_targets.get(&key).map(Vec::as_slice).unwrap_or(&[])
+        self.line_targets
+            .get(&key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     fn resolve_system(

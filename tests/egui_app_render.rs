@@ -314,11 +314,10 @@ fn icon_lookup_simulink_discrete_derivative() {
     );
     b.library_block_path = Some("simulink/Discrete/Discrete Derivative".to_string());
 
+    // The Discrete Derivative now uses a typeset fraction icon (K(z-1)/(Ts z))
+    // instead of the flat SVG, matching Simulink's block mask.
     let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(
-        cfg.icon,
-        Some(IconSpec::Svg("discrete/discrete_derivative.svg"))
-    );
+    assert_eq!(cfg.icon, Some(IconSpec::Math("frac:K(z-1)/Ts z")));
 }
 
 #[test]

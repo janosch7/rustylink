@@ -14,6 +14,11 @@ const fn svg(path: &'static str) -> SimulinkIcon {
     SimulinkIcon::Svg(path)
 }
 
+/// Typeset-math icon (superscript); see [`crate::egui_app::render::draw_math_icon`].
+const fn math(spec: &'static str) -> SimulinkIcon {
+    SimulinkIcon::Math(spec)
+}
+
 pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Identity Matrix", CAT)
         .with_aliases(&["IdentityMatrix"])
@@ -45,11 +50,11 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Transpose", CAT)
         .with_description("Transpose a matrix")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(svg("matrix/matrix_transpose.svg")),
+        .with_icon(math("sup:A^T")),
     SimulinkBlockDefinition::new("Hermitian Transpose", CAT)
         .with_description("Complex-conjugate (Hermitian) transpose")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(svg("matrix/hermitian_transpose.svg")),
+        .with_icon(math("sup:A^H")),
     SimulinkBlockDefinition::new("Matrix Square", CAT)
         .with_aliases(&["Square"])
         .with_description("Square a matrix (A*A)")

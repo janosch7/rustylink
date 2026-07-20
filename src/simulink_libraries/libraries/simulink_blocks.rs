@@ -37,6 +37,16 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
         .with_icon(math("frac:1/s")),
 
+    SimulinkBlockDefinition::new("TransferFcn", "Continuous")
+        .with_aliases(&["Transfer Fcn", "Transfer Function"])
+        .with_description("Linear transfer function (numerator/denominator in s)")
+        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
+        .with_metadata_keys(&[
+            MetadataKey::with_default("Numerator", "[1]"),
+            MetadataKey::with_default("Denominator", "[1 1]"),
+        ])
+        .with_static_renderer(renderers::static_transfer_fcn),
+
     SimulinkBlockDefinition::new("SecondOrderIntegrator", "Continuous")
         .with_aliases(&["Second-Order Integrator"])
         .with_description("Integrate twice: acceleration to position")
@@ -75,7 +85,15 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Delay", "Discrete")
         .with_description("Delay input by variable number of sample periods")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(math("sup:z^-n")),
+        .with_metadata_keys(&[MetadataKey::with_default("DelayLength", "2")])
+        .with_static_renderer(renderers::static_delay),
+
+    SimulinkBlockDefinition::new("DiscreteIntegrator", "Discrete")
+        .with_aliases(&["Discrete-Time Integrator", "Discrete Time Integrator"])
+        .with_description("Discrete-time integrator / accumulator")
+        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
+        .with_metadata_keys(&[MetadataKey::with_default("IntegratorMethod", "Integration: Forward Euler")])
+        .with_static_renderer(renderers::static_discrete_integrator),
 
     SimulinkBlockDefinition::new("UnitDelay", "Discrete")
         .with_aliases(&["Unit Delay"])
@@ -86,13 +104,13 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Difference", "Discrete")
         .with_description("Compute difference between successive samples")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("\u{0394}")),
+        .with_icon(math("frac:z-1/z")),
 
     SimulinkBlockDefinition::new("Discrete Derivative", "Discrete")
         .with_aliases(&["DiscreteDerivative"])
-        .with_description("Discrete-time derivative (Ku/Ts)")
+        .with_description("Discrete-time derivative K(z-1)/(Ts z)")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(SimulinkIcon::Svg("discrete/discrete_derivative.svg")),
+        .with_icon(math("frac:K(z-1)/Ts z")),
 
     SimulinkBlockDefinition::new("DiscretePulseGenerator", "Sources")
         .with_aliases(&["Discrete Pulse Generator", "Pulse Generator"])

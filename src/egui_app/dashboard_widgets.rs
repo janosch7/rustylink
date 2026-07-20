@@ -172,13 +172,28 @@ fn paint_dashboard_widget_icon(
     rect: &Rect,
     palette: WidgetPalette,
 ) {
-    // No block-type branching: draw the block's catalog icon (the single source
-    // of truth for its small-size representation).  When the definition carries
-    // no icon, fall back to a neutral field box.
+    // Draw the block's catalog icon (the single source of truth for its
+    // small-size representation).  When the definition carries no icon, fall
+    // back to a neutral field box.
     let def = crate::simulink_libraries::resolve_definition(block);
     if let Some(icon) = def.icon {
         let spec = crate::simulink_libraries::config::icon_to_spec(icon);
-        crate::egui_app::render::draw_icon_spec(painter, rect, 1.0, &spec, palette.text, None);
+        // Simulink draws the Toggle and Rocker switches vertically; rotate their
+        // minimized fallback glyph 90°.  The Slider Switch shares the same glyph
+        // but stays upright.
+        if matches!(
+            block.block_type.as_str(),
+            "ToggleSwitchBlock" | "RockerSwitchBlock"
+        ) {
+            crate::egui_app::render::draw_icon_spec_rotated_quarter(
+                painter,
+                rect,
+                &spec,
+                palette.text,
+            );
+        } else {
+            crate::egui_app::render::draw_icon_spec(painter, rect, 1.0, &spec, palette.text, None);
+        }
         return;
     }
     let inner = inner_rect(rect, 0.70);
