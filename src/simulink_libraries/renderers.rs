@@ -93,6 +93,42 @@ pub fn static_product(
     true
 }
 
+/// Static renderer for the Math Function block. Reads `Operator` and paints the
+/// matching typeset icon (superscript `eᵘ`/`u²`, overbar conjugate `ū`,
+/// fraction `1/u`, …) instead of the flat operator word.
+pub fn static_math_function(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let op = ctx.metadata.get("Operator").unwrap_or("exp").trim();
+    let spec: std::borrow::Cow<'_, str> = match op {
+        "exp" => "sup:e^u".into(),
+        "10^u" | "pow10" => "sup:10^u".into(),
+        "square" => "sup:u^2".into(),
+        "pow" | "power" => "sup:u^v".into(),
+        "sqrt" | "signedSqrt" | "rSqrt" => "\u{221A}u".into(),
+        "reciprocal" => "frac:1/u".into(),
+        "conj" => "over:u".into(),
+        "transpose" => "sup:u^T".into(),
+        "hermitian" => "sup:u^H".into(),
+        "magnitude^2" => "|u|\u{00B2}".into(),
+        "log10" => "log\u{2081}\u{2080}(u)".into(),
+        "log" => "ln(u)".into(),
+        other => other.into(),
+    };
+    crate::egui_app::render::draw_math_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
+}
+
 /// Static renderer for Goto/From blocks (draws the tag label).
 pub fn static_goto_from(
     painter: &Painter,

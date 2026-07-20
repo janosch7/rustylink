@@ -57,6 +57,7 @@ fn icon_desc(block: &Block) -> String {
             SimulinkIcon::Utf8(g) => glyph_desc(g),
             SimulinkIcon::Phosphor(_) => "<phosphor>".into(),
             SimulinkIcon::Svg(p) => format!("<svg:{p}>"),
+            SimulinkIcon::Math(s) => format!("<math:{s}>"),
         };
     }
     if def.shape != SimulinkShape::Rectangle {
@@ -67,6 +68,7 @@ fn icon_desc(block: &Block) -> String {
         Some(IconSpec::Utf8(g)) => glyph_desc(g),
         Some(IconSpec::Phosphor(_)) => "<phosphor>".into(),
         Some(IconSpec::Svg(p)) => format!("<svg:{p}>"),
+        Some(IconSpec::Math(s)) => format!("<math:{s}>"),
         None => "<QUESTION>".into(),
     }
 }

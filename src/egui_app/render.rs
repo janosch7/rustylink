@@ -607,6 +607,178 @@ pub fn render_center_glyph_maximized(
     );
 }
 
+/// Draw a small piece of typeset math (a horizontal fraction bar, a raised
+/// superscript, or an overbar) centred in `rect`.  Simulink draws these block
+/// icons as 2-D math that a single one-line glyph string can't reproduce, so we
+/// paint them here.  `spec` is a compact notation understood by this painter:
+///
+/// * `frac:NUM/DEN` – numerator over denominator with a horizontal bar
+///   (`frac:1/s`, `frac:(z-1)/z`, `frac:K(z-1)/Ts z`).
+/// * `sup:BASE^SUP` – `BASE` with a raised, smaller superscript
+///   (`sup:z^-2`, `sup:e^u`, `sup:u^2`).
+/// * `over:BASE` – `BASE` with an overbar (conjugate, e.g. `over:u` → `ū`).
+///
+/// Anything else is drawn as a plain maximised glyph (same as a `Utf8` icon).
+pub fn draw_math_icon(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    spec: &str,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    let avail = compute_icon_available_rect(rect, font_scale, port_label_widths);
+    if avail.width() <= 1.0 || avail.height() <= 1.0 {
+        return;
+    }
+    if let Some(rest) = spec.strip_prefix("frac:") {
+        let (num, den) = rest.split_once('/').unwrap_or((rest, ""));
+        draw_fraction(painter, &avail, num.trim(), den.trim(), color);
+    } else if let Some(rest) = spec.strip_prefix("sup:") {
+        let (base, sup) = rest.split_once('^').unwrap_or((rest, ""));
+        draw_superscript(painter, &avail, base, sup, color);
+    } else if let Some(base) = spec.strip_prefix("over:") {
+        draw_overbar(painter, &avail, base, color);
+    } else {
+        render_center_glyph_maximized(painter, rect, font_scale, spec, color, port_label_widths);
+    }
+}
+
+/// Font size (points) at which `text` fits within `max` bounds.
+fn fit_font_px(painter: &egui::Painter, text: &str, max: Vec2) -> f32 {
+    if text.is_empty() {
+        return 100.0;
+    }
+    let ref_px = 100.0_f32;
+    let g = painter.layout_no_wrap(
+        text.to_string(),
+        egui::FontId::proportional(ref_px),
+        Color32::TRANSPARENT,
+    );
+    let s = g.size();
+    if s.x <= 1e-3 || s.y <= 1e-3 {
+        return ref_px;
+    }
+    ref_px * (max.x / s.x).min(max.y / s.y)
+}
+
+fn text_width(painter: &egui::Painter, text: &str, font_px: f32) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    painter
+        .layout_no_wrap(
+            text.to_string(),
+            egui::FontId::proportional(font_px),
+            Color32::TRANSPARENT,
+        )
+        .size()
+        .x
+}
+
+/// Numerator over a horizontal bar over denominator.
+fn draw_fraction(painter: &egui::Painter, avail: &Rect, num: &str, den: &str, color: Color32) {
+    let row_max = Vec2::new(avail.width() * 0.94, avail.height() * 0.44);
+    let font_px = fit_font_px(painter, num, row_max)
+        .min(fit_font_px(painter, den, row_max))
+        .clamp(6.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let cx = avail.center().x;
+    let cy = avail.center().y;
+    let gap = font_px * 0.14;
+    painter.text(
+        Pos2::new(cx, cy - gap),
+        Align2::CENTER_BOTTOM,
+        num,
+        font.clone(),
+        color,
+    );
+    painter.text(
+        Pos2::new(cx, cy + gap),
+        Align2::CENTER_TOP,
+        den,
+        font,
+        color,
+    );
+    let bar_w = text_width(painter, num, font_px).max(text_width(painter, den, font_px)) * 1.08;
+    let stroke = Stroke::new((font_px * 0.07).clamp(1.0, 3.0), color);
+    painter.line_segment(
+        [
+            Pos2::new(cx - bar_w * 0.5, cy),
+            Pos2::new(cx + bar_w * 0.5, cy),
+        ],
+        stroke,
+    );
+}
+
+/// `base` with a smaller superscript raised above the baseline.
+fn draw_superscript(painter: &egui::Painter, avail: &Rect, base: &str, sup: &str, color: Color32) {
+    if sup.is_empty() {
+        let px = fit_font_px(painter, base, avail.size() * 0.9).clamp(6.0, 40.0);
+        painter.text(
+            avail.center(),
+            Align2::CENTER_CENTER,
+            base,
+            egui::FontId::proportional(px),
+            color,
+        );
+        return;
+    }
+    // Size so base (full) + superscript (0.62×, raised) fit the available box.
+    let sup_ratio = 0.62_f32;
+    let rise = 0.42_f32; // fraction of base height the superscript rises
+    let ref_px = 100.0_f32;
+    let bw = text_width(painter, base, ref_px);
+    let sw = text_width(painter, sup, ref_px * sup_ratio);
+    let total_w = bw + sw;
+    let total_h = ref_px * (1.0 + rise);
+    let font_px = if total_w <= 1e-3 {
+        ref_px
+    } else {
+        (ref_px * ((avail.width() * 0.94) / total_w).min((avail.height() * 0.94) / total_h))
+            .clamp(6.0, 40.0)
+    };
+    let base_font = egui::FontId::proportional(font_px);
+    let sup_font = egui::FontId::proportional(font_px * sup_ratio);
+    let run_w = text_width(painter, base, font_px) + text_width(painter, sup, font_px * sup_ratio);
+    let left = avail.center().x - run_w * 0.5;
+    let cy = avail.center().y;
+    let base_w = text_width(painter, base, font_px);
+    painter.text(
+        Pos2::new(left, cy),
+        Align2::LEFT_CENTER,
+        base,
+        base_font,
+        color,
+    );
+    painter.text(
+        Pos2::new(left + base_w, cy - font_px * rise * 0.5),
+        Align2::LEFT_CENTER,
+        sup,
+        sup_font,
+        color,
+    );
+}
+
+/// `base` with a horizontal overbar (Simulink's conjugate icon `ū`).
+fn draw_overbar(painter: &egui::Painter, avail: &Rect, base: &str, color: Color32) {
+    let font_px = fit_font_px(painter, base, avail.size() * Vec2::new(0.8, 0.78)).clamp(6.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let cx = avail.center().x;
+    let cy = avail.center().y + font_px * 0.08;
+    painter.text(Pos2::new(cx, cy), Align2::CENTER_CENTER, base, font, color);
+    let w = text_width(painter, base, font_px) * 1.05;
+    let bar_y = cy - font_px * 0.52;
+    let stroke = Stroke::new((font_px * 0.07).clamp(1.0, 3.0), color);
+    painter.line_segment(
+        [
+            Pos2::new(cx - w * 0.5, bar_y),
+            Pos2::new(cx + w * 0.5, bar_y),
+        ],
+        stroke,
+    );
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct SvgCacheKey {
     path: &'static str,
@@ -766,6 +938,9 @@ pub fn draw_icon_spec(
                 color,
                 port_label_widths,
             );
+        }
+        block_types::IconSpec::Math(spec) => {
+            draw_math_icon(painter, rect, font_scale, spec, color, port_label_widths);
         }
         block_types::IconSpec::Phosphor(name) => {
             let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
@@ -1220,7 +1395,16 @@ pub fn render_product_block(
     if !has_div {
         let font_size = (rect.height() * 0.5).clamp(9.0, 30.0) * font_scale;
         let font_id = egui::FontId::proportional(font_size);
-        let glyph = if matrix { "[\u{00D7}]" } else { "\u{00D7}" };
+        // A single multiply port collapses the input vector: Simulink shows the
+        // product-of-elements symbol `∏` rather than the element-wise `×`.
+        let collapse = matches!(operators, [c] if *c == '*');
+        let glyph = if matrix {
+            "[\u{00D7}]"
+        } else if collapse {
+            "\u{220F}" // ∏
+        } else {
+            "\u{00D7}" // ×
+        };
         painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font_id, text);
         return;
     }

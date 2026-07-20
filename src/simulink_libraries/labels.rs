@@ -55,6 +55,16 @@ pub fn math_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Operator"))
 }
 
+/// Bias ("Add Constant") label: reads the `Bias` value and shows it as a signed
+/// constant (e.g. `+1`, `-2.5`), matching Simulink's icon.
+pub fn bias_value(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    let value = nonempty(meta.get("Bias"))?;
+    Some(match value.parse::<f64>() {
+        Ok(n) if n >= 0.0 => format!("+{value}"),
+        _ => value,
+    })
+}
+
 /// Trigonometry function label: reads `Operator` (sin, cos, acos, atan2, …).
 pub fn trig_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Operator"))

@@ -30,6 +30,10 @@ pub enum SimulinkIcon {
     Svg(&'static str),
     /// A Phosphor icon name.
     Phosphor(&'static str),
+    /// Typeset math drawn by the painter (fraction bar / superscript / overbar).
+    /// See [`crate::egui_app::render::draw_math_icon`] for the notation, e.g.
+    /// `"frac:1/s"`, `"sup:e^u"`, `"over:u"`.
+    Math(&'static str),
 }
 
 /// The body shape used to draw a block.

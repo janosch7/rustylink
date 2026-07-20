@@ -16,6 +16,12 @@ const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
 }
 
+/// Typeset-math icon (fraction bar / superscript / overbar); see
+/// [`crate::egui_app::render::draw_math_icon`] for the notation.
+const fn math(spec: &'static str) -> SimulinkIcon {
+    SimulinkIcon::Math(spec)
+}
+
 #[rustfmt::skip]
 pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     // ═══════════════════════════════════════════════════════════════════════
@@ -24,18 +30,18 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Derivative", "Continuous")
         .with_description("Output the time derivative of the input")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("du/dt")),
+        .with_icon(math("frac:\u{0394}u/\u{0394}t")),
 
     SimulinkBlockDefinition::new("Integrator", "Continuous")
         .with_description("Integrate input signal over time")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("1/s")),
+        .with_icon(math("frac:1/s")),
 
     SimulinkBlockDefinition::new("SecondOrderIntegrator", "Continuous")
         .with_aliases(&["Second-Order Integrator"])
         .with_description("Integrate twice: acceleration to position")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
-        .with_icon(icon("1/s\u{00B2}")),
+        .with_icon(math("frac:1/s\u{00B2}")),
 
     SimulinkBlockDefinition::new("DescriptorStateSpace", "Continuous")
         .with_aliases(&["Descriptor State-Space"])
@@ -69,13 +75,13 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Delay", "Discrete")
         .with_description("Delay input by variable number of sample periods")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("z\u{207B}\u{207F}")),
+        .with_icon(math("sup:z^-n")),
 
     SimulinkBlockDefinition::new("UnitDelay", "Discrete")
         .with_aliases(&["Unit Delay"])
         .with_description("Delay input by one sample period")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("1/z")),
+        .with_icon(math("frac:1/z")),
 
     SimulinkBlockDefinition::new("Difference", "Discrete")
         .with_description("Compute difference between successive samples")
@@ -178,7 +184,8 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Add Constant"])
         .with_description("Add a bias (constant) to the input")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("u+K")),
+        .with_metadata_keys(&[MetadataKey::with_default("Bias", "0")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::bias_value)),
 
     SimulinkBlockDefinition::new("DotProduct", "Math Operations")
         .with_aliases(&["Dot Product"])
@@ -191,7 +198,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_description("Apply mathematical function (exp, log, sqrt, ...)")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
         .with_metadata_keys(&[MetadataKey::with_default("Operator", "exp")])
-        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::math_function)),
+        .with_static_renderer(renderers::static_math_function),
 
     SimulinkBlockDefinition::new("Trigonometry", "Math Operations")
         .with_aliases(&["Trigonometric Function"])

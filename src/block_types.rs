@@ -21,6 +21,9 @@ pub enum IconSpec {
     Utf8(&'static str),
     Svg(&'static str),
     Phosphor(&'static str),
+    /// Typeset math (fraction bar / superscript / overbar); see
+    /// [`crate::egui_app::render::draw_math_icon`].
+    Math(&'static str),
 }
 
 /// Configuration for a specific block type.
