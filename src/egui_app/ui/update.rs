@@ -1753,7 +1753,7 @@ pub(crate) fn update_internal(
         }
 
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
             let color = if monochrome {
                 monochrome_line_color(dark_mode)
             } else {
@@ -1762,9 +1762,9 @@ pub(crate) fn update_internal(
                     .copied()
                     .unwrap_or(line_stroke_default.color)
             };
-            let show_testpoint_marker = line_has_testpoint(&line_targets);
+            let show_testpoint_marker = line_has_testpoint(line_targets);
             let stroke = Stroke::new(
-                line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
+                line_stroke_width(line_targets, app.selected_line_indices.contains(li)),
                 color,
             );
             let has_in_dst = line.dst.as_ref().is_some_and(|dst| dst.port_type == "in");
@@ -2347,7 +2347,7 @@ pub(crate) fn update_internal(
         };
 
         for (line, screen_pts, main_anchor, _resp, li, _segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
             let color = if monochrome {
                 monochrome_line_color(dark_mode)
             } else {
@@ -2356,7 +2356,7 @@ pub(crate) fn update_internal(
                     .copied()
                     .unwrap_or(line_stroke_default.color)
             };
-            draw_line_labels(line, &line_targets, screen_pts, *main_anchor, color, *li);
+            draw_line_labels(line, line_targets, screen_pts, *main_anchor, color, *li);
         }
 
         // Clickable labels

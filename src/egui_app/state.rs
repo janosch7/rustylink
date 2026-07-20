@@ -1014,15 +1014,9 @@ impl SubsystemApp {
             return;
         }
 
-        if let Some(state) = self.default_navigation_view_states.get(&key) {
-            let (zoom, pan, view_bounds) = state.to_runtime();
-            self.zoom = zoom;
-            self.pan = pan;
-            self.view_bounds = view_bounds;
-            self.reset_view = false;
-            return;
-        }
-
+        // First visit: trigger fit-to-view reset.  Authored states
+        // (ZoomFactor/Location from the model) are not applied automatically;
+        // use `apply_authored_navigation_view_state_for_current_path` for that.
         self.pan = Vec2::ZERO;
         self.view_bounds = None;
         self.zoom = self.default_zoom_by_path.get(&key).copied().unwrap_or(1.0);
