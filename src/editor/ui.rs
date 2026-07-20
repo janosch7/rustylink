@@ -249,6 +249,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             c
         })
         .collect();
+    // Keep original blocks (with subsystem intact) for subsystem blocks so
+    // that is_subsystem_block() checks in context menus and double-click work.
+    let subsystem_block_lookup: HashMap<String, crate::model::Block> = sys.blocks.iter()
+        .filter(|b| parse_block_rect(b).is_some())
+        .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
+            && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+        .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
+        .collect();
     let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
         .iter()
         .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
@@ -573,7 +581,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Context menu
             resp.context_menu(|ui| {
-                block_context_menu(state, ui, block_idx, b);
+                block_context_menu(state, ui, block_idx, b, &subsystem_block_lookup);
             });
 
             // Click/drag handling
@@ -600,7 +608,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             }
             if resp.double_clicked() {
                 // Open subsystem or code editor
-                handle_block_double_click(state, block_idx, b);
+                handle_block_double_click(state, block_idx, b, &subsystem_block_lookup);
             }
         }
 
@@ -1508,6 +1516,7 @@ fn block_context_menu(
     ui: &mut egui::Ui,
     block_idx: usize,
     block: &crate::model::Block,
+    subsystem_block_lookup: &HashMap<String, crate::model::Block>,
 ) {
     if ui.button("Delete").clicked() {
         state.selection.select_block(block_idx);
@@ -1543,8 +1552,14 @@ fn block_context_menu(
         }
         ui.separator();
     }
-    if is_subsystem_block(block) && ui.button("Open Subsystem").clicked() {
-        state.app.open_block_if_subsystem(block);
+    let is_subsystem = block.sid.as_ref()
+        .is_some_and(|sid| subsystem_block_lookup.contains_key(sid));
+    if is_subsystem && ui.button("Open Subsystem").clicked() {
+        let full_block: crate::model::Block = block.sid.as_ref()
+            .and_then(|sid| subsystem_block_lookup.get(sid))
+            .cloned()
+            .unwrap_or_else(|| block.clone());
+        state.app.open_block_if_subsystem(&full_block);
         state.selection.clear();
         ui.close();
     }
@@ -1860,11 +1875,16 @@ fn handle_block_double_click(
     state: &mut EditorState,
     block_idx: usize,
     block: &crate::model::Block,
+    subsystem_block_lookup: &HashMap<String, crate::model::Block>,
 ) {
     if is_code_block(block) {
         open_code_editor(state, block_idx, block);
-    } else if is_subsystem_block(block) {
-        state.app.open_block_if_subsystem(block);
+    } else if block.sid.as_ref().is_some_and(|sid| subsystem_block_lookup.contains_key(sid)) {
+        let full_block: crate::model::Block = block.sid.as_ref()
+            .and_then(|sid| subsystem_block_lookup.get(sid))
+            .cloned()
+            .unwrap_or_else(|| block.clone());
+        state.app.open_block_if_subsystem(&full_block);
         state.selection.clear();
     }
 }

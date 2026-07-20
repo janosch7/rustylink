@@ -40,6 +40,14 @@ struct Args {
 
 #[cfg(feature = "egui")]
 fn main() -> Result<()> {
+    // Limit rayon to 2 threads — the only parallel work is parsing, which is
+    // done before the GUI starts.  This avoids spawning one thread per logical
+    // core (24+ sleeping threads) that contribute to overall system overhead.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build_global()
+        .ok();
+
     let args = Args::parse();
     let path = Utf8PathBuf::from(&args.file);
 
@@ -320,6 +328,7 @@ fn main() -> Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(

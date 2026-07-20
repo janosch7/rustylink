@@ -101,6 +101,16 @@ impl ConnectionTargetResolver {
         self.block_targets.get(&key).cloned().unwrap_or_default()
     }
 
+    /// Like `block_targets_for_block` but returns a reference to avoid cloning.
+    pub fn block_targets_for_block_ref(
+        &self,
+        system_path: &[String],
+        block: &Block,
+    ) -> &[ConnectionTarget] {
+        let key = block_cache_key(system_path, block);
+        self.block_targets.get(&key).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     pub fn line_targets_for_line(
         &self,
         system_path: &[String],
@@ -108,6 +118,16 @@ impl ConnectionTargetResolver {
     ) -> Vec<ConnectionTarget> {
         let key = line_cache_key(system_path, line);
         self.line_targets.get(&key).cloned().unwrap_or_default()
+    }
+
+    /// Like `line_targets_for_line` but returns a reference to avoid cloning.
+    pub fn line_targets_for_line_ref(
+        &self,
+        system_path: &[String],
+        line: &Line,
+    ) -> &[ConnectionTarget] {
+        let key = line_cache_key(system_path, line);
+        self.line_targets.get(&key).map(Vec::as_slice).unwrap_or(&[])
     }
 
     fn resolve_system(
