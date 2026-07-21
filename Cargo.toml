@@ -75,7 +75,8 @@ optional = true
 features = ["compression"]
 
 [dependencies.liveplot]
-path = "../liveplot-rs"
+#path = "../liveplot-rs"
+version = "2.1.1"
 optional = true
 default-features = false
 features = ["tiles", "fft", "parquet"]
