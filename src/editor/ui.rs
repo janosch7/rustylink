@@ -18,7 +18,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use egui_phosphor::regular::{ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE};
+use egui_phosphor_icons::icons::{
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_UP, ARROWS_CLOCKWISE, ARROWS_LEFT_RIGHT,
+    CIRCLE, CLIPBOARD, FILE_TEXT, TRASH,
+};
 
 use crate::model::EndpointRef;
 
@@ -70,7 +73,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     // Top panel: breadcrumbs + search + edit toolbar
     egui::Panel::top(state.app.egui_id("editor_top")).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let up_label = egui::RichText::new("⬆ Up");
+            let up_label = egui::RichText::new(format!("{} Up", ARROW_UP.as_str()));
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
             if up.clicked() {
                 let mut p = path_snapshot.clone();
@@ -97,14 +100,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             // Undo / redo
             let undo_btn = ui.add_enabled(
                 state.history.can_undo(),
-                egui::Button::new(format!("{ARROW_COUNTER_CLOCKWISE} Undo")),
+                egui::Button::new(format!("{} Undo", ARROW_COUNTER_CLOCKWISE.as_str())),
             );
             if undo_btn.clicked() {
                 state.undo();
             }
             let redo_btn = ui.add_enabled(
                 state.history.can_redo(),
-                egui::Button::new(format!("{ARROW_CLOCKWISE} Redo")),
+                egui::Button::new(format!("{} Redo", ARROW_CLOCKWISE.as_str())),
             );
             if redo_btn.clicked() {
                 state.redo();
@@ -112,7 +115,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             ui.separator();
 
             let has_selection = !state.selection.is_empty();
-            let del_btn = ui.add_enabled(has_selection, egui::Button::new("🗑 Delete"));
+            let del_btn = ui.add_enabled(
+                has_selection,
+                egui::Button::new(format!("{} Delete", TRASH.as_str())),
+            );
             if del_btn.clicked() {
                 state.delete_selection();
             }
@@ -125,14 +131,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             }
             let rotate_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("🔄 Rotate"),
+                egui::Button::new(format!("{} Rotate", ARROWS_CLOCKWISE.as_str())),
             );
             if rotate_btn.clicked() {
                 state.rotate_selection();
             }
             let mirror_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("↔ Mirror"),
+                egui::Button::new(format!("{} Mirror", ARROWS_LEFT_RIGHT.as_str())),
             );
             if mirror_btn.clicked() {
                 state.mirror_selection();
@@ -141,13 +147,15 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let copy_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("📋 Copy"),
+                egui::Button::new(format!("{} Copy", CLIPBOARD.as_str())),
             );
             if copy_btn.clicked() {
                 state.copy_selection();
             }
-            let paste_btn =
-                ui.add_enabled(state.clipboard.has_content(), egui::Button::new("📃 Paste"));
+            let paste_btn = ui.add_enabled(
+                state.clipboard.has_content(),
+                egui::Button::new(format!("{} Paste", FILE_TEXT.as_str())),
+            );
             if paste_btn.clicked() {
                 state.paste();
             }
@@ -181,7 +189,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             // Modified indicator
             if state.dirty {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.colored_label(Color32::from_rgb(255, 200, 80), "● Modified");
+                    ui.colored_label(
+                        Color32::from_rgb(255, 200, 80),
+                        format!("{} Modified", CIRCLE.as_str()),
+                    );
                 });
             }
 

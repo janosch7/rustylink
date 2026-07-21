@@ -116,7 +116,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Discrete Pulse Generator", "Pulse Generator"])
         .with_description("Generate discrete square-pulse signal")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::WAVE_SQUARE)),
+        .with_icon(SimulinkIcon::Phosphor(egui_phosphor_icons::icons::WAVE_SQUARE.as_str())),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Logic and Bit Operations

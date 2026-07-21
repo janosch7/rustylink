@@ -14,7 +14,16 @@ use eframe::egui;
 /// [`SimulinkIcon::Phosphor`]: crate::simulink_libraries::types::SimulinkIcon::Phosphor
 pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    egui_phosphor_icons::add_fonts(&mut fonts);
+
+    // Add phosphor font to Proportional family so icon glyphs in format! strings are found.
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .push("phosphor-icons".to_owned());
+    }
 
     // Bundle DejaVu Sans as a broad-coverage fallback so the technical/math
     // glyphs used by block icons (✓ ☰ ∠ ∿ ⊥ ⇒ superscripts …) render as real

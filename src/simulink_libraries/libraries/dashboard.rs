@@ -19,6 +19,7 @@ use crate::simulink_libraries::types::{
     DashboardControlKind, IOPorts, RenderContext, SimulinkBlockDefinition, SimulinkIcon,
     SimulinkShape,
 };
+use egui_phosphor_icons::icons::{CARET_DOWN, CHECK_SQUARE, CIRCLE, PENCIL, RECTANGLE};
 
 const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
@@ -159,14 +160,14 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_display_name("Display")
         .with_description("Display the value of the connected signal")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
-        .with_icon(ph(egui_phosphor::regular::MONITOR))
+        .with_icon(ph(egui_phosphor_icons::icons::MONITOR.as_str()))
         .with_static_renderer(static_display)
         .with_live_renderer(view_field_or_display),
     widget(
         "DisplayBlock",
         "Dashboard Display",
         "Dashboard numeric display widget",
-        ph(egui_phosphor::regular::MONITOR),
+        ph(egui_phosphor_icons::icons::MONITOR.as_str()),
         IOPorts::Fixed(1),
         static_display,
         view_field_or_display,
@@ -176,7 +177,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "PushButtonBlock",
         "Push Button",
         "Momentary push button UI control",
-        ph(egui_phosphor::regular::RADIO_BUTTON),
+        ph(egui_phosphor_icons::icons::RADIO_BUTTON.as_str()),
         IOPorts::None,
         static_push_button,
         live_push_button,
@@ -186,7 +187,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "Checkbox",
         "Checkbox",
         "Boolean checkbox UI control",
-        icon("☑"),
+        icon(CHECK_SQUARE.as_str()),
         IOPorts::None,
         static_checkbox,
         live_checkbox,
@@ -196,7 +197,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "ComboBox",
         "Combo Box",
         "Dropdown selection UI control",
-        icon("▾"),
+        icon(CARET_DOWN.as_str()),
         IOPorts::None,
         static_combo_box,
         live_combo_box,
@@ -206,7 +207,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "EditField",
         "Edit Field",
         "Text/number input field UI control",
-        icon("✎"),
+        icon(PENCIL.as_str()),
         IOPorts::None,
         static_edit_field,
         live_edit_field,
@@ -216,7 +217,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "RadioButtonGroup",
         "Radio Button Group",
         "Radio button selection group",
-        icon("◉"),
+        icon(CIRCLE.as_str()),
         IOPorts::None,
         static_radio_button_group,
         live_radio_button_group,
@@ -226,7 +227,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "SliderBlock",
         "Slider",
         "Continuous value slider control",
-        ph(egui_phosphor::regular::SLIDERS_HORIZONTAL),
+        ph(egui_phosphor_icons::icons::SLIDERS_HORIZONTAL.as_str()),
         IOPorts::None,
         static_slider,
         live_slider,
@@ -238,7 +239,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "Two-position slider switch",
         // Same switch glyph as the Toggle/Rocker fallbacks, but drawn upright
         // (the far-zoom path rotates only the Toggle/Rocker switches 90°).
-        ph(egui_phosphor::regular::TOGGLE_LEFT),
+        ph(egui_phosphor_icons::icons::TOGGLE_LEFT.as_str()),
         IOPorts::None,
         static_slider_switch,
         live_slider_switch,
@@ -248,7 +249,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "ToggleSwitchBlock",
         "Toggle Switch",
         "Two-position toggle switch",
-        ph(egui_phosphor::regular::TOGGLE_LEFT),
+        ph(egui_phosphor_icons::icons::TOGGLE_LEFT.as_str()),
         IOPorts::None,
         static_toggle_switch,
         live_toggle_switch,
@@ -258,7 +259,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "RockerSwitchBlock",
         "Rocker Switch",
         "Rocker-style on/off switch",
-        ph(egui_phosphor::regular::TOGGLE_RIGHT),
+        ph(egui_phosphor_icons::icons::TOGGLE_RIGHT.as_str()),
         IOPorts::None,
         static_rocker_switch,
         live_rocker_switch,
@@ -268,7 +269,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "RotarySwitchBlock",
         "Rotary Switch",
         "Multi-position rotary switch",
-        icon("◎"),
+        icon(CIRCLE.as_str()),
         IOPorts::None,
         static_rotary_switch,
         live_rotary_switch,
@@ -278,7 +279,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "KnobBlock",
         "Knob",
         "Rotary knob input control",
-        icon("◎"),
+        icon(CIRCLE.as_str()),
         IOPorts::None,
         static_knob,
         live_knob,
@@ -316,7 +317,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "LinearGaugeBlock",
         "Linear Gauge",
         "Linear/horizontal gauge indicator",
-        icon("▮"),
+        icon(RECTANGLE.as_str()),
         IOPorts::Fixed(1),
         static_linear_gauge,
         view_linear_gauge,
@@ -325,7 +326,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         "LampBlock",
         "Lamp",
         "LED lamp indicator (on/off or multi-state)",
-        ph(egui_phosphor::regular::LIGHTBULB),
+        ph(egui_phosphor_icons::icons::LIGHTBULB.as_str()),
         IOPorts::Fixed(1),
         static_lamp,
         view_lamp,
@@ -337,6 +338,6 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_description("Plot connected signals on a dashboard scope")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_shape(SimulinkShape::Rectangle)
-        .with_icon(ph(egui_phosphor::regular::WAVEFORM))
+        .with_icon(ph(egui_phosphor_icons::icons::WAVEFORM.as_str()))
         .with_static_renderer(static_dashboard_scope),
 ];

@@ -13,6 +13,7 @@ use crate::simulink_libraries::types::{
     BlockLabelPolicy, IOPorts, MetadataKey, PortLabelPolicy, PortPlacement, PortPositionOverride,
     SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
 };
+use egui_phosphor_icons::icons::LIST;
 
 const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
@@ -62,7 +63,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Scope", "Sinks")
         .with_description("Display signals over time")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::WAVEFORM))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::WAVEFORM.as_str(),
+        ))
         .with_static_renderer(renderers::static_scope),
     SimulinkBlockDefinition::new("Terminator", "Sinks")
         .with_description("Terminate an unconnected output port")
@@ -92,7 +95,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("MATLAB Function", "User-Defined Functions")
         .with_description("Author block behaviour in MATLAB")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::FUNCTION))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::FUNCTION.as_str(),
+        ))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
@@ -100,7 +105,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("CFunction", "User-Defined Functions")
         .with_description("Author block behaviour in C")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::FILE_C))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::FILE_C.as_str(),
+        ))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
@@ -109,23 +116,23 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Concatenate", "Signal Routing")
         .with_description("Concatenate input signals")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon("☰")),
+        .with_icon(icon(LIST.as_str())),
     SimulinkBlockDefinition::new("Mux", "Signal Routing")
         .with_description("Combine signals into a vector")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon("☰")),
+        .with_icon(icon(LIST.as_str())),
     SimulinkBlockDefinition::new("Demux", "Signal Routing")
         .with_description("Split a vector into signals")
         .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
-        .with_icon(icon("☰")),
+        .with_icon(icon(LIST.as_str())),
     SimulinkBlockDefinition::new("BusCreator", "Signal Routing")
         .with_description("Combine signals into a bus")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon("☰")),
+        .with_icon(icon(LIST.as_str())),
     SimulinkBlockDefinition::new("BusSelector", "Signal Routing")
         .with_description("Select signals from a bus")
         .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
-        .with_icon(icon("☰")),
+        .with_icon(icon(LIST.as_str())),
     SimulinkBlockDefinition::new("ComplexToRealImag", "Math Operations")
         .with_description("Split a complex signal into real and imaginary parts")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
@@ -138,14 +145,18 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Manual Switch"])
         .with_description("Manually switch between two inputs")
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROWS_MERGE))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::ARROWS_MERGE.as_str(),
+        ))
         .with_static_renderer(renderers::static_manual_switch)
         .with_live_renderer(renderers::live_manual_switch),
     SimulinkBlockDefinition::new("Goto", "Signal Routing")
         .with_description("Send a signal to a matching From block")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_shape(SimulinkShape::Goto)
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROW_RIGHT))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::ARROW_RIGHT.as_str(),
+        ))
         .with_metadata_keys(&[MetadataKey::with_default("GotoTag", "A")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::goto_tag))
         .with_static_renderer(renderers::static_goto_from),
@@ -153,7 +164,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_description("Receive a signal from a matching Goto block")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
         .with_shape(SimulinkShape::From)
-        .with_icon(SimulinkIcon::Phosphor(egui_phosphor::regular::ARROW_LEFT))
+        .with_icon(SimulinkIcon::Phosphor(
+            egui_phosphor_icons::icons::ARROW_LEFT.as_str(),
+        ))
         .with_metadata_keys(&[MetadataKey::with_default("GotoTag", "A")])
         .with_block_label(BlockLabelPolicy::MetadataDependent(labels::goto_tag))
         .with_static_renderer(renderers::static_goto_from),

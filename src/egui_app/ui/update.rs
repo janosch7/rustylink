@@ -24,6 +24,7 @@ use crate::egui_app::state::{
 use crate::egui_app::text::highlight_query_job;
 use crate::egui_app::{get_block_type_cfg, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use egui_phosphor_icons::icons::{ARROW_UP, FOLDER_OPEN};
 use std::collections::{BTreeSet, HashMap};
 
 /// Shallow clone of a block that skips the expensive subsystem tree.
@@ -484,7 +485,7 @@ pub(crate) fn update_internal(
 
     egui::Panel::top(app.egui_id("top_panel")).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let up_label = egui::RichText::new("⬆ Up");
+            let up_label = egui::RichText::new(format!("{} Up", ARROW_UP.as_str()));
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
             if up.clicked() {
                 let mut p = path_snapshot.clone();
@@ -541,10 +542,12 @@ pub(crate) fn update_internal(
             if app.move_mode_enabled {
                 let undo_btn = egui::Button::new(format!(
                     "{} Undo",
-                    egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE
+                    egui_phosphor_icons::icons::ARROW_COUNTER_CLOCKWISE.as_str()
                 ));
-                let redo_btn =
-                    egui::Button::new(format!("{} Redo", egui_phosphor::regular::ARROW_CLOCKWISE));
+                let redo_btn = egui::Button::new(format!(
+                    "{} Redo",
+                    egui_phosphor_icons::icons::ARROW_CLOCKWISE.as_str()
+                ));
                 if ui
                     .add_enabled(app.viewer_history.can_undo(), undo_btn)
                     .clicked()
@@ -653,7 +656,7 @@ pub(crate) fn update_internal(
             if ui
                 .add_enabled(
                     app.source_model_path.is_some(),
-                    egui::Button::new("📂 Open folder"),
+                    egui::Button::new(format!("{} Open folder", FOLDER_OPEN.as_str())),
                 )
                 .on_hover_text("Open the folder containing this model in the file explorer")
                 .clicked()

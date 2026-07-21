@@ -67,8 +67,8 @@ fn embedded_svg_assets_exist() {
 fn svg_parse_extract_diagonal_embedded() {
     // Ensure the new icon actually parses, catching any embedding or SVG errors.
     let bytes = icon_assets::get("matrix/extract_diagonal.svg").unwrap();
-    let options = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_data(&bytes, &options).unwrap();
+    let options = usvg::Options::default();
+    let tree = usvg::Tree::from_data(&bytes, &options).unwrap();
     assert!(tree.size().width() > 0.0 && tree.size().height() > 0.0);
 }
 
@@ -126,9 +126,9 @@ fn icon_lookup_stub_block_initial_system_no_library_path() {
 #[test]
 fn svg_rasterization_identity_matrix() {
     let bytes = icon_assets::get("matrix/identity_matrix.svg").unwrap();
-    let options = resvg::usvg::Options::default();
+    let options = usvg::Options::default();
     // Parsing must succeed.
-    let tree = resvg::usvg::Tree::from_data(&bytes, &options).unwrap();
+    let tree = usvg::Tree::from_data(&bytes, &options).unwrap();
     assert!(tree.size().width() > 0.0 && tree.size().height() > 0.0);
     // Rasterisation must also succeed.
     let image = egui_extras::image::load_svg_bytes_with_size(
@@ -147,9 +147,9 @@ fn svg_rasterization_identity_matrix() {
 #[test]
 fn svg_rasterization_preserves_aspect_ratio() {
     let bytes = icon_assets::get("matrix/is_triangular.svg").unwrap();
-    let options = resvg::usvg::Options::default();
+    let options = usvg::Options::default();
 
-    let tree = resvg::usvg::Tree::from_data(&bytes, &options).unwrap();
+    let tree = usvg::Tree::from_data(&bytes, &options).unwrap();
     let src_w = tree.size().width();
     let src_h = tree.size().height();
     let src_ratio = src_w / src_h;
@@ -325,7 +325,7 @@ fn svg_parse_matrix_square_embedded() {
     let bytes = rustylink::egui_app::icon_assets::get("matrix/matrix_square.svg")
         .expect("matrix_square.svg must be embedded");
 
-    let mut options = resvg::usvg::Options::default();
+    let mut options = usvg::Options::default();
     // Keep consistent with runtime behavior: populate the font DB if possible.
     if let Some(db) = rustylink::egui_app::embedded_egui_sans_fontdb() {
         options.fontdb = db;

@@ -792,14 +792,14 @@ struct SvgCachedTexture {
     px_size: [usize; 2],
 }
 
-pub fn embedded_egui_sans_fontdb() -> Option<Arc<resvg::usvg::fontdb::Database>> {
-    static FONTDB: OnceLock<Option<Arc<resvg::usvg::fontdb::Database>>> = OnceLock::new();
+pub fn embedded_egui_sans_fontdb() -> Option<Arc<usvg::fontdb::Database>> {
+    static FONTDB: OnceLock<Option<Arc<usvg::fontdb::Database>>> = OnceLock::new();
     FONTDB
         .get_or_init(|| {
             let font_defs = egui::FontDefinitions::default();
             let ubuntu = font_defs.font_data.get("Ubuntu-Light")?;
 
-            let mut db = resvg::usvg::fontdb::Database::new();
+            let mut db = usvg::fontdb::Database::new();
             db.load_font_data(ubuntu.as_ref().font.as_ref().to_vec());
 
             // Ensure CSS generic `sans-serif` resolves to the embedded font.
@@ -861,7 +861,7 @@ fn get_or_create_svg_texture(
     }
 
     let bytes = icon_assets::get(path)?;
-    let mut options = resvg::usvg::Options::default();
+    let mut options = usvg::Options::default();
     // usvg's font database is empty by default; populate it from egui's embedded fonts.
     // This avoids relying on system-installed fonts.
     if let Some(db) = embedded_egui_sans_fontdb() {

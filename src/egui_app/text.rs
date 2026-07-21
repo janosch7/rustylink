@@ -384,7 +384,10 @@ fn collect_attributes(tag: &BytesStart<'_>) -> Result<Vec<(String, String)>, ()>
         let key = std::str::from_utf8(attr.key.as_ref())
             .map_err(|_| ())?
             .to_ascii_lowercase();
-        let value = attr.unescape_value().map_err(|_| ())?.into_owned();
+        let value = attr
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map_err(|_| ())?
+            .into_owned();
         attrs.push((key, value));
     }
     Ok(attrs)
