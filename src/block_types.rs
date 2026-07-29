@@ -24,6 +24,11 @@ pub enum IconSpec {
     /// Typeset math (fraction bar / superscript / overbar); see
     /// [`crate::egui_app::render::draw_math_icon`].
     Math(&'static str),
+    /// Line-art drawn from a compact polyline notation; see
+    /// [`crate::egui_app::render::draw_plot_icon`].  Simulink draws many block
+    /// icons (waveforms, saturation curves, scope screens) as vector line art
+    /// rather than glyphs.
+    Plot(&'static str),
 }
 
 /// Configuration for a specific block type.

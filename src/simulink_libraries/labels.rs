@@ -65,6 +65,54 @@ pub fn bias_value(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     })
 }
 
+/// Inport / Outport label: the port number Simulink writes inside the obround.
+pub fn port_number(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(nonempty(meta.get("Port")).unwrap_or_else(|| "1".into()))
+}
+
+/// Goto Tag Visibility label: the scoped tag in braces, e.g. `{A}`.
+pub fn goto_tag_braced(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(format!(
+        "{{{}}}",
+        nonempty(meta.get("GotoTag")).unwrap_or_else(|| "A".into())
+    ))
+}
+
+/// Bus Assignment label: `Bus` over the assignment it performs, e.g.
+/// `Bus := signal1` for `AssignedSignals = signal1`.
+pub fn bus_assignment(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(match nonempty(meta.get("AssignedSignals")) {
+        Some(signals) => format!("Bus\n:= {signals}"),
+        None => "Bus".into(),
+    })
+}
+
+/// String Constant label: the literal it outputs, quoted as Simulink shows it.
+pub fn string_constant(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    let value = nonempty(meta.get("String")).unwrap_or_else(|| "\"Hello!\"".into());
+    Some(if value.starts_with('"') {
+        value
+    } else {
+        format!("\"{value}\"")
+    })
+}
+
+/// Bit Clear label: Simulink names the bit it clears, e.g. `Clear bit 0`.
+pub fn bit_clear(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(format!(
+        "Clear bit {}",
+        nonempty(meta.get("iBit")).unwrap_or_else(|| "0".into())
+    ))
+}
+
+/// Bit Set label: the counterpart of [`bit_clear`], e.g. `Set bit 0`.
+pub fn bit_set(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(format!(
+        "Set bit {}",
+        nonempty(meta.get("iBit")).unwrap_or_else(|| "0".into())
+    ))
+}
+
 /// Trigonometry function label: reads `Operator` (sin, cos, acos, atan2, …).
 pub fn trig_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Operator"))
@@ -76,20 +124,33 @@ pub fn minmax_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
 }
 
 /// Instance label for a `Compare To Constant` block, derived from its
-/// `InstanceData` (`relop`/`const`).  Returns e.g. `"≤ 3.0"`, or `None` when the
-/// parameters are absent.
+/// `InstanceData` (`relop`/`const`).  Simulink prints the operator verbatim and
+/// the constant without a trailing `.0`, e.g. `<= 3`.
 pub fn compare_to_constant(block: &Block) -> Option<String> {
     let id = block.instance_data.as_ref()?;
-    let relop = id.properties.get("relop")?;
-    let const_val = id.properties.get("const")?;
-    let sym = match relop.trim() {
-        "<=" => "\u{2264}",
-        ">=" => "\u{2265}",
-        "~=" => "\u{2260}",
-        "==" => "=",
-        other => other,
-    };
-    Some(format!("{} {}", sym, const_val.trim()))
+    let relop = id.properties.get("relop")?.trim();
+    let const_val = id.properties.get("const")?.trim();
+    Some(format!("{relop} {}", trim_trailing_zeros(const_val)))
+}
+
+/// Instance label for a `Compare To Zero` block: the operator against `0`.
+pub fn compare_to_zero(block: &Block) -> Option<String> {
+    let relop = block
+        .instance_data
+        .as_ref()
+        .and_then(|id| id.properties.get("relop"))
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("<=");
+    Some(format!("{relop} 0"))
+}
+
+/// Drop a numeric value's redundant fractional part (`3.0` → `3`).
+fn trim_trailing_zeros(value: &str) -> String {
+    match value.parse::<f64>() {
+        Ok(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", n as i64),
+        _ => value.to_string(),
+    }
 }
 
 /// Trim a metadata value and discard it if empty.

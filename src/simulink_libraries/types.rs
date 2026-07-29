@@ -32,8 +32,12 @@ pub enum SimulinkIcon {
     Phosphor(&'static str),
     /// Typeset math drawn by the painter (fraction bar / superscript / overbar).
     /// See [`crate::egui_app::render::draw_math_icon`] for the notation, e.g.
-    /// `"frac:1/s"`, `"sup:e^u"`, `"over:u"`.
+    /// `"frac:1/s"`, `"sup:e^u"`, `"over:u"`, `"lines:a|b"`.
     Math(&'static str),
+    /// Line-art drawn by the painter from a compact polyline notation.  See
+    /// [`crate::egui_app::render::draw_plot_icon`], e.g. a saturation curve
+    /// `"p 0,.85 .3,.85 .7,.15 1,.15"`.
+    Plot(&'static str),
 }
 
 /// The body shape used to draw a block.

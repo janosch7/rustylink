@@ -13,7 +13,6 @@ use crate::simulink_libraries::types::{
     BlockLabelPolicy, IOPorts, MetadataKey, PortLabelPolicy, PortPlacement, PortPositionOverride,
     SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
 };
-use egui_phosphor_icons::icons::LIST;
 
 const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
@@ -72,75 +71,69 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_icon(icon("⊣")),
     // ── Ports & subsystems ─────────────────────────────────────────────
+    // Simulink writes the port's number inside the obround, not an arrow.
     SimulinkBlockDefinition::new("Inport", "Ports & Subsystems")
         .with_description("Create an input port for a subsystem")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
         .with_shape(SimulinkShape::Obround)
-        .with_icon(icon("⬅")),
+        .with_metadata_keys(&[MetadataKey::with_default("Port", "1")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::port_number)),
     SimulinkBlockDefinition::new("Outport", "Ports & Subsystems")
         .with_description("Create an output port for a subsystem")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
         .with_shape(SimulinkShape::Obround)
-        .with_icon(icon("➡")),
+        .with_metadata_keys(&[MetadataKey::with_default("Port", "1")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::port_number)),
+    // Simulink previews a subsystem by drawing its contents in miniature: an
+    // In port per input wired across to an Out port per output.
     SimulinkBlockDefinition::new("SubSystem", "Ports & Subsystems")
         .with_description("Group blocks into a subsystem")
         // Subsystem ports are derived from the contained In/Outport blocks, so
         // the default (used only when the model carries no port info) is 0/0.
         .with_ports(IOPorts::Variable(0), IOPorts::Variable(0))
-        .with_icon(icon(""))
+        .with_static_renderer(renderers::static_subsystem)
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
         ),
+    // Simulink captions the block `fcn` (under the MATLAB membrane logo).
     SimulinkBlockDefinition::new("MATLAB Function", "User-Defined Functions")
         .with_description("Author block behaviour in MATLAB")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(SimulinkIcon::Phosphor(
-            egui_phosphor_icons::icons::FUNCTION.as_str(),
-        ))
-        .with_port_labels(
-            PortLabelPolicy::MetadataDependent(port_labels_from_model),
-            PortLabelPolicy::MetadataDependent(port_labels_from_model),
-        ),
-    SimulinkBlockDefinition::new("CFunction", "User-Defined Functions")
-        .with_description("Author block behaviour in C")
-        .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(SimulinkIcon::Phosphor(
-            egui_phosphor_icons::icons::FILE_C.as_str(),
-        ))
+        .with_block_label(BlockLabelPolicy::Fixed("fcn"))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
         ),
     // ── Signal routing ─────────────────────────────────────────────────
+    // Simulink draws all five of these as a solid bar the height of the block.
     SimulinkBlockDefinition::new("Concatenate", "Signal Routing")
         .with_description("Concatenate input signals")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon(LIST.as_str())),
+        .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("Mux", "Signal Routing")
         .with_description("Combine signals into a vector")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon(LIST.as_str())),
+        .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("Demux", "Signal Routing")
         .with_description("Split a vector into signals")
         .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
-        .with_icon(icon(LIST.as_str())),
+        .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("BusCreator", "Signal Routing")
         .with_description("Combine signals into a bus")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_icon(icon(LIST.as_str())),
+        .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("BusSelector", "Signal Routing")
         .with_description("Select signals from a bus")
         .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
-        .with_icon(icon(LIST.as_str())),
+        .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("ComplexToRealImag", "Math Operations")
         .with_description("Split a complex signal into real and imaginary parts")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
-        .with_icon(icon(""))
-        .with_port_labels(
-            PortLabelPolicy::Fixed(&["Re+Im"]),
-            PortLabelPolicy::Fixed(&["Re", "Im"]),
-        ),
+        .with_icon(SimulinkIcon::Plot(
+            "p 0.1,0.5 0.45,0.5; p 0.45,0.5 0.9,0.2; p 0.45,0.5 0.9,0.8",
+        ))
+        .with_port_labels(PortLabelPolicy::None, PortLabelPolicy::Fixed(&["Re", "Im"])),
     SimulinkBlockDefinition::new("ManualSwitch", "Signal Routing")
         .with_aliases(&["Manual Switch"])
         .with_description("Manually switch between two inputs")

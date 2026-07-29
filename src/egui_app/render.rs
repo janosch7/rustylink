@@ -615,8 +615,11 @@ pub fn render_center_glyph_maximized(
 /// * `frac:NUM/DEN` – numerator over denominator with a horizontal bar
 ///   (`frac:1/s`, `frac:(z-1)/z`, `frac:K(z-1)/Ts z`).
 /// * `sup:BASE^SUP` – `BASE` with a raised, smaller superscript
-///   (`sup:z^-2`, `sup:e^u`, `sup:u^2`).
+///   (`sup:z^-2`, `sup:e^u`, `sup:u^2`).  Text after a space in `SUP` returns
+///   to the baseline, so `sup:A^H A` typesets `AᴴA`.
 /// * `over:BASE` – `BASE` with an overbar (conjugate, e.g. `over:u` → `ū`).
+/// * `lines:A|B` – stacked, centred lines at a common font size (e.g. the
+///   Descriptor State-Space icon `lines:Eẋ = Ax + Bu|y = Cx + Du`).
 ///
 /// Anything else is drawn as a plain maximised glyph (same as a `Utf8` icon).
 pub fn draw_math_icon(
@@ -636,11 +639,151 @@ pub fn draw_math_icon(
         draw_fraction(painter, &avail, num.trim(), den.trim(), color);
     } else if let Some(rest) = spec.strip_prefix("sup:") {
         let (base, sup) = rest.split_once('^').unwrap_or((rest, ""));
-        draw_superscript(painter, &avail, base, sup, color);
+        let (sup, tail) = sup.split_once(' ').unwrap_or((sup, ""));
+        draw_superscript(painter, &avail, base, sup, tail, color);
     } else if let Some(base) = spec.strip_prefix("over:") {
         draw_overbar(painter, &avail, base, color);
+    } else if let Some(rest) = spec.strip_prefix("lines:") {
+        draw_stacked_lines(painter, &avail, rest, color);
     } else {
         render_center_glyph_maximized(painter, rect, font_scale, spec, color, port_label_widths);
+    }
+}
+
+/// `|`-separated lines stacked vertically and centred, all at one font size.
+fn draw_stacked_lines(painter: &egui::Painter, avail: &Rect, spec: &str, color: Color32) {
+    let lines: Vec<&str> = spec.split('|').map(str::trim).collect();
+    if lines.is_empty() {
+        return;
+    }
+    let n = lines.len() as f32;
+    let row = Vec2::new(avail.width() * 0.96, (avail.height() * 0.94) / n);
+    let font_px = lines
+        .iter()
+        .map(|l| fit_font_px(painter, l, row))
+        .fold(f32::INFINITY, f32::min)
+        .clamp(5.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let step = font_px * 1.16;
+    let top = avail.center().y - step * (n - 1.0) * 0.5;
+    for (i, line) in lines.iter().enumerate() {
+        painter.text(
+            Pos2::new(avail.center().x, top + step * i as f32),
+            Align2::CENTER_CENTER,
+            *line,
+            font.clone(),
+            color,
+        );
+    }
+}
+
+/// Draw a line-art block icon from a compact notation.
+///
+/// Simulink draws many icons (source waveforms, saturation/backlash curves,
+/// scope screens, verification plots) as vector line art rather than as a
+/// glyph.  `spec` is a `;`-separated list of drawing commands whose coordinates
+/// are normalised to `0.0..=1.0` inside the icon area, with `y` pointing
+/// **down** so the notation reads like screen space:
+///
+/// * `p X,Y X,Y …` – polyline through the listed points.
+/// * `a X,Y X,Y …` – same, but faint: Simulink's thin grey axis cross.
+/// * `b X0,Y0,X1,Y1` – translucent filled band (Simulink's grey limit bands).
+/// * `r X0,Y0,X1,Y1` – stroked rectangle.
+/// * `f X0,Y0,X1,Y1` – solid rectangle (Simulink's black bus bars).
+/// * `c CX,CY,R` – stroked circle (`R` is a fraction of the icon width).
+/// * `d CX,CY,R` – filled dot.
+/// * `o CX,CY,W,H` – stroked obround (the In/Out ports of a subsystem preview).
+/// * `t X,Y,H TEXT` – `TEXT` centred at `X,Y` with cap height `H` (a fraction
+///   of the icon height), for the letters Simulink sets inside its pictograms
+///   (`A ⇒ D`, the `U` of Is Triangular).
+///
+/// Unknown commands are skipped, so a malformed spec degrades to blank rather
+/// than panicking.
+pub fn draw_plot_icon(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    spec: &str,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    let avail = compute_icon_available_rect(rect, font_scale, port_label_widths);
+    if avail.width() <= 1.0 || avail.height() <= 1.0 {
+        return;
+    }
+    let at = |x: f32, y: f32| {
+        Pos2::new(
+            avail.left() + x * avail.width(),
+            avail.top() + y * avail.height(),
+        )
+    };
+    let width = (avail.width().min(avail.height()) * 0.055).clamp(0.8, 2.2);
+    let stroke = Stroke::new(width, color);
+    let faint = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 90);
+    let axis_stroke = Stroke::new((width * 0.7).max(0.7), faint);
+    let band = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 46);
+
+    for cmd in spec.split(';') {
+        let cmd = cmd.trim();
+        let Some((kind, args)) = cmd.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let nums: Vec<f32> = args
+            .split([' ', ','])
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse::<f32>().ok())
+            .collect();
+        match kind {
+            "p" | "a" => {
+                let pts: Vec<Pos2> = nums.chunks_exact(2).map(|c| at(c[0], c[1])).collect();
+                if pts.len() >= 2 {
+                    let s = if kind == "a" { axis_stroke } else { stroke };
+                    painter.add(egui::Shape::line(pts, s));
+                }
+            }
+            "b" | "r" | "f" if nums.len() >= 4 => {
+                let r = Rect::from_two_pos(at(nums[0], nums[1]), at(nums[2], nums[3]));
+                match kind {
+                    "b" => {
+                        painter.rect_filled(r, 0.0, band);
+                    }
+                    "f" => {
+                        painter.rect_filled(r, 0.0, color);
+                    }
+                    _ => {
+                        painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
+                    }
+                }
+            }
+            "o" if nums.len() >= 4 => {
+                let c = at(nums[0], nums[1]);
+                let half = Vec2::new(nums[2] * avail.width(), nums[3] * avail.height()) * 0.5;
+                let r = Rect::from_center_size(c, half * 2.0);
+                painter.rect_stroke(r, r.height() * 0.5, stroke, egui::StrokeKind::Inside);
+            }
+            "t" if nums.len() >= 3 => {
+                let Some((_, text)) = args.split_once(char::is_whitespace) else {
+                    continue;
+                };
+                painter.text(
+                    at(nums[0], nums[1]),
+                    Align2::CENTER_CENTER,
+                    text.trim(),
+                    egui::FontId::proportional((nums[2] * avail.height()).clamp(4.0, 40.0)),
+                    color,
+                );
+            }
+            "c" | "d" if nums.len() >= 3 => {
+                let c = at(nums[0], nums[1]);
+                let r = nums[2] * avail.width();
+                if kind == "c" {
+                    painter.circle_stroke(c, r, stroke);
+                } else {
+                    painter.circle_filled(c, r, color);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -712,7 +855,14 @@ fn draw_fraction(painter: &egui::Painter, avail: &Rect, num: &str, den: &str, co
 }
 
 /// `base` with a smaller superscript raised above the baseline.
-fn draw_superscript(painter: &egui::Painter, avail: &Rect, base: &str, sup: &str, color: Color32) {
+fn draw_superscript(
+    painter: &egui::Painter,
+    avail: &Rect,
+    base: &str,
+    sup: &str,
+    tail: &str,
+    color: Color32,
+) {
     if sup.is_empty() {
         let px = fit_font_px(painter, base, avail.size() * 0.9).clamp(6.0, 40.0);
         painter.text(
@@ -730,7 +880,8 @@ fn draw_superscript(painter: &egui::Painter, avail: &Rect, base: &str, sup: &str
     let ref_px = 100.0_f32;
     let bw = text_width(painter, base, ref_px);
     let sw = text_width(painter, sup, ref_px * sup_ratio);
-    let total_w = bw + sw;
+    let tw = text_width(painter, tail, ref_px);
+    let total_w = bw + sw + tw;
     let total_h = ref_px * (1.0 + rise);
     let font_px = if total_w <= 1e-3 {
         ref_px
@@ -740,15 +891,16 @@ fn draw_superscript(painter: &egui::Painter, avail: &Rect, base: &str, sup: &str
     };
     let base_font = egui::FontId::proportional(font_px);
     let sup_font = egui::FontId::proportional(font_px * sup_ratio);
-    let run_w = text_width(painter, base, font_px) + text_width(painter, sup, font_px * sup_ratio);
+    let base_w = text_width(painter, base, font_px);
+    let sup_w = text_width(painter, sup, font_px * sup_ratio);
+    let run_w = base_w + sup_w + text_width(painter, tail, font_px);
     let left = avail.center().x - run_w * 0.5;
     let cy = avail.center().y;
-    let base_w = text_width(painter, base, font_px);
     painter.text(
         Pos2::new(left, cy),
         Align2::LEFT_CENTER,
         base,
-        base_font,
+        base_font.clone(),
         color,
     );
     painter.text(
@@ -758,6 +910,15 @@ fn draw_superscript(painter: &egui::Painter, avail: &Rect, base: &str, sup: &str
         sup_font,
         color,
     );
+    if !tail.is_empty() {
+        painter.text(
+            Pos2::new(left + base_w + sup_w, cy),
+            Align2::LEFT_CENTER,
+            tail,
+            base_font,
+            color,
+        );
+    }
 }
 
 /// `base` with a horizontal overbar (Simulink's conjugate icon `ū`).
@@ -941,6 +1102,9 @@ pub fn draw_icon_spec(
         }
         block_types::IconSpec::Math(spec) => {
             draw_math_icon(painter, rect, font_scale, spec, color, port_label_widths);
+        }
+        block_types::IconSpec::Plot(spec) => {
+            draw_plot_icon(painter, rect, font_scale, spec, color, port_label_widths);
         }
         block_types::IconSpec::Phosphor(name) => {
             let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
@@ -1642,30 +1806,34 @@ fn not_gate_path(r: &Rect) -> Vec<Pos2> {
     ]
 }
 
-/// Render Goto/From blocks with their GotoTag label instead of port labels
+/// Render Goto/From blocks with their GotoTag label instead of port labels.
+///
+/// Simulink brackets the tag (`[A]`) inside the tag-shaped body.
 pub fn render_goto_from_block(
     painter: &egui::Painter,
     block: &Block,
     rect: &Rect,
     font_scale: f32,
     name_font_factor: f32,
+    color: Color32,
 ) {
-    let label = block
+    let tag = block
         .properties
         .get("GotoTag")
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or("A");
+    let label = format!("[{tag}]");
 
-    let font_size = (rect.height() * 0.6).clamp(10.0, 24.0) * font_scale * name_font_factor;
-    let color = Color32::from_rgb(32, 32, 32);
-    let font_id = egui::FontId::proportional(font_size);
+    let mut font_size = (rect.height() * 0.6).clamp(10.0, 24.0) * font_scale * name_font_factor;
+    let fitted = fit_font_px(painter, &label, rect.size() * Vec2::new(0.72, 0.7));
+    font_size = font_size.min(fitted);
 
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        font_id,
+        egui::FontId::proportional(font_size),
         color,
     );
 }

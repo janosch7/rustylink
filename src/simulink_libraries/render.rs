@@ -89,8 +89,17 @@ pub fn render_block_interior(
     if let Some(label) = block_label_text(block, def, &metadata)
         && !label.is_empty()
     {
-        let font = FontId::proportional(12.0 * ctx.font_scale);
-        let galley = painter.layout_no_wrap(label, font, params.text_color);
+        let mut px = 12.0 * ctx.font_scale;
+        let mut galley =
+            painter.layout_no_wrap(label.clone(), FontId::proportional(px), params.text_color);
+        // Simulink shrinks a block's caption until it fits; do the same rather
+        // than letting long labels ("hermitian", "Clear bit 0") spill out.
+        let avail = rect.size() * 0.88;
+        let overflow = (galley.size().x / avail.x).max(galley.size().y / avail.y);
+        if overflow > 1.0 {
+            px = (px / overflow).max(1.0);
+            galley = painter.layout_no_wrap(label, FontId::proportional(px), params.text_color);
+        }
         let pos = rect.center() - galley.size() * 0.5;
         painter.galley(pos, galley, params.text_color);
         return;
