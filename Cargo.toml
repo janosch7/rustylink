@@ -95,6 +95,14 @@ optional = true
 tempfile = "3.10"
 usvg = "0.45"
 
+[[example]]
+name = "analyze_model_blocks"
+required-features = ["egui"]
+
+[[example]]
+name = "dump_block_icons"
+required-features = ["egui"]
+
 [[test]]
 name = "block_catalog"
 path = "tests/block_catalog.rs"
