@@ -123,6 +123,13 @@ pub fn minmax_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Function")).map(|s| s.to_lowercase())
 }
 
+/// MinMax Running Resettable label: the running function applied to the input
+/// and the held output, e.g. `min(u,y)`.
+pub fn minmax_running_function(block: &Block, meta: &BlockMetadata) -> Option<String> {
+    let function = minmax_function(block, meta)?;
+    Some(format!("{function}(u,y)"))
+}
+
 /// Instance label for a `Compare To Constant` block, derived from its
 /// `InstanceData` (`relop`/`const`).  Simulink prints the operator verbatim and
 /// the constant without a trailing `.0`, e.g. `<= 3`.
@@ -143,6 +150,29 @@ pub fn compare_to_zero(block: &Block) -> Option<String> {
         .filter(|s| !s.is_empty())
         .unwrap_or("<=");
     Some(format!("{relop} 0"))
+}
+
+/// Is Symmetric caption: `Mode` selects plain or skew symmetry.
+pub fn is_symmetric_mode(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(matrix_test_caption(meta, "symmetric"))
+}
+
+/// Is Hermitian caption: `Mode` selects plain or skew Hermitian symmetry.
+pub fn is_hermitian_mode(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(matrix_test_caption(meta, "hermitian"))
+}
+
+/// The property Simulink tests, prefixed with `skew` when `Mode` selects the
+/// skew variant (`Skew-Symmetric`, `Skew-Hermitian`).
+fn matrix_test_caption(meta: &BlockMetadata, property: &str) -> String {
+    if meta
+        .get("Mode")
+        .is_some_and(|m| m.trim().to_lowercase().starts_with("skew"))
+    {
+        format!("skew\n{property}")
+    } else {
+        property.to_string()
+    }
 }
 
 /// Drop a numeric value's redundant fractional part (`3.0` → `3`).

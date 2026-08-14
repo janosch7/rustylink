@@ -332,6 +332,7 @@ pub(crate) fn port_label_display_name(
     };
 
     subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
         .or_else(explicit_port_name)
         .unwrap_or_else(fallback_name)
 }
@@ -371,10 +372,25 @@ fn subsystem_boundary_port_index(block: &Block) -> u32 {
         .unwrap_or(1)
 }
 
+/// Strip Simulink's default `In<N>` / `Out<N>` boundary-block naming so a
+/// subsystem shows the port *number* (what the Inport block's own icon draws),
+/// while user-chosen names such as `u` or `theta` are kept verbatim.
+fn simplify_boundary_name(name: &str) -> String {
+    for prefix in ["In", "Out"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.chars().all(|c| c.is_ascii_digit())
+        {
+            return rest.to_string();
+        }
+    }
+    name.to_string()
+}
+
 fn boundary_block_display_name(block: &Block) -> Option<String> {
     let name = block.name.trim();
     if !name.is_empty() {
-        return Some(name.to_string());
+        return Some(simplify_boundary_name(name));
     }
 
     block
@@ -1493,21 +1509,34 @@ pub fn render_sum_block(
     let text = colors.text;
 
     if round {
-        // Classic round Sum: first operator on the left, second at the bottom
-        // (matching the bottom-placed second input port).
-        let left_op = operators.first().copied().unwrap_or('+');
-        let bottom_op = operators.get(1).copied().unwrap_or('+');
+        // Classic round Sum: the last operator sits at the bottom (matching the
+        // bottom-placed last input port), the rest stack down the left edge.
+        let ops: &[char] = if operators.is_empty() {
+            &['+', '+']
+        } else {
+            operators
+        };
+        let side = ops.len() - 1;
+        for (i, op) in ops[..side].iter().enumerate() {
+            let f = (i as f32 + 1.0) / (side as f32 + 1.0);
+            painter.text(
+                Pos2::new(
+                    rect.left() + rect.width() * 0.28,
+                    rect.top() + (0.18 + f * 0.44) * rect.height(),
+                ),
+                Align2::CENTER_CENTER,
+                sign_str(*op),
+                font_id.clone(),
+                text,
+            );
+        }
         painter.text(
-            Pos2::new(rect.left() + rect.width() * 0.26, rect.center().y),
+            Pos2::new(
+                rect.center().x + rect.width() * 0.04,
+                rect.bottom() - rect.height() * 0.26,
+            ),
             Align2::CENTER_CENTER,
-            sign_str(left_op),
-            font_id.clone(),
-            text,
-        );
-        painter.text(
-            Pos2::new(rect.center().x, rect.bottom() - rect.height() * 0.24),
-            Align2::CENTER_CENTER,
-            sign_str(bottom_op),
+            sign_str(ops[side]),
             font_id,
             text,
         );

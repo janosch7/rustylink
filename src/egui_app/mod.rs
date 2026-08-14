@@ -73,7 +73,9 @@ pub fn port_label_display_name(
         }
     };
 
-    subsystem_boundary_port_name(block, index, logical_is_input).unwrap_or_else(fallback_name)
+    subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
+        .unwrap_or_else(fallback_name)
 }
 
 fn subsystem_boundary_port_name(
@@ -111,10 +113,25 @@ fn subsystem_boundary_port_index(block: &crate::model::Block) -> u32 {
         .unwrap_or(1)
 }
 
+/// Strip Simulink's default `In<N>` / `Out<N>` boundary-block naming so a
+/// subsystem shows the port *number* (what the Inport block's own icon draws),
+/// while user-chosen names such as `u` or `theta` are kept verbatim.
+fn simplify_boundary_name(name: &str) -> String {
+    for prefix in ["In", "Out"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.chars().all(|c| c.is_ascii_digit())
+        {
+            return rest.to_string();
+        }
+    }
+    name.to_string()
+}
+
 fn boundary_block_display_name(block: &crate::model::Block) -> Option<String> {
     let name = block.name.trim();
     if !name.is_empty() {
-        return Some(name.to_string());
+        return Some(simplify_boundary_name(name));
     }
 
     block

@@ -6,6 +6,7 @@
 
 #![cfg(feature = "egui")]
 
+use crate::simulink_libraries::labels;
 use crate::simulink_libraries::renderers;
 use crate::simulink_libraries::types::{
     BlockLabelPolicy, IOPorts, MetadataKey, SimulinkBlockDefinition, SimulinkIcon,
@@ -51,18 +52,24 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["IsTriangular"])
         .with_description("Test whether a matrix is triangular")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_metadata_keys(&[MetadataKey::with_default("Triangularity", "Upper")])
+        .with_metadata_keys(&[MetadataKey::with_default("Mode", "Upper")])
         .with_static_renderer(renderers::static_is_triangular),
     SimulinkBlockDefinition::new("Is Symmetric", CAT)
         .with_aliases(&["IsSymmetric"])
         .with_description("Test whether a matrix is symmetric")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_block_label(BlockLabelPolicy::Fixed("symmetric")),
+        .with_metadata_keys(&[MetadataKey::with_default("Mode", "Symmetric")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(
+            labels::is_symmetric_mode,
+        )),
     SimulinkBlockDefinition::new("Is Hermitian", CAT)
         .with_aliases(&["IsHermitian"])
         .with_description("Test whether a matrix is Hermitian")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_block_label(BlockLabelPolicy::Fixed("hermitian")),
+        .with_metadata_keys(&[MetadataKey::with_default("Mode", "Hermitian")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(
+            labels::is_hermitian_mode,
+        )),
     SimulinkBlockDefinition::new("Cross Product", CAT)
         .with_description("Cross product of two vectors")
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
@@ -137,6 +144,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("Matrix Concatenate", CAT)
         .with_description("Concatenate matrices")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_metadata_keys(&[MetadataKey::with_default("ConcatenateDimension", "2")])
-        .with_static_renderer(renderers::static_matrix_concatenate),
+        .with_metadata_keys(&[
+            MetadataKey::with_default("Mode", "Multidimensional array"),
+            MetadataKey::with_default("ConcatenateDimension", "2"),
+        ])
+        .with_static_renderer(renderers::static_concatenate),
 ];

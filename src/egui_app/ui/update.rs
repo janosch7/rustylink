@@ -2673,7 +2673,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(true, port_idx, in_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))
@@ -2695,7 +2695,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| !o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(false, port_idx, out_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))

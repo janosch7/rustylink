@@ -79,11 +79,29 @@ pub enum PortPlacement {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PortPositionOverride {
     pub is_input: bool,
-    /// 1-based port index.
+    /// 1-based port index, counted from the end when `from_end` is set.
     pub port_index: u32,
+    /// Count `port_index` back from the last port instead of forward from the
+    /// first.  Simulink's round Sum, for example, always puts its *last* input
+    /// on the bottom edge, whether it has two or five of them.
+    pub from_end: bool,
     pub placement: PortPlacement,
     /// Position along the chosen side, `0.0..=1.0`.
     pub fraction: f32,
+}
+
+impl PortPositionOverride {
+    /// Whether this override applies to port `index` (1-based) of a side that
+    /// has `count` ports in total.
+    pub fn matches(&self, is_input: bool, index: u32, count: u32) -> bool {
+        self.is_input == is_input
+            && index
+                == if self.from_end {
+                    count.saturating_sub(self.port_index.saturating_sub(1))
+                } else {
+                    self.port_index
+                }
+    }
 }
 
 /// Number of ports on one side of a block.

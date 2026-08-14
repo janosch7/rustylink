@@ -129,28 +129,42 @@ pub fn static_math_function(
     true
 }
 
+/// A saturation curve (flat, ramp, flat) normalised to the icon area – the
+/// marker Simulink adds to an integrator whose output is limited.
+const SATURATION_CURVE: &str = "p 0.04,0.84 0.30,0.84 0.72,0.16 0.96,0.16";
+
+/// Whether a Simulink on/off property is enabled.
+fn is_on(ctx: &RenderContext<'_>, key: &str) -> bool {
+    ctx.metadata
+        .get(key)
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("on"))
+}
+
+/// Whether a property selects an external source (`external` / `Input port`).
+fn is_external(ctx: &RenderContext<'_>, key: &str) -> bool {
+    ctx.metadata.get(key).is_some_and(|v| {
+        let v = v.trim();
+        v.eq_ignore_ascii_case("external") || v.eq_ignore_ascii_case("input port")
+    })
+}
+
 /// Static renderer for the continuous Integrator block.
 ///
-/// Simulink draws `1/s` on its own, but adds the saturation curve beside it
-/// once output limiting is enabled (`LimitOutput = on`), which is the only
-/// thing distinguishing an "Integrator Limited" instance from a plain one.
+/// The `1/s` core is constant; the configuration decorates it: `LimitOutput`
+/// adds the saturation curve, `WrapState` encircles the fraction.
 pub fn static_integrator(
     painter: &Painter,
     _block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
-    let limited = ctx
-        .metadata
-        .get("LimitOutput")
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("on"));
-    if !limited {
+    let limited = is_on(ctx, "LimitOutput");
+    let wrapped = is_on(ctx, "WrapState");
+    if !limited && !wrapped {
         return false; // fall back to the definition's plain `frac:1/s` icon
     }
-    // Fraction on the left two-thirds, saturation curve on the right third.
-    let split = rect.left() + rect.width() * 0.60;
+    let split = rect.left() + rect.width() * if limited { 0.60 } else { 1.0 };
     let frac_rect = Rect::from_min_max(rect.min, eframe::egui::pos2(split, rect.bottom()));
-    let curve_rect = Rect::from_min_max(eframe::egui::pos2(split, rect.top()), rect.max);
     crate::egui_app::render::draw_math_icon(
         painter,
         &frac_rect,
@@ -159,26 +173,42 @@ pub fn static_integrator(
         ctx.text_color,
         ctx.port_label_widths,
     );
-    crate::egui_app::render::draw_plot_icon(
-        painter,
-        &curve_rect,
-        ctx.font_scale,
-        "p 0.0,0.86 0.30,0.86 0.72,0.14 1.0,0.14",
-        ctx.text_color,
-        None,
-    );
+    if wrapped {
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            &frac_rect,
+            ctx.font_scale,
+            "c 0.5,0.5 0.46",
+            ctx.text_color,
+            None,
+        );
+    }
+    if limited {
+        let curve_rect = Rect::from_min_max(eframe::egui::pos2(split, rect.top()), rect.max);
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            &curve_rect,
+            ctx.font_scale,
+            SATURATION_CURVE,
+            ctx.text_color,
+            None,
+        );
+    }
     true
 }
 
-/// Static renderer for the Second-Order Integrator: `1/s²` with the two
-/// integral signs Simulink prints beside its `x` and `dx` outputs.
+/// Static renderer for the Second-Order Integrator: `1/s²` decorated per state.
+///
+/// The `x` stage marker (upper right) is a saturation curve when `LimitX` is
+/// on and a circle when `WrapX` is; the `dx` stage marker (lower right) is a
+/// saturation curve when `LimitDXDT` is on.
 pub fn static_second_order_integrator(
     painter: &Painter,
     _block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
-    let split = rect.left() + rect.width() * 0.68;
+    let split = rect.left() + rect.width() * 0.66;
     let frac_rect = Rect::from_min_max(rect.min, eframe::egui::pos2(split, rect.bottom()));
     crate::egui_app::render::draw_math_icon(
         painter,
@@ -188,16 +218,86 @@ pub fn static_second_order_integrator(
         ctx.text_color,
         ctx.port_label_widths,
     );
-    let signs_rect = Rect::from_min_max(eframe::egui::pos2(split, rect.top()), rect.max);
-    crate::egui_app::render::draw_plot_icon(
-        painter,
-        &signs_rect,
-        ctx.font_scale,
-        "t 0.5,0.28,0.42 \u{222B}; t 0.5,0.74,0.42 \u{222B}",
-        ctx.text_color,
-        None,
-    );
+
+    let marks = Rect::from_min_max(eframe::egui::pos2(split, rect.top()), rect.max);
+    let mut spec = String::new();
+    if is_on(ctx, "LimitX") {
+        spec.push_str("p 0.06,0.44 0.34,0.44 0.70,0.10 0.94,0.10;");
+    } else if is_on(ctx, "WrapX") {
+        spec.push_str("c 0.50,0.26 0.26; p 0.62,0.06 0.76,0.14 0.60,0.22;");
+    }
+    if is_on(ctx, "LimitDXDT") {
+        spec.push_str("p 0.06,0.92 0.34,0.92 0.70,0.58 0.94,0.58;");
+    }
+    if !spec.is_empty() {
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            &marks,
+            ctx.font_scale,
+            &spec,
+            ctx.text_color,
+            None,
+        );
+    }
     true
+}
+
+/// Input port labels for the continuous Integrator.
+///
+/// Simulink adds one port per enabled source: the external reset (labelled
+/// with the edge pictogram it triggers on) and the external initial condition
+/// (`x₀`).  The signal input itself is never labelled.
+pub fn integrator_port_labels(
+    _block: &Block,
+    meta: &super::metadata::BlockMetadata,
+    is_input: bool,
+) -> Vec<String> {
+    if !is_input {
+        return Vec::new();
+    }
+    let mut labels = vec![String::new()];
+    if let Some(glyph) = reset_glyph(meta.get("ExternalReset")) {
+        labels.push(glyph.to_string());
+    }
+    if matches!(meta.get("InitialConditionSource"), Some(s) if s.trim().eq_ignore_ascii_case("external"))
+    {
+        labels.push("x\u{2080}".to_string());
+    }
+    labels
+}
+
+/// Port labels for the Second-Order Integrator: `u` plus the external initial
+/// conditions that are enabled, and the two integrated states as outputs.
+pub fn second_order_integrator_port_labels(
+    _block: &Block,
+    meta: &super::metadata::BlockMetadata,
+    is_input: bool,
+) -> Vec<String> {
+    if !is_input {
+        return vec!["x".to_string(), "dx".to_string()];
+    }
+    let external =
+        |key: &str| matches!(meta.get(key), Some(s) if s.trim().eq_ignore_ascii_case("external"));
+    let mut labels = vec!["u".to_string()];
+    if external("ICSourceX") {
+        labels.push("x\u{2080}".to_string());
+    }
+    if external("ICSourceDXDT") {
+        labels.push("dx\u{2080}".to_string());
+    }
+    labels
+}
+
+/// The pictogram Simulink prints beside a reset port for each trigger edge.
+fn reset_glyph(external_reset: Option<&str>) -> Option<&'static str> {
+    match external_reset?.trim().to_ascii_lowercase().as_str() {
+        "" | "none" => None,
+        "rising" => Some("\u{2197}"),     // ↗
+        "falling" => Some("\u{2198}"),    // ↘
+        "either" => Some("\u{2195}"),     // ↕
+        "level hold" => Some("\u{2294}"), // ⊔
+        _ => Some("\u{2293}"),            // ⊓  (level)
+    }
 }
 
 /// Static renderer for the n-D Lookup Table: the `<n>-D T(u)` caption Simulink
@@ -280,43 +380,49 @@ pub fn static_subsystem(
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
-    let mut ins = 0usize;
-    let mut outs = 0usize;
-    let mut enabled = false;
-    let mut triggered = false;
-    if let Some(system) = block.subsystem.as_deref() {
-        for child in &system.blocks {
-            match child.block_type.as_str() {
-                "Inport" => ins += 1,
-                "Outport" => outs += 1,
-                "EnablePort" => enabled = true,
-                "TriggerPort" => triggered = true,
-                _ => {}
-            }
-        }
-    }
-    if let Some(counts) = block.port_counts.as_ref() {
-        ins = ins.max(counts.ins.unwrap_or(0) as usize);
-        outs = outs.max(counts.outs.unwrap_or(0) as usize);
-    }
-    let rows = ins.max(outs).clamp(1, 4);
+    let content = SubsystemContent::of(block);
+    let rows = content.in_names.len().max(content.out_names.len()).max(1);
     let mut spec = String::new();
     for row in 0..rows {
-        let y = (row as f32 + 0.5) / rows as f32;
-        let y = 0.20 + y * 0.60;
-        if row < ins.max(1) {
-            spec.push_str(&format!("o 0.16,{y:.3},0.13,0.09;"));
+        let y = 0.20 + (row as f32 + 0.5) / rows as f32 * 0.60;
+        let left = content.in_names.get(row);
+        let right = content.out_names.get(row);
+        if let Some(name) = left {
+            spec.push_str(&format!("t 0.08,{y:.3},0.20 {name};"));
+            spec.push_str(&format!("o 0.22,{y:.3},0.10,0.10;"));
         }
-        if row < outs.max(1) {
-            spec.push_str(&format!("o 0.84,{y:.3},0.13,0.09;"));
+        if let Some(name) = right {
+            spec.push_str(&format!("o 0.78,{y:.3},0.10,0.10;"));
+            spec.push_str(&format!("t 0.92,{y:.3},0.20 {name};"));
         }
-        spec.push_str(&format!("p 0.24,{y:.3} 0.76,{y:.3};"));
+        if left.is_some() && right.is_some() {
+            spec.push_str(&format!("p 0.27,{y:.3} 0.73,{y:.3};"));
+        }
     }
-    if enabled {
-        spec.push_str("p 0.40,0.14 0.46,0.14 0.46,0.06 0.54,0.06 0.54,0.14 0.60,0.14;");
+    // Simulink prints the conditional-execution pictogram of the port block the
+    // subsystem contains above the wiring preview.
+    if content.enabled {
+        spec.push_str("p 0.40,0.13 0.44,0.13 0.44,0.05 0.56,0.05 0.56,0.13 0.60,0.13;");
     }
-    if triggered {
-        spec.push_str("p 0.66,0.14 0.72,0.06 0.78,0.14;");
+    if content.triggered {
+        spec.push_str("p 0.42,0.13 0.42,0.05 0.50,0.05 0.50,0.13 0.58,0.13 0.58,0.05;");
+    }
+    if content.for_each {
+        spec.push_str(concat!(
+            "t 0.52,0.09,0.18 N;",
+            "b 0.54,0.12 0.72,0.44; r 0.54,0.12 0.72,0.44;",
+            "r 0.48,0.18 0.66,0.50; r 0.42,0.24 0.60,0.56"
+        ));
+    }
+    if let Some(event) = content.event.as_ref() {
+        // Simulink heads the function-call subsystem with a lifecycle pictogram
+        // and the name of the event it listens for.
+        spec.push_str("c 0.24,0.26,0.10;");
+        spec.push_str(match event.kind {
+            EventKind::Reset => "p 0.24,0.16 0.31,0.19 0.30,0.12;",
+            _ => "p 0.24,0.14 0.24,0.26;",
+        });
+        spec.push_str(&format!("t 0.58,0.26,0.26 {};", event.caption));
     }
     crate::egui_app::render::draw_plot_icon(
         painter,
@@ -327,6 +433,103 @@ pub fn static_subsystem(
         None,
     );
     true
+}
+
+/// The parts of a subsystem's contents that shape how Simulink draws it.
+struct SubsystemContent {
+    in_names: Vec<String>,
+    out_names: Vec<String>,
+    enabled: bool,
+    triggered: bool,
+    for_each: bool,
+    /// The lifecycle event a contained `EventListener` responds to – what
+    /// distinguishes initialize/reset/reinitialize/terminate function
+    /// subsystems from one another.
+    event: Option<SubsystemEvent>,
+}
+
+struct SubsystemEvent {
+    kind: EventKind,
+    caption: String,
+}
+
+#[derive(PartialEq, Eq)]
+enum EventKind {
+    Lifecycle,
+    Reset,
+}
+
+impl SubsystemEvent {
+    /// Simulink captions Initialize and Terminate functions with the event
+    /// itself; Reset and Reinitialize functions carry a user-chosen event name.
+    fn of(listener: &Block) -> SubsystemEvent {
+        let event_type = listener
+            .properties
+            .get("EventType")
+            .map(|s| s.trim())
+            .unwrap_or("Initialize");
+        let name = listener
+            .properties
+            .get("EventName")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
+        match event_type.to_ascii_lowercase().as_str() {
+            "reset" => SubsystemEvent {
+                kind: EventKind::Reset,
+                caption: name.unwrap_or("reset").to_string(),
+            },
+            "reinitialize" => SubsystemEvent {
+                kind: EventKind::Lifecycle,
+                caption: name.unwrap_or("reinit").to_string(),
+            },
+            other => SubsystemEvent {
+                kind: EventKind::Lifecycle,
+                caption: other.to_string(),
+            },
+        }
+    }
+}
+
+impl SubsystemContent {
+    fn of(block: &Block) -> Self {
+        let mut content = SubsystemContent {
+            in_names: Vec::new(),
+            out_names: Vec::new(),
+            enabled: false,
+            triggered: false,
+            for_each: false,
+            event: None,
+        };
+        if let Some(system) = block.subsystem.as_deref() {
+            for child in &system.blocks {
+                match child.block_type.as_str() {
+                    "Inport" => content.in_names.push(port_caption(child)),
+                    "Outport" => content.out_names.push(port_caption(child)),
+                    "EnablePort" => content.enabled = true,
+                    "TriggerPort" => content.triggered = true,
+                    "ForEach" => content.for_each = true,
+                    "EventListener" => content.event = Some(SubsystemEvent::of(child)),
+                    _ => {}
+                }
+            }
+        }
+        content
+    }
+}
+
+/// Caption Simulink prints for a boundary port inside a subsystem preview: the
+/// port number for the default `In1`/`Out1` names, the block name otherwise.
+fn port_caption(child: &Block) -> String {
+    let name = child.name.trim();
+    let digits: String = name
+        .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+        .to_string();
+    let stem = &name[..name.len() - digits.len()];
+    if (stem.eq_ignore_ascii_case("in") || stem.eq_ignore_ascii_case("out")) && !digits.is_empty() {
+        digits
+    } else {
+        name.to_string()
+    }
 }
 
 /// Static renderer for the Matrix Concatenate block: stacked blocks with the
@@ -374,7 +577,7 @@ pub fn static_is_triangular(
 ) -> bool {
     let lower = ctx
         .metadata
-        .get("Triangularity")
+        .get("Mode")
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("lower"));
     let spec = if lower {
         "r 0.10,0.10 0.90,0.90; p 0.10,0.10 0.90,0.90; t 0.32,0.68,0.34 L"
@@ -392,18 +595,24 @@ pub fn static_is_triangular(
     true
 }
 
-/// Static renderer for the Delay block: `z` raised to a negative superscript
-/// equal to the configured delay length (Simulink shows e.g. `z⁻²` for the
-/// default `DelayLength = 2`).
+/// Static renderer for the Delay block: `z` raised to a negative superscript.
+///
+/// The exponent is the configured `DelayLength` when the length is a dialog
+/// parameter, and the symbolic `d` once it comes from the delay-length input
+/// port (`DelayLengthSource = Input port`).
 pub fn static_delay(
     painter: &Painter,
     _block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
-    let raw = ctx.metadata.get("DelayLength").unwrap_or("2").trim();
-    let n = if raw.is_empty() { "2" } else { raw };
-    let spec = format!("sup:z^-{n}");
+    let exponent = if is_external(ctx, "DelayLengthSource") {
+        "d".to_string()
+    } else {
+        let raw = ctx.metadata.get("DelayLength").unwrap_or("2").trim();
+        if raw.is_empty() { "2" } else { raw }.to_string()
+    };
+    let spec = format!("sup:z^-{exponent}");
     crate::egui_app::render::draw_math_icon(
         painter,
         rect,
@@ -528,6 +737,480 @@ fn format_coeff(mag: f64) -> String {
         let s = format!("{mag:.3}");
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
+}
+
+/// Input port labels for the Delay block, derived from `InputPortMap`.
+///
+/// Simulink encodes the enabled optional inputs as a comma-separated token
+/// list (`u0,p1,e6,r5,p4`): the signal, the delay length, the enable, the
+/// reset and the external initial condition, in the order they appear on the
+/// block.  A Delay with only the signal input is left unlabelled.
+pub fn delay_port_labels(
+    _block: &Block,
+    meta: &super::metadata::BlockMetadata,
+    is_input: bool,
+) -> Vec<String> {
+    if !is_input {
+        return Vec::new();
+    }
+    let map = meta.get("InputPortMap").unwrap_or("u0");
+    let tokens: Vec<&str> = map
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if tokens.len() <= 1 {
+        return Vec::new();
+    }
+    tokens
+        .iter()
+        .map(|token| match token.chars().next() {
+            Some('u') => "u".to_string(),
+            Some('e') => "\u{2293}".to_string(),
+            Some('r') => reset_glyph(meta.get("ExternalReset"))
+                .unwrap_or("\u{2293}")
+                .to_string(),
+            // `p1` is the delay length, `p4` the initial condition; Simulink
+            // lists the length first.
+            Some('p') if *token == "p1" => "d".to_string(),
+            Some('p') => "x0".to_string(),
+            _ => String::new(),
+        })
+        .collect()
+}
+
+/// Static renderer for the Algebraic Constraint block: `Solve` above the
+/// constraint the block enforces (`f(z) = 0` unless the model overrides it).
+pub fn static_algebraic_constraint(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let constraint = ctx
+        .metadata
+        .get("Constraint")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("f(z) = 0");
+    crate::egui_app::render::draw_math_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &format!("lines:Solve|{constraint}"),
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
+}
+
+/// Fork line-art splitting one input into the two named parts.
+fn split_fork(top: &str, bottom: &str) -> String {
+    format!(
+        concat!(
+            "p 0.04,0.50 0.24,0.50; p 0.24,0.50 0.40,0.24 0.56,0.24;",
+            "p 0.24,0.50 0.40,0.76 0.56,0.76;",
+            "t 0.78,0.24,0.30 {top}; t 0.78,0.76,0.30 {bottom}"
+        ),
+        top = top,
+        bottom = bottom
+    )
+}
+
+/// Fork line-art merging the two named parts into one output.
+fn merge_fork(top: &str, bottom: &str) -> String {
+    format!(
+        concat!(
+            "t 0.22,0.24,0.30 {top}; t 0.22,0.76,0.30 {bottom};",
+            "p 0.44,0.24 0.60,0.24 0.76,0.50; p 0.44,0.76 0.60,0.76 0.76,0.50;",
+            "p 0.76,0.50 0.96,0.50"
+        ),
+        top = top,
+        bottom = bottom
+    )
+}
+
+/// Draw either the two-part fork icon or the single-part formula, depending on
+/// which parts the block is configured to expose.
+fn draw_complex_icon(
+    painter: &Painter,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+    fork: Option<String>,
+    formula: &str,
+) -> bool {
+    match fork {
+        Some(spec) => crate::egui_app::render::draw_plot_icon(
+            painter,
+            rect,
+            ctx.font_scale,
+            &spec,
+            ctx.text_color,
+            ctx.port_label_widths,
+        ),
+        None => crate::egui_app::render::draw_math_icon(
+            painter,
+            rect,
+            ctx.font_scale,
+            formula,
+            ctx.text_color,
+            ctx.port_label_widths,
+        ),
+    }
+    true
+}
+
+/// Static renderer for Complex to Magnitude-Angle: `Output` selects whether
+/// both parts fork out or a single `|u|` / `∠u` is produced.
+pub fn static_complex_to_magnitude_angle(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let (fork, formula) = match ctx.metadata.get("Output").unwrap_or("").trim() {
+        "Magnitude" => (None, "|u|"),
+        "Angle" => (None, "\u{2220}u"),
+        _ => (Some(split_fork("|u|", "\u{2220}u")), ""),
+    };
+    draw_complex_icon(painter, rect, ctx, fork, formula)
+}
+
+/// Static renderer for Complex to Real-Imag (`Output`: both, `Re(u)`, `Im(u)`).
+pub fn static_complex_to_real_imag(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let (fork, formula) = match ctx.metadata.get("Output").unwrap_or("").trim() {
+        "Real" => (None, "Re(u)"),
+        "Imag" => (None, "Im(u)"),
+        _ => (Some(split_fork("Re", "Im")), ""),
+    };
+    draw_complex_icon(painter, rect, ctx, fork, formula)
+}
+
+/// Static renderer for Magnitude-Angle to Complex.  When only one part comes
+/// from the input port, Simulink names the dialog-supplied one `K`.
+pub fn static_magnitude_angle_to_complex(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let (fork, formula) = match ctx.metadata.get("Input").unwrap_or("").trim() {
+        "Magnitude" => (None, "u \u{2220}K"),
+        "Angle" => (None, "K \u{2220}u"),
+        _ => (Some(merge_fork("|u|", "\u{2220}u")), ""),
+    };
+    draw_complex_icon(painter, rect, ctx, fork, formula)
+}
+
+/// Static renderer for Real-Imag to Complex (`Input`: both, `u + jK`, `K + ju`).
+pub fn static_real_imag_to_complex(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let (fork, formula) = match ctx.metadata.get("Input").unwrap_or("").trim() {
+        "Real" => (None, "u + jK"),
+        "Imag" => (None, "K + ju"),
+        _ => (Some(merge_fork("Re", "Im")), ""),
+    };
+    draw_complex_icon(painter, rect, ctx, fork, formula)
+}
+
+/// Static renderer for the Concatenate block.
+///
+/// `Mode` picks the pictogram: multidimensional-array concatenation is drawn
+/// as two joined cuboids labelled with `ConcatenateDimension`, while vector
+/// and matrix concatenation are the stacked slabs of the incoming signals.
+pub fn static_concatenate(
+    painter: &Painter,
+    block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let multidimensional = ctx
+        .metadata
+        .get("Mode")
+        .is_some_and(|m| m.to_lowercase().contains("multidimensional"));
+    if multidimensional {
+        return static_matrix_concatenate(painter, block, rect, ctx);
+    }
+    let inputs = block
+        .port_counts
+        .as_ref()
+        .and_then(|c| c.ins)
+        .unwrap_or(2)
+        .clamp(2, 6);
+    let mut spec = String::new();
+    for i in 1..inputs {
+        let y = i as f32 / inputs as f32;
+        spec.push_str(&format!("p 0.0,{y:.3} 1.0,{y:.3};"));
+    }
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        None,
+    );
+    true
+}
+
+/// Static renderer for the Data Type Conversion block: the target type, or
+/// `convert` when the type is inherited.
+pub fn static_data_type_conversion(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let out_type = ctx.metadata.get("OutDataTypeStr").unwrap_or("").trim();
+    let label = if out_type.is_empty() || out_type.starts_with("Inherit") {
+        "convert"
+    } else {
+        out_type
+    };
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &format!("t 0.50,0.50,0.44 {label}"),
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
+}
+
+/// Static renderer for the Signal Conversion block.
+///
+/// A plain signal copy fans the individual elements into a bus; the bus
+/// conversions draw three signal lines through the conversion bar with the
+/// virtual side dashed.
+pub fn static_signal_conversion(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let output = ctx.metadata.get("ConversionOutput").unwrap_or("").trim();
+    let spec: String = match output {
+        "Virtual bus" | "Nonvirtual bus" => {
+            // The dashed middle line marks the virtual side of the conversion.
+            let (left, right) = if output == "Virtual bus" {
+                (
+                    "p 0.06,0.50 0.16,0.50; p 0.22,0.50 0.32,0.50;",
+                    "p 0.62,0.50 0.94,0.50;",
+                )
+            } else {
+                (
+                    "p 0.06,0.50 0.38,0.50;",
+                    "p 0.62,0.50 0.72,0.50; p 0.78,0.50 0.94,0.50;",
+                )
+            };
+            format!(
+                "p 0.06,0.28 0.94,0.28; p 0.06,0.72 0.94,0.72; {left} {right} b 0.40,0.10 0.60,0.90; r 0.40,0.10 0.60,0.90"
+            )
+        }
+        _ => concat!(
+            "b 0.10,0.10 0.30,0.28; r 0.10,0.10 0.30,0.28;",
+            "b 0.10,0.41 0.30,0.59; r 0.10,0.41 0.30,0.59;",
+            "b 0.10,0.72 0.30,0.90; r 0.10,0.72 0.30,0.90;",
+            "b 0.68,0.10 0.88,0.36; r 0.68,0.10 0.88,0.36;",
+            "b 0.68,0.37 0.88,0.63; r 0.68,0.37 0.88,0.63;",
+            "b 0.68,0.64 0.88,0.90; r 0.68,0.64 0.88,0.90;",
+            "p 0.30,0.19 0.68,0.23; p 0.30,0.50 0.68,0.50; p 0.30,0.81 0.68,0.77"
+        )
+        .to_string(),
+    };
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        None,
+    );
+    true
+}
+
+/// Static renderer for the Selector block.
+///
+/// A one-dimensional selection is drawn literally: one marker per input
+/// element, filled when the index vector picks it, wired across to the output
+/// elements.  Multi-dimensional selections are labelled `U`/`Y` instead.
+pub fn static_selector(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let dims: u32 = ctx
+        .metadata
+        .get("NumberOfDimensions")
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(1);
+    if dims > 1 {
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            rect,
+            ctx.font_scale,
+            "t 0.20,0.50,0.34 U; t 0.80,0.50,0.34 Y",
+            ctx.text_color,
+            None,
+        );
+        return true;
+    }
+
+    let width: usize = ctx
+        .metadata
+        .get("InputPortWidth")
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(3usize)
+        .clamp(1, 6);
+    let selected: Vec<usize> = ctx
+        .metadata
+        .get("Indices")
+        .unwrap_or("[1]")
+        .split([',', ' ', '[', ']'])
+        .filter_map(|t| t.trim().parse::<usize>().ok())
+        .collect();
+
+    let mut spec = String::new();
+    let mut out_row = 0usize;
+    let out_count = selected.len().max(1);
+    for i in 0..width {
+        let y = (i as f32 + 0.5) / width as f32;
+        let y = 0.14 + y * 0.72;
+        let picked = selected.contains(&(i + 1));
+        if picked {
+            spec.push_str(&format!("f 0.14,{:.3} 0.30,{:.3};", y - 0.09, y + 0.09));
+            let oy = (out_row as f32 + 0.5) / out_count as f32;
+            let oy = 0.14 + oy * 0.72;
+            spec.push_str(&format!("f 0.70,{:.3} 0.86,{:.3};", oy - 0.09, oy + 0.09));
+            spec.push_str(&format!("p 0.30,{y:.3} 0.70,{oy:.3};"));
+            out_row += 1;
+        } else {
+            spec.push_str(&format!("r 0.16,{:.3} 0.28,{:.3};", y - 0.07, y + 0.07));
+        }
+    }
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        None,
+    );
+    true
+}
+
+/// Static renderer for the Multiport Switch: the selector lever routing the
+/// numbered data inputs to the output.
+pub fn static_multiport_switch(
+    painter: &Painter,
+    block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let data_inputs = multiport_switch_data_inputs(block, ctx.metadata);
+    // Ports are spaced evenly down the left edge: the control input on top,
+    // then one contact per data input, the first of which the lever selects.
+    let total = data_inputs + 1;
+    let port_y = |index: u32| (index as f32 + 1.0) / (total as f32 + 1.0);
+    let control_y = port_y(0);
+    let mut spec = format!(
+        "p 0.0,{control_y:.3} 0.30,{control_y:.3}; p 0.30,{:.3} 0.30,{:.3};",
+        control_y - 0.06,
+        control_y + 0.06
+    );
+    let first_contact_y = port_y(1);
+    spec.push_str(&format!(
+        "p 0.72,{first_contact_y:.3} 0.90,0.50; p 0.90,0.50 1.0,0.50;"
+    ));
+    for i in 0..data_inputs {
+        let y = port_y(i + 1);
+        spec.push_str(&format!(
+            "p 0.0,{y:.3} 0.64,{y:.3}; r 0.64,{:.3} 0.72,{:.3};",
+            y - 0.035,
+            y + 0.035
+        ));
+    }
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
+}
+
+/// Number of data inputs a Multiport Switch exposes (the port count minus the
+/// control input, or the configured `Inputs` count).
+fn multiport_switch_data_inputs(block: &Block, meta: &super::metadata::BlockMetadata) -> u32 {
+    meta.get("Inputs")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .or_else(|| {
+            block
+                .port_counts
+                .as_ref()
+                .and_then(|c| c.ins)
+                .map(|n| n.saturating_sub(1))
+        })
+        .unwrap_or(3)
+        .max(1)
+}
+
+/// Input port labels for the Multiport Switch: the unlabelled control input
+/// followed by the data inputs, the last of which is also the default (`*`).
+pub fn multiport_switch_port_labels(
+    block: &Block,
+    meta: &super::metadata::BlockMetadata,
+    is_input: bool,
+) -> Vec<String> {
+    if !is_input {
+        return Vec::new();
+    }
+    let data = multiport_switch_data_inputs(block, meta);
+    let mut labels = vec![String::new()];
+    for i in 1..=data {
+        labels.push(if i == data {
+            format!("*, {i}")
+        } else {
+            i.to_string()
+        });
+    }
+    labels
+}
+
+/// Static renderer for the C Function block: a bold `C` with the two raised
+/// plus signs of the C++ logo.
+pub fn static_c_function(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        concat!(
+            "t 0.38,0.52,0.60 C;",
+            "p 0.62,0.30 0.78,0.30; p 0.70,0.22 0.70,0.38;",
+            "p 0.62,0.60 0.78,0.60; p 0.70,0.52 0.70,0.68"
+        ),
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
 }
 
 /// Static renderer for Goto/From blocks (draws the tag label).

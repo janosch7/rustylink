@@ -18,10 +18,11 @@ const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
 }
 
-/// Place the Sum block's second input at the bottom (classic Simulink layout).
+/// Place the Sum block's last input at the bottom (classic Simulink layout).
 const SUM_PORT_OVERRIDES: &[PortPositionOverride] = &[PortPositionOverride {
     is_input: true,
-    port_index: 2,
+    port_index: 1,
+    from_end: true,
     placement: PortPlacement::Bottom,
     fraction: 0.5,
 }];
@@ -106,11 +107,18 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
         ),
     // ── Signal routing ─────────────────────────────────────────────────
-    // Simulink draws all five of these as a solid bar the height of the block.
+    // Vector/matrix concatenation stacks the inputs inside a plain rectangle;
+    // multidimensional-array mode draws joined cuboids instead.
     SimulinkBlockDefinition::new("Concatenate", "Signal Routing")
+        .with_aliases(&["Vector Concatenate"])
         .with_description("Concatenate input signals")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
-        .with_shape(SimulinkShape::FilledBlack),
+        .with_metadata_keys(&[
+            MetadataKey::with_default("Mode", "Vector"),
+            MetadataKey::with_default("ConcatenateDimension", "2"),
+        ])
+        .with_static_renderer(renderers::static_concatenate),
+    // Simulink draws all four of these as a solid bar the height of the block.
     SimulinkBlockDefinition::new("Mux", "Signal Routing")
         .with_description("Combine signals into a vector")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
@@ -129,11 +137,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_shape(SimulinkShape::FilledBlack),
     SimulinkBlockDefinition::new("ComplexToRealImag", "Math Operations")
         .with_description("Split a complex signal into real and imaginary parts")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
-        .with_icon(SimulinkIcon::Plot(
-            "p 0.1,0.5 0.45,0.5; p 0.45,0.5 0.9,0.2; p 0.45,0.5 0.9,0.8",
-        ))
-        .with_port_labels(PortLabelPolicy::None, PortLabelPolicy::Fixed(&["Re", "Im"])),
+        .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
+        .with_metadata_keys(&[MetadataKey::with_default("Output", "Real and imag")])
+        .with_static_renderer(renderers::static_complex_to_real_imag),
     SimulinkBlockDefinition::new("ManualSwitch", "Signal Routing")
         .with_aliases(&["Manual Switch"])
         .with_description("Manually switch between two inputs")

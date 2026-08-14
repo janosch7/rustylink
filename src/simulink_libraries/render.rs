@@ -143,6 +143,52 @@ pub fn render_block_interior(
     );
 }
 
+/// Resolve the label of a single port from the block's definition.
+///
+/// This is the catalog-side entry point used by the UI's port-label resolver so
+/// that [`super::types::PortLabelPolicy::MetadataDependent`] policies actually
+/// take effect: the definition is resolved, its metadata extracted, and the
+/// policy asked for the label of `index` (1-based).  `None` means "the policy
+/// has nothing to say for this port", letting the caller fall back.
+pub fn port_label(block: &Block, index: u32, is_input: bool) -> Option<String> {
+    use super::types::PortLabelPolicy;
+
+    let def = resolve_definition(block);
+    let policy = if is_input {
+        def.input_port_label
+    } else {
+        def.output_port_label
+    };
+    let names = match policy {
+        PortLabelPolicy::None => return None,
+        PortLabelPolicy::Fixed(list) => list.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        PortLabelPolicy::MetadataDependent(f) => {
+            let metadata = extract_metadata(block, def);
+            f(block, &metadata, is_input)
+        }
+    };
+    if index == 0 {
+        return None;
+    }
+    names
+        .get((index - 1) as usize)
+        .filter(|s| !s.is_empty())
+        .cloned()
+}
+
+/// Whether the block's definition wants labels drawn on the given port side.
+pub fn shows_port_labels(block: &Block, is_input: bool) -> bool {
+    use super::types::PortLabelPolicy;
+
+    let def = resolve_definition(block);
+    let policy = if is_input {
+        def.input_port_label
+    } else {
+        def.output_port_label
+    };
+    !matches!(policy, PortLabelPolicy::None)
+}
+
 /// Resolve the textual block label per the definition's policy.
 fn block_label_text(
     block: &Block,

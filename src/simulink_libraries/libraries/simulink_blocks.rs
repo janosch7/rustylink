@@ -38,12 +38,6 @@ macro_rules! axes {
     };
 }
 
-/// One line fanning out into two – the splitter Simulink draws on the
-/// "Complex to …" blocks, whose real identity is in their port labels.
-const SPLIT_FORK: &str = "p 0.1,0.5 0.45,0.5; p 0.45,0.5 0.9,0.2; p 0.45,0.5 0.9,0.8";
-/// Two lines merging into one – the "… to Complex" counterpart.
-const MERGE_FORK: &str = "p 0.1,0.2 0.55,0.5; p 0.1,0.8 0.55,0.5; p 0.55,0.5 0.9,0.5";
-
 /// A jittery trace – Simulink's icon for the random / noise sources.
 const NOISE_TRACE: &str = concat!(
     "p 0.05,0.52 0.12,0.28 0.19,0.66 0.26,0.34 0.33,0.74 0.40,0.22 0.47,0.58",
@@ -97,13 +91,23 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_icon(math("frac:\u{0394}u/\u{0394}t")),
 
     // Simulink draws the plain Integrator as `1/s`; enabling output limits
-    // (`LimitOutput`) adds the saturation curve beside it.
+    // (`LimitOutput`) or state wrapping (`WrapState`) decorates it, and the
+    // external reset / initial-condition sources add labelled input ports.
     SimulinkBlockDefinition::new("Integrator", "Continuous")
         .with_description("Integrate input signal over time")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
+        .with_ports(IOPorts::Variable(1), IOPorts::Fixed(1))
         .with_icon(math("frac:1/s"))
-        .with_metadata_keys(&[MetadataKey::with_default("LimitOutput", "off")])
-        .with_static_renderer(renderers::static_integrator),
+        .with_metadata_keys(&[
+            MetadataKey::with_default("LimitOutput", "off"),
+            MetadataKey::with_default("WrapState", "off"),
+            MetadataKey::with_default("ExternalReset", "none"),
+            MetadataKey::with_default("InitialConditionSource", "internal"),
+        ])
+        .with_static_renderer(renderers::static_integrator)
+        .with_port_labels(
+            PortLabelPolicy::MetadataDependent(renderers::integrator_port_labels),
+            PortLabelPolicy::None,
+        ),
 
     SimulinkBlockDefinition::new("TransferFcn", "Continuous")
         .with_aliases(&["Transfer Fcn", "Transfer Function"])
@@ -118,11 +122,18 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("SecondOrderIntegrator", "Continuous")
         .with_aliases(&["Second-Order Integrator"])
         .with_description("Integrate twice: acceleration to position")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
+        .with_ports(IOPorts::Variable(1), IOPorts::Fixed(2))
+        .with_metadata_keys(&[
+            MetadataKey::with_default("LimitX", "off"),
+            MetadataKey::with_default("WrapX", "off"),
+            MetadataKey::with_default("LimitDXDT", "off"),
+            MetadataKey::with_default("ICSourceX", "internal"),
+            MetadataKey::with_default("ICSourceDXDT", "internal"),
+        ])
         .with_static_renderer(renderers::static_second_order_integrator)
         .with_port_labels(
-            PortLabelPolicy::Fixed(&["u"]),
-            PortLabelPolicy::Fixed(&["x", "dx"]),
+            PortLabelPolicy::MetadataDependent(renderers::second_order_integrator_port_labels),
+            PortLabelPolicy::MetadataDependent(renderers::second_order_integrator_port_labels),
         ),
 
     SimulinkBlockDefinition::new("DescriptorStateSpace", "Continuous")
@@ -169,9 +180,18 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     // ═══════════════════════════════════════════════════════════════════════
     SimulinkBlockDefinition::new("Delay", "Discrete")
         .with_description("Delay input by variable number of sample periods")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_metadata_keys(&[MetadataKey::with_default("DelayLength", "2")])
-        .with_static_renderer(renderers::static_delay),
+        .with_ports(IOPorts::Variable(1), IOPorts::Fixed(1))
+        .with_metadata_keys(&[
+            MetadataKey::with_default("DelayLength", "2"),
+            MetadataKey::with_default("DelayLengthSource", "Dialog"),
+            MetadataKey::with_default("InputPortMap", "u0"),
+            MetadataKey::with_default("ExternalReset", "None"),
+        ])
+        .with_static_renderer(renderers::static_delay)
+        .with_port_labels(
+            PortLabelPolicy::MetadataDependent(renderers::delay_port_labels),
+            PortLabelPolicy::None,
+        ),
 
     SimulinkBlockDefinition::new("DiscreteIntegrator", "Discrete")
         .with_aliases(&["Discrete-Time Integrator", "Discrete Time Integrator"])
@@ -339,38 +359,30 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("ComplexToMagnitudeAngle", "Math Operations")
         .with_aliases(&["Complex to Magnitude-Angle"])
         .with_description("Split complex signal to magnitude and angle")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(2))
-        .with_icon(plot(SPLIT_FORK))
-        .with_port_labels(
-            PortLabelPolicy::None,
-            PortLabelPolicy::Fixed(&["|u|", "\u{2220}u"]),
-        ),
+        .with_ports(IOPorts::Fixed(1), IOPorts::Variable(2))
+        .with_metadata_keys(&[MetadataKey::with_default("Output", "Magnitude and angle")])
+        .with_static_renderer(renderers::static_complex_to_magnitude_angle),
 
     SimulinkBlockDefinition::new("MagnitudeAngleToComplex", "Math Operations")
         .with_aliases(&["Magnitude-Angle to Complex"])
         .with_description("Combine magnitude and angle into complex signal")
-        .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_icon(plot(MERGE_FORK))
-        .with_port_labels(
-            PortLabelPolicy::Fixed(&["|u|", "\u{2220}u"]),
-            PortLabelPolicy::None,
-        ),
+        .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
+        .with_metadata_keys(&[MetadataKey::with_default("Input", "Magnitude and angle")])
+        .with_static_renderer(renderers::static_magnitude_angle_to_complex),
 
     SimulinkBlockDefinition::new("RealImagToComplex", "Math Operations")
         .with_aliases(&["Real-Imag to Complex"])
         .with_description("Combine real and imaginary into complex signal")
-        .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_icon(plot(MERGE_FORK))
-        .with_port_labels(
-            PortLabelPolicy::Fixed(&["Re", "Im"]),
-            PortLabelPolicy::None,
-        ),
+        .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
+        .with_metadata_keys(&[MetadataKey::with_default("Input", "Real and imag")])
+        .with_static_renderer(renderers::static_real_imag_to_complex),
 
     SimulinkBlockDefinition::new("AlgebraicConstraint", "Math Operations")
         .with_aliases(&["Algebraic Constraint"])
         .with_description("Solve algebraic loop: f(z) = 0")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(math("lines:Solve|f(z) = 0"))
+        .with_metadata_keys(&[MetadataKey::with_default("Constraint", "f(z) = 0")])
+        .with_static_renderer(renderers::static_algebraic_constraint)
         .with_port_labels(
             PortLabelPolicy::Fixed(&["f(z)"]),
             PortLabelPolicy::Fixed(&["z"]),
@@ -380,7 +392,10 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["MinMax Running Resettable"])
         .with_description("Running min/max with external reset")
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
-        .with_icon(icon("min(u,y)"))
+        .with_metadata_keys(&[MetadataKey::with_default("Function", "min")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(
+            labels::minmax_running_function,
+        ))
         .with_port_labels(
             PortLabelPolicy::Fixed(&["u", "R"]),
             PortLabelPolicy::Fixed(&["y"]),
@@ -403,7 +418,8 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Is Hermitian"])
         .with_description("Test whether matrix is Hermitian")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("Aᴴ")),
+        .with_metadata_keys(&[MetadataKey::with_default("Mode", "Hermitian")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::is_hermitian_mode)),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Model Verification / Testing
@@ -556,8 +572,10 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("PMIOPort", "Ports & Subsystems")
         .with_aliases(&["Connection Port", "Simscape Port"])
         .with_description("Physical modeling connection port")
-        .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(icon("\u{21C6}")),
+        .with_ports(IOPorts::None, IOPorts::Fixed(1))
+        .with_shape(SimulinkShape::Obround)
+        .with_metadata_keys(&[MetadataKey::with_default("Port", "1")])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::port_number)),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Signal Attributes
@@ -566,7 +584,8 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Data Type Conversion"])
         .with_description("Convert signal to specified data type")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_block_label(BlockLabelPolicy::Fixed("convert")),
+        .with_metadata_keys(&[MetadataKey::with_default("OutDataTypeStr", "Inherit: Inherit via back propagation")])
+        .with_static_renderer(renderers::static_data_type_conversion),
 
     // Simulink draws the propagated width above a diagonal probe line.
     SimulinkBlockDefinition::new("Width", "Signal Attributes")
@@ -578,11 +597,8 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["Signal Conversion"])
         .with_description("Convert between signal types")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(plot(concat!(
-            "r 0.05,0.08 0.28,0.28; r 0.05,0.40 0.28,0.60; r 0.05,0.72 0.28,0.92;",
-            "r 0.74,0.10 0.95,0.90;",
-            "p 0.28,0.18 0.74,0.30; p 0.28,0.50 0.74,0.50; p 0.28,0.82 0.74,0.70"
-        ))),
+        .with_metadata_keys(&[MetadataKey::with_default("ConversionOutput", "Signal copy")])
+        .with_static_renderer(renderers::static_signal_conversion),
 
     SimulinkBlockDefinition::new("BusToVector", "Signal Attributes")
         .with_aliases(&["Bus to Vector"])
@@ -623,23 +639,23 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("MultiPortSwitch", "Signal Routing")
         .with_aliases(&["Multiport Switch"])
         .with_description("Select one of N inputs based on control signal")
-        .with_ports(IOPorts::Variable(3), IOPorts::Fixed(1))
-        .with_icon(plot(concat!(
-            "p 0.05,0.20 0.30,0.20; d 0.34,0.20 0.05;",
-            "p 0.05,0.50 0.30,0.50; d 0.34,0.50 0.05;",
-            "p 0.05,0.80 0.30,0.80; d 0.34,0.80 0.05;",
-            "p 0.34,0.20 0.80,0.50; p 0.80,0.50 0.97,0.50"
-        ))),
+        .with_ports(IOPorts::Variable(4), IOPorts::Fixed(1))
+        .with_metadata_keys(&[MetadataKey::with_default("Inputs", "")])
+        .with_static_renderer(renderers::static_multiport_switch)
+        .with_port_labels(
+            PortLabelPolicy::MetadataDependent(renderers::multiport_switch_port_labels),
+            PortLabelPolicy::None,
+        ),
 
     SimulinkBlockDefinition::new("Selector", "Signal Routing")
         .with_description("Select input elements from a vector/matrix")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
-        .with_icon(plot(concat!(
-            "r 0.06,0.06 0.94,0.94;",
-            "d 0.20,0.22 0.06; d 0.20,0.78 0.06; r 0.14,0.44 0.27,0.57;",
-            "d 0.80,0.30 0.06; d 0.80,0.70 0.06;",
-            "p 0.20,0.22 0.80,0.30; p 0.20,0.78 0.80,0.70"
-        ))),
+        .with_metadata_keys(&[
+            MetadataKey::with_default("NumberOfDimensions", "1"),
+            MetadataKey::with_default("InputPortWidth", "3"),
+            MetadataKey::with_default("Indices", "[1]"),
+        ])
+        .with_static_renderer(renderers::static_selector),
 
     SimulinkBlockDefinition::new("Switch", "Signal Routing")
         .with_description("Switch between two inputs based on threshold")
@@ -818,9 +834,9 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
 
     SimulinkBlockDefinition::new("CFunction", "User-Defined Functions")
         .with_aliases(&["C Function", "C Caller"])
-        .with_description("Call external C code")
+        .with_description("Call external C++ code")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_icon(icon("C\u{2021}")),
+        .with_static_renderer(renderers::static_c_function),
 
     SimulinkBlockDefinition::new("MATLABFunction", "User-Defined Functions")
         .with_aliases(&["MATLAB Function", "MATLAB Fcn", "Interpreted MATLAB Function"])
