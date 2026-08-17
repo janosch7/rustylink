@@ -249,6 +249,9 @@ pub struct RenderContext<'a> {
 /// rendering; returning `true` means the renderer fully handled the interior.
 pub type StaticRendererFn = fn(&Painter, &Block, &eframe::egui::Rect, &RenderContext<'_>) -> bool;
 
+/// Signature of a property-driven port-position override selector.
+pub type PortOverridesFn = fn(&Block, &BlockMetadata) -> &'static [PortPositionOverride];
+
 /// Signature of an interior renderer used when **live mode is ON**.
 ///
 /// This is the single renderer type for live mode and carries everything a
@@ -336,6 +339,11 @@ pub struct SimulinkBlockDefinition {
     pub live_renderer: Option<LiveRendererFn>,
     /// Per-port position overrides.
     pub port_position_overrides: &'static [PortPositionOverride],
+    /// Per-port position overrides that depend on the block's properties, e.g.
+    /// a round Sum puts its last input on the bottom edge while the
+    /// rectangular one keeps every input on the left.  Takes precedence over
+    /// [`Self::port_position_overrides`] when set.
+    pub port_overrides_fn: Option<PortOverridesFn>,
     /// Properties extracted from `block.properties` into metadata, each with an
     /// optional default applied when the model omits the property.
     pub metadata_keys: &'static [MetadataKey],
@@ -388,6 +396,7 @@ impl SimulinkBlockDefinition {
             static_renderer: None,
             live_renderer: None,
             port_position_overrides: &[],
+            port_overrides_fn: None,
             metadata_keys: &[],
             metadata_fn: None,
             compute_instance_label: None,
@@ -453,6 +462,11 @@ impl SimulinkBlockDefinition {
 
     pub const fn with_port_overrides(mut self, overrides: &'static [PortPositionOverride]) -> Self {
         self.port_position_overrides = overrides;
+        self
+    }
+
+    pub const fn with_port_overrides_fn(mut self, f: PortOverridesFn) -> Self {
+        self.port_overrides_fn = Some(f);
         self
     }
 

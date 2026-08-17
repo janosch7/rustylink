@@ -181,6 +181,18 @@ pub fn stroke_block_body(
 }
 
 pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
+    let mut cfg = lookup_block_type_cfg(block);
+    // Port placement can depend on the block's own properties (a round Sum
+    // wraps its last input onto the bottom edge, the rectangular one does not).
+    let def = crate::simulink_libraries::resolve_definition(block);
+    if let Some(f) = def.port_overrides_fn {
+        let metadata = crate::simulink_libraries::metadata::extract_metadata(block, def);
+        cfg.port_position_overrides = f(block, &metadata).to_vec();
+    }
+    cfg
+}
+
+fn lookup_block_type_cfg(block: &Block) -> BlockTypeConfig {
     let map = block_types::get_block_type_config_map();
     let Ok(g) = map.read() else {
         return BlockTypeConfig::default();

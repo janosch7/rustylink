@@ -22,17 +22,26 @@ use crate::egui_app::state::{
     LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
 };
 use crate::egui_app::text::highlight_query_job;
-use crate::egui_app::{get_block_type_cfg, port_label_display_name};
+use crate::egui_app::{get_block_type_cfg, port_label_defined_name, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use egui_phosphor_icons::icons::{ARROW_UP, FOLDER_OPEN};
 use std::collections::{BTreeSet, HashMap};
 
-/// Shallow clone of a block that skips the expensive subsystem tree.
-/// Used for rendering to avoid deep-cloning entire subsystem contents every frame.
+/// Shallow clone of a block that prunes the expensive subsystem tree.
+///
+/// Rendering a subsystem needs its *direct* children – Simulink previews a
+/// subsystem from the boundary ports and conditional-execution port blocks it
+/// contains – but never the nested systems below them, which are what make a
+/// deep clone expensive.
 fn shallow_clone_block(b: &crate::model::Block) -> crate::model::Block {
     let mut clone = b.clone();
-    // Skip subsystem content - it's not needed for rendering and is very expensive to clone
-    clone.subsystem = None;
+    if let Some(system) = clone.subsystem.as_deref_mut() {
+        system.lines.clear();
+        system.annotations.clear();
+        for child in &mut system.blocks {
+            child.subsystem = None;
+        }
+    }
     clone
 }
 
@@ -2486,6 +2495,58 @@ pub(crate) fn update_internal(
                             }
                     }
                 });
+            }
+        }
+
+        // Simulink prints a port's label whether or not a signal is attached,
+        // so ask for one on every port the model/catalog actually names – the
+        // requests above only cover wired-up ports.
+        {
+            let wired: std::collections::HashSet<(String, u32, bool)> = port_label_requests
+                .iter()
+                .map(|(sid, index, is_input, _)| (sid.clone(), *index, *is_input))
+                .collect();
+            for (b, _) in &blocks {
+                let Some(sid) = b.sid.as_ref() else { continue };
+                let Some(brect) = sid_screen_map.get(sid).copied() else {
+                    continue;
+                };
+                let cfg = get_block_type_cfg(b);
+                let in_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.ins)
+                    .unwrap_or(cfg.default_ins);
+                let out_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.outs)
+                    .unwrap_or(cfg.default_outs);
+                if in_count == 0 && out_count == 0 {
+                    continue;
+                }
+                let (ins, outs) = crate::egui_app::geometry::port_indicator_positions_with_overrides(
+                    brect,
+                    in_count,
+                    out_count,
+                    b.block_mirror.unwrap_or(false),
+                    &cfg.port_position_overrides,
+                );
+                let mut request = |index: usize, is_input: bool, y: f32| {
+                    let index = index as u32 + 1;
+                    if wired.contains(&(sid.clone(), index, is_input)) {
+                        return;
+                    }
+                    if port_label_defined_name(b, index, is_input, &cfg).is_some() {
+                        port_label_requests.push((sid.clone(), index, is_input, y));
+                    }
+                };
+                for (i, p) in ins.iter().enumerate() {
+                    request(i, true, p.y);
+                }
+                for (i, p) in outs.iter().enumerate() {
+                    request(i, false, p.y);
+                }
             }
         }
 

@@ -23,13 +23,31 @@ fn body_colors(ctx: &RenderContext<'_>) -> crate::egui_app::render::BodyColors {
     }
 }
 
+/// Whether a Sum block's `IconShape` selects the round body.
+fn sum_is_round(icon_shape: Option<&str>) -> bool {
+    !icon_shape.is_some_and(|s| {
+        let s = s.trim();
+        s.eq_ignore_ascii_case("rectangular") || s.eq_ignore_ascii_case("rect")
+    })
+}
+
+/// Port placement for the Sum block: only the round body wraps its last input
+/// onto the bottom edge; the rectangular one lists every input on the left.
+pub fn sum_port_overrides(
+    _block: &Block,
+    meta: &super::metadata::BlockMetadata,
+) -> &'static [super::types::PortPositionOverride] {
+    if sum_is_round(meta.get("IconShape")) {
+        super::libraries::core::ROUND_SUM_PORT_OVERRIDES
+    } else {
+        &[]
+    }
+}
+
 /// Static renderer for the Sum block. Reads `IconShape` (round vs rectangular)
 /// and `Inputs` (per-port +/- signs) from metadata and paints its own body.
 pub fn static_sum(painter: &Painter, _block: &Block, rect: &Rect, ctx: &RenderContext<'_>) -> bool {
-    let round = !ctx.metadata.get("IconShape").is_some_and(|s| {
-        let s = s.trim();
-        s.eq_ignore_ascii_case("rectangular") || s.eq_ignore_ascii_case("rect")
-    });
+    let round = sum_is_round(ctx.metadata.get("IconShape"));
     let ops = crate::egui_app::render::parse_input_operators(
         ctx.metadata.get("Inputs").unwrap_or_default(),
         '+',
@@ -381,22 +399,64 @@ pub fn static_subsystem(
     ctx: &RenderContext<'_>,
 ) -> bool {
     let content = SubsystemContent::of(block);
-    let rows = content.in_names.len().max(content.out_names.len()).max(1);
     let mut spec = String::new();
+    // A pictogram on the top edge pushes the wiring into the lower half.
+    let top_glyph =
+        content.enabled || content.triggered || content.for_each || content.event.is_some();
+    let (band_top, band_height) = if top_glyph {
+        (0.56, 0.36)
+    } else {
+        (0.20, 0.60)
+    };
+    let rows = content
+        .in_count
+        .max(content.out_count)
+        .max(usize::from(!content.markers.is_empty()));
+    // The boundary port *names* are drawn by the port-label pass; the preview
+    // itself is Simulink's miniature wiring: a terminal per boundary port with
+    // the signal running across the subsystem between them, and a marker for
+    // every other block the subsystem contains.
     for row in 0..rows {
-        let y = 0.20 + (row as f32 + 0.5) / rows as f32 * 0.60;
-        let left = content.in_names.get(row);
-        let right = content.out_names.get(row);
-        if let Some(name) = left {
-            spec.push_str(&format!("t 0.08,{y:.3},0.20 {name};"));
-            spec.push_str(&format!("o 0.22,{y:.3},0.10,0.10;"));
+        let y = band_top + (row as f32 + 0.5) / rows as f32 * band_height;
+        let left = row < content.in_count;
+        let right = row < content.out_count;
+        if left {
+            spec.push_str(&format!("o 0.14,{y:.3},0.14,0.14;"));
         }
-        if let Some(name) = right {
-            spec.push_str(&format!("o 0.78,{y:.3},0.10,0.10;"));
-            spec.push_str(&format!("t 0.92,{y:.3},0.20 {name};"));
+        if right {
+            spec.push_str(&format!("o 0.86,{y:.3},0.14,0.14;"));
         }
-        if left.is_some() && right.is_some() {
-            spec.push_str(&format!("p 0.27,{y:.3} 0.73,{y:.3};"));
+        if row > 0 || content.markers.is_empty() {
+            if left && right {
+                spec.push_str(&format!("p 0.21,{y:.3} 0.79,{y:.3};"));
+            }
+            continue;
+        }
+        let (from, to) = (
+            if left { 0.21 } else { 0.28 },
+            if right { 0.79 } else { 0.72 },
+        );
+        spec.push_str(&format!("p {from:.3},{y:.3} {to:.3},{y:.3};"));
+        let count = content.markers.len() as f32;
+        for (i, marker) in content.markers.iter().enumerate() {
+            let x = from + (i as f32 + 0.5) / count * (to - from);
+            spec.push_str(&match marker {
+                Marker::State => format!(
+                    "p {:.3},{y:.3} {x:.3},{:.3} {:.3},{y:.3} {x:.3},{:.3} {:.3},{y:.3};",
+                    x - 0.05,
+                    y - 0.09,
+                    x + 0.05,
+                    y + 0.09,
+                    x - 0.05
+                ),
+                Marker::Block => format!(
+                    "r {:.3},{:.3} {:.3},{:.3};",
+                    x - 0.06,
+                    y - 0.10,
+                    x + 0.06,
+                    y + 0.10
+                ),
+            });
         }
     }
     // Simulink prints the conditional-execution pictogram of the port block the
@@ -415,14 +475,18 @@ pub fn static_subsystem(
         ));
     }
     if let Some(event) = content.event.as_ref() {
-        // Simulink heads the function-call subsystem with a lifecycle pictogram
-        // and the name of the event it listens for.
-        spec.push_str("c 0.24,0.26,0.10;");
+        // Simulink heads a function subsystem with the lifecycle pictogram of
+        // the event its EventListener responds to, and the event's name.
+        spec.push_str("c 0.16,0.26,0.09;");
         spec.push_str(match event.kind {
-            EventKind::Reset => "p 0.24,0.16 0.31,0.19 0.30,0.12;",
-            _ => "p 0.24,0.14 0.24,0.26;",
+            // Circular arrow.
+            EventKind::Reset => "p 0.16,0.13 0.23,0.16 0.16,0.20;",
+            // Bar fully inside the ring.
+            EventKind::Terminate => "p 0.16,0.20 0.16,0.32;",
+            // Power symbol: the bar breaks through the top of the ring.
+            EventKind::Initialize | EventKind::Reinitialize => "p 0.16,0.12 0.16,0.26;",
         });
-        spec.push_str(&format!("t 0.58,0.26,0.26 {};", event.caption));
+        spec.push_str(&format!("t 0.58,0.26,0.30 {};", event.caption));
     }
     crate::egui_app::render::draw_plot_icon(
         painter,
@@ -437,11 +501,14 @@ pub fn static_subsystem(
 
 /// The parts of a subsystem's contents that shape how Simulink draws it.
 struct SubsystemContent {
-    in_names: Vec<String>,
-    out_names: Vec<String>,
+    in_count: usize,
+    out_count: usize,
     enabled: bool,
     triggered: bool,
     for_each: bool,
+    /// A miniature per contained block that is neither a boundary port nor a
+    /// pictogram of its own.
+    markers: Vec<Marker>,
     /// The lifecycle event a contained `EventListener` responds to – what
     /// distinguishes initialize/reset/reinitialize/terminate function
     /// subsystems from one another.
@@ -453,10 +520,19 @@ struct SubsystemEvent {
     caption: String,
 }
 
+/// How a contained block shows up in the miniature: Simulink draws state
+/// reads/writes as a diamond and everything else as a small rectangle.
+enum Marker {
+    State,
+    Block,
+}
+
 #[derive(PartialEq, Eq)]
 enum EventKind {
-    Lifecycle,
+    Initialize,
+    Reinitialize,
     Reset,
+    Terminate,
 }
 
 impl SubsystemEvent {
@@ -479,11 +555,15 @@ impl SubsystemEvent {
                 caption: name.unwrap_or("reset").to_string(),
             },
             "reinitialize" => SubsystemEvent {
-                kind: EventKind::Lifecycle,
+                kind: EventKind::Reinitialize,
                 caption: name.unwrap_or("reinit").to_string(),
             },
+            "terminate" => SubsystemEvent {
+                kind: EventKind::Terminate,
+                caption: "terminate".to_string(),
+            },
             other => SubsystemEvent {
-                kind: EventKind::Lifecycle,
+                kind: EventKind::Initialize,
                 caption: other.to_string(),
             },
         }
@@ -493,42 +573,29 @@ impl SubsystemEvent {
 impl SubsystemContent {
     fn of(block: &Block) -> Self {
         let mut content = SubsystemContent {
-            in_names: Vec::new(),
-            out_names: Vec::new(),
+            in_count: 0,
+            out_count: 0,
             enabled: false,
             triggered: false,
             for_each: false,
+            markers: Vec::new(),
             event: None,
         };
         if let Some(system) = block.subsystem.as_deref() {
             for child in &system.blocks {
                 match child.block_type.as_str() {
-                    "Inport" => content.in_names.push(port_caption(child)),
-                    "Outport" => content.out_names.push(port_caption(child)),
+                    "Inport" => content.in_count += 1,
+                    "Outport" => content.out_count += 1,
                     "EnablePort" => content.enabled = true,
                     "TriggerPort" => content.triggered = true,
                     "ForEach" => content.for_each = true,
                     "EventListener" => content.event = Some(SubsystemEvent::of(child)),
-                    _ => {}
+                    "StateReader" | "StateWriter" => content.markers.push(Marker::State),
+                    _ => content.markers.push(Marker::Block),
                 }
             }
         }
         content
-    }
-}
-
-/// Caption Simulink prints for a boundary port inside a subsystem preview: the
-/// port number for the default `In1`/`Out1` names, the block name otherwise.
-fn port_caption(child: &Block) -> String {
-    let name = child.name.trim();
-    let digits: String = name
-        .trim_start_matches(|c: char| c.is_ascii_alphabetic())
-        .to_string();
-    let stem = &name[..name.len() - digits.len()];
-    if (stem.eq_ignore_ascii_case("in") || stem.eq_ignore_ascii_case("out")) && !digits.is_empty() {
-        digits
-    } else {
-        name.to_string()
     }
 }
 

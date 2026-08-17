@@ -57,25 +57,37 @@ pub fn port_label_display_name(
     is_input: bool,
     cfg: &crate::block_types::BlockTypeConfig,
 ) -> String {
+    port_label_defined_name(block, index, is_input, cfg)
+        .unwrap_or_else(|| format!("{}{}", if is_input { "In" } else { "Out" }, index))
+}
+
+/// The label the model/catalog defines for a port, or `None` when there is
+/// none.  Unlike [`port_label_display_name`] this does not invent an
+/// `In<N>`/`Out<N>` placeholder, so callers can tell a genuinely named port
+/// (which Simulink prints whether or not a signal is attached) from an
+/// anonymous one.
+pub fn port_label_defined_name(
+    block: &crate::model::Block,
+    index: u32,
+    is_input: bool,
+    cfg: &crate::block_types::BlockTypeConfig,
+) -> Option<String> {
     let mirrored = block.block_mirror.unwrap_or(false);
     let logical_is_input = if mirrored { !is_input } else { is_input };
 
-    let fallback_name = || {
+    let catalog_name = || {
         let names = if logical_is_input {
             &cfg.input_port_names
         } else {
             &cfg.output_port_names
         };
-        if index > 0 && (index as usize) <= names.len() {
-            names[(index - 1) as usize].clone()
-        } else {
-            format!("{}{}", if is_input { "In" } else { "Out" }, index)
-        }
+        names.get(index.checked_sub(1)? as usize).cloned()
     };
 
     subsystem_boundary_port_name(block, index, logical_is_input)
         .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
-        .unwrap_or_else(fallback_name)
+        .or_else(catalog_name)
+        .filter(|name| !name.is_empty())
 }
 
 fn subsystem_boundary_port_name(

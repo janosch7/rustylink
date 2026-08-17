@@ -18,8 +18,9 @@ const fn icon(glyph: &'static str) -> SimulinkIcon {
     SimulinkIcon::Utf8(glyph)
 }
 
-/// Place the Sum block's last input at the bottom (classic Simulink layout).
-const SUM_PORT_OVERRIDES: &[PortPositionOverride] = &[PortPositionOverride {
+/// Place the round Sum block's last input at the bottom (classic Simulink
+/// layout).  The rectangular variant keeps every input on the left edge.
+pub const ROUND_SUM_PORT_OVERRIDES: &[PortPositionOverride] = &[PortPositionOverride {
     is_input: true,
     port_index: 1,
     from_end: true,
@@ -46,7 +47,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
             MetadataKey::with_default("IconShape", "round"),
             MetadataKey::with_default("Inputs", "++"),
         ])
-        .with_port_overrides(SUM_PORT_OVERRIDES)
+        .with_port_overrides_fn(renderers::sum_port_overrides)
         .with_static_renderer(renderers::static_sum),
     SimulinkBlockDefinition::new("Gain", "Math Operations")
         .with_description("Multiply input by a constant")
