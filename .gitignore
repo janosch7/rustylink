@@ -8,7 +8,6 @@ simulink
 .vscode
 *.log
 .venv/
-Cargo.lock
 perf.data
 perf.data.old
 simulink_test_models/slprj/

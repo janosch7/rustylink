@@ -1,6 +1,6 @@
 [package]
 name = "rustylink"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 homepage = "https://github.com/ulikoehler/rustylink"
 repository = "https://github.com/ulikoehler/rustylink"
@@ -44,11 +44,11 @@ mask = []
 dashboard = ["egui"]
 
 [dependencies.egui]
-version = "0.35"
+version = "0.36"
 optional = true
 
 [dependencies.eframe]
-version = "0.35"
+version = "0.36"
 optional = true
 default-features = false
 features = ["glow", "default_fonts", "wayland", "x11"]
@@ -58,12 +58,15 @@ version = "5.3"
 optional = true
 
 [dependencies.egui_extras]
-version = "0.35"
+version = "0.36"
 optional = true
 default-features = false
 features = ["svg"]
 
 [dependencies.usvg]
+# Must match the usvg version used by `egui_extras` (via `resvg`)
+# to avoid type mismatches when passing `usvg::Options` to
+# `egui_extras::image::load_svg_bytes_with_size`.
 version = "0.45"
 optional = true
 default-features = false
@@ -76,7 +79,7 @@ features = ["compression"]
 
 [dependencies.liveplot]
 #path = "../liveplot-rs"
-version = "2.1.1"
+version = "2.2.0"
 optional = true
 default-features = false
 features = ["tiles", "fft", "parquet"]
@@ -88,7 +91,7 @@ optional = true
 # Must track the same egui generation as `eframe`/`egui` (0.35) so the
 # `FontDefinitions` types match for `add_fonts`.
 [dependencies.egui_phosphor_icons]
-version = "0.4"
+version = "0.5"
 optional = true
 
 [dev-dependencies]
