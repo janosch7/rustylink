@@ -373,22 +373,30 @@ pub const ENABLE_PORT: &str = "\u{1}enable";
 /// reset port.
 const LEVEL_PULSE: &str = "p 0.05,0.95 0.30,0.95 0.30,0.15 0.70,0.15 0.70,0.95 0.95,0.95";
 
+/// The rising-edge trigger pictogram: a step whose vertical edge carries the
+/// arrow head.  Also used for the trigger port of a triggered subsystem.
+pub const RISING_EDGE: &str =
+    "p 0.05,0.90 0.45,0.90 0.45,0.15 0.90,0.15; p 0.31,0.38 0.45,0.15 0.59,0.38";
+
+/// The falling-edge counterpart of [`RISING_EDGE`].
+pub const FALLING_EDGE: &str =
+    "p 0.05,0.15 0.45,0.15 0.45,0.90 0.90,0.90; p 0.31,0.67 0.45,0.90 0.59,0.67";
+
+/// A pulse whose rising and falling edges both carry an arrow head.
+pub const EITHER_EDGE: &str = concat!(
+    "p 0.05,0.90 0.30,0.90 0.30,0.15 0.70,0.15 0.70,0.90 0.95,0.90;",
+    "p 0.19,0.36 0.30,0.15 0.41,0.36; p 0.59,0.69 0.70,0.90 0.81,0.69"
+);
+
 /// The pictogram Simulink prints beside a reset port, per trigger edge: a step
 /// with an arrow head on the triggering edge, or a plain square pulse for the
 /// level-triggered modes.
 fn reset_spec(external_reset: Option<&str>) -> Option<&'static str> {
     match external_reset?.trim().to_ascii_lowercase().as_str() {
         "" | "none" => None,
-        "rising" => {
-            Some("p 0.05,0.95 0.45,0.95 0.45,0.15 0.95,0.15; p 0.29,0.42 0.45,0.10 0.61,0.42")
-        }
-        "falling" => {
-            Some("p 0.05,0.15 0.45,0.15 0.45,0.95 0.95,0.95; p 0.29,0.68 0.45,1.00 0.61,0.68")
-        }
-        "either" => Some(concat!(
-            "p 0.05,0.95 0.30,0.95 0.30,0.15 0.70,0.15 0.70,0.95 0.95,0.95;",
-            "p 0.17,0.42 0.30,0.10 0.43,0.42; p 0.57,0.68 0.70,1.00 0.83,0.68"
-        )),
+        "rising" => Some(RISING_EDGE),
+        "falling" => Some(FALLING_EDGE),
+        "either" => Some(EITHER_EDGE),
         // `level` and `level hold` share the square-pulse pictogram.
         _ => Some(LEVEL_PULSE),
     }
@@ -526,38 +534,32 @@ pub fn static_subsystem(
     let content = SubsystemContent::of(block);
     let mut spec = String::new();
 
-    // The control pictograms sit under the top-edge ports they belong to.
-    // Keep them square by scaling their width with the block's aspect ratio.
-    let controls = usize::from(content.enabled) + usize::from(content.triggered);
-    let half = (0.09 * rect.height() / rect.width().max(1.0)).clamp(0.03, 0.12);
-    let mut control = 0;
-    let mut next_x = || {
-        control += 1;
-        control as f32 / (controls + 1) as f32
-    };
-    if content.enabled {
-        // Square pulse: the level the subsystem executes at.
-        let x = next_x();
-        spec.push_str(&format!(
-            "p {:.3},0.30 {:.3},0.30 {:.3},0.10 {:.3},0.10 {:.3},0.30 {:.3},0.30;",
-            x - half,
-            x - half * 0.55,
-            x - half * 0.55,
-            x + half * 0.55,
-            x + half * 0.55,
-            x + half
-        ));
-    }
-    if content.triggered {
-        // Rising edge: the trigger the subsystem responds to.
-        let x = next_x();
-        spec.push_str(&format!(
-            "p {:.3},0.30 {:.3},0.30 {:.3},0.10 {:.3},0.10;",
-            x - half,
-            x - half * 0.1,
-            x - half * 0.1,
-            x + half
-        ));
+    // The control pictograms sit under the top-edge ports they belong to, and
+    // reuse the port pictograms of the Integrator/Delay reset ports.
+    let controls: Vec<&str> = content
+        .enabled
+        .then_some(LEVEL_PULSE)
+        .into_iter()
+        .chain(content.triggered)
+        .collect();
+    let size = (rect.width() / (controls.len() as f32 + 1.0))
+        .min(rect.height() * 0.34)
+        .min(16.0 * ctx.font_scale)
+        .max(4.0);
+    for (index, control) in controls.iter().enumerate() {
+        let x = rect.left() + (index as f32 + 1.0) / (controls.len() as f32 + 1.0) * rect.width();
+        let glyph = Rect::from_min_size(
+            eframe::egui::pos2(x - size * 0.5, rect.top() + size * 0.2),
+            eframe::egui::vec2(size, size),
+        );
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            &glyph,
+            ctx.font_scale,
+            control,
+            ctx.text_color,
+            None,
+        );
     }
     if content.for_each {
         // Stacked copies of the same block – one per element of the input.
@@ -575,9 +577,9 @@ pub fn static_subsystem(
             // Bar fully inside the ring.
             EventKind::Terminate => "c 0.18,0.34 0.13; p 0.18,0.26 0.18,0.42;",
             // Power symbol: the bar breaks through the gap at the top of the ring.
-            EventKind::Initialize | EventKind::Reinitialize => {
-                "s 0.18,0.34,0.13,0.80,1.70; p 0.18,0.16 0.18,0.34;"
-            }
+            EventKind::Initialize => "s 0.18,0.34,0.13,0.80,1.70; p 0.18,0.16 0.18,0.34;",
+            // Both at once: the power symbol drawn with the reset arrow head.
+            EventKind::Reinitialize => "sa 0.18,0.34,0.13,0.80,1.70; p 0.18,0.16 0.18,0.34;",
         });
         spec.push_str(&format!("t 0.62,0.34,0.30 {};", event.caption));
     }
@@ -598,7 +600,8 @@ pub fn static_subsystem(
 /// The parts of a subsystem's contents that shape how Simulink draws it.
 struct SubsystemContent {
     enabled: bool,
-    triggered: bool,
+    /// The pictogram of a contained `TriggerPort`, per its `TriggerType`.
+    triggered: Option<&'static str>,
     for_each: bool,
     /// The lifecycle event a contained `EventListener` responds to – what
     /// distinguishes initialize/reset/reinitialize/terminate function
@@ -658,7 +661,7 @@ impl SubsystemContent {
     fn of(block: &Block) -> Self {
         let mut content = SubsystemContent {
             enabled: false,
-            triggered: false,
+            triggered: None,
             for_each: false,
             event: None,
         };
@@ -666,7 +669,18 @@ impl SubsystemContent {
             for child in &system.blocks {
                 match child.block_type.as_str() {
                     "EnablePort" => content.enabled = true,
-                    "TriggerPort" => content.triggered = true,
+                    "TriggerPort" => {
+                        content.triggered = Some(
+                            reset_spec(
+                                child
+                                    .properties
+                                    .get("TriggerType")
+                                    .map(String::as_str)
+                                    .or(Some("rising")),
+                            )
+                            .unwrap_or(RISING_EDGE),
+                        )
+                    }
                     "ForEach" => content.for_each = true,
                     "EventListener" => content.event = Some(SubsystemEvent::of(child)),
                     _ => {}
@@ -1353,11 +1367,9 @@ pub fn static_c_function(
         rect,
         ctx.font_scale,
         concat!(
-            // A bold `C` with the two raised plus signs of `C++` stacked
-            // beside it, the way Simulink draws the C Function block.
-            "t 0.40,0.54,0.66 C;",
-            "p 0.64,0.26 0.78,0.26; p 0.71,0.19 0.71,0.33;",
-            "p 0.64,0.46 0.78,0.46; p 0.71,0.39 0.71,0.53"
+            "t 0.38,0.52,0.60 C;",
+            "p 0.62,0.30 0.78,0.30; p 0.70,0.22 0.70,0.38;",
+            "p 0.62,0.60 0.78,0.60; p 0.70,0.52 0.70,0.68"
         ),
         ctx.text_color,
         ctx.port_label_widths,

@@ -1678,9 +1678,17 @@ pub fn render_product_block(
     if !has_div {
         // A single multiply port collapses the input vector: Simulink shows the
         // product-of-elements symbol `∏`, drawn as large as the block allows,
-        // rather than the element-wise `×`.
+        // rather than the element-wise `×`.  It is drawn rather than typeset so
+        // the bar overhangs both legs the way Simulink's icon does.
         if matches!(operators, [c] if *c == '*') && !matrix {
-            render_center_glyph_maximized(painter, rect, font_scale, "\u{220F}", text, None);
+            draw_plot_icon(
+                painter,
+                rect,
+                font_scale,
+                "p 0.08,0.16 0.92,0.16; p 0.26,0.16 0.26,0.90; p 0.74,0.16 0.74,0.90",
+                text,
+                None,
+            );
             return;
         }
         let font_size = (rect.height() * 0.5).clamp(9.0, 30.0) * font_scale;
