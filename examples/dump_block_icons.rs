@@ -47,10 +47,10 @@ fn icon_desc(block: &Block) -> String {
     if def.static_renderer.is_some() {
         return "<renderer>".into();
     }
-    if let Some(l) = block_label_text(block) {
-        if !l.is_empty() {
-            return format!("<label:{l:?}>");
-        }
+    if let Some(l) = block_label_text(block)
+        && !l.is_empty()
+    {
+        return format!("<label:{l:?}>");
     }
     if let Some(icon) = def.icon {
         return match icon {
@@ -58,6 +58,7 @@ fn icon_desc(block: &Block) -> String {
             SimulinkIcon::Phosphor(_) => "<phosphor>".into(),
             SimulinkIcon::Svg(p) => format!("<svg:{p}>"),
             SimulinkIcon::Math(s) => format!("<math:{s}>"),
+            SimulinkIcon::Plot(s) => format!("<plot:{s}>"),
         };
     }
     if def.shape != SimulinkShape::Rectangle {
@@ -69,6 +70,7 @@ fn icon_desc(block: &Block) -> String {
         Some(IconSpec::Phosphor(_)) => "<phosphor>".into(),
         Some(IconSpec::Svg(p)) => format!("<svg:{p}>"),
         Some(IconSpec::Math(s)) => format!("<math:{s}>"),
+        Some(IconSpec::Plot(s)) => format!("<plot:{s}>"),
         None => "<QUESTION>".into(),
     }
 }
@@ -103,10 +105,10 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let path = Utf8PathBuf::from(&args.file);
     let mut lib_paths: Vec<Utf8PathBuf> = Vec::new();
-    if let Some(parent) = path.parent() {
-        if parent.as_str() != "" {
-            lib_paths.push(parent.to_path_buf());
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_str().is_empty()
+    {
+        lib_paths.push(parent.to_path_buf());
     }
     lib_paths.extend(args.lib.iter().map(Utf8PathBuf::from));
 

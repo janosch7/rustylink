@@ -68,20 +68,13 @@ pub fn apply_update_response(app: &mut SubsystemApp, response: &UpdateResponse) 
             // build a cleaned title using our helper function
             let title_cleaned = block_dialog_title(block);
 
-            if let Some(cv) = build_chart_view_for_block(app, block) {
-                app.chart_view = Some(cv);
-                app.block_view = Some(BlockDialog {
-                    title: title_cleaned.clone(),
-                    block: Arc::new(block.clone()),
-                    open: true,
-                });
-            } else {
-                app.block_view = Some(BlockDialog {
-                    title: title_cleaned.clone(),
-                    block: Arc::new(block.clone()),
-                    open: true,
-                });
-            }
+            // A MATLAB Function block shows its source in the block window
+            // itself (see `show_block_window`) rather than in a chart popup.
+            app.block_view = Some(BlockDialog {
+                title: title_cleaned.clone(),
+                block: Arc::new(block.clone()),
+                open: true,
+            });
         }
     }
 }
@@ -274,6 +267,14 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
 }
 
 fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
+    // The MATLAB source of a MATLAB Function block lives in its Stateflow
+    // chart; resolve it up front so the window body can borrow the dialog.
+    let matlab_source = app
+        .block_view
+        .as_ref()
+        .and_then(|bd| build_chart_view_for_block(app, &bd.block))
+        .map(|view| view.script)
+        .filter(|script| !script.trim().is_empty());
     if let Some(bd) = &app.block_view {
         let mut open_flag = bd.open;
         let block = &bd.block;
@@ -391,6 +392,19 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                                         .desired_width(f32::INFINITY),
                                 );
                             }
+                        });
+                }
+                if let Some(script) = matlab_source.as_ref() {
+                    ui.separator();
+                    egui::CollapsingHeader::new("MATLAB Code")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let mut source = script.clone();
+                            ui.add(
+                                egui::TextEdit::multiline(&mut source)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY),
+                            );
                         });
                 }
                 egui::CollapsingHeader::new("Ports")

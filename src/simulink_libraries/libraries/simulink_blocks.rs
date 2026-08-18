@@ -346,7 +346,13 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_description("Trigonometric function (sin, cos, tan, acos, ...)")
         .with_ports(IOPorts::Fixed(1), IOPorts::Fixed(1))
         .with_metadata_keys(&[MetadataKey::with_default("Operator", "sin")])
-        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::trig_function)),
+        .with_block_label(BlockLabelPolicy::MetadataDependent(labels::trig_function))
+        // `sincos` is captionless and identified by its two named outputs.
+        .with_static_renderer(renderers::static_trigonometry)
+        .with_port_labels(
+            PortLabelPolicy::None,
+            PortLabelPolicy::MetadataDependent(renderers::trigonometry_port_labels),
+        ),
 
     SimulinkBlockDefinition::new("MinMax", "Math Operations")
         .with_description("Output minimum or maximum of inputs")

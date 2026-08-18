@@ -134,7 +134,14 @@ pub fn static_math_function(
         "magnitude^2" => "|u|\u{00B2}".into(),
         "log10" => "log\u{2081}\u{2080}(u)".into(),
         "log" => "ln(u)".into(),
-        other => other.into(),
+        // Every remaining power operator (`2^u`, `u^3`, …) is typeset as the
+        // base with a raised exponent rather than printed with a literal caret.
+        other => match other.split_once('^') {
+            Some((base, exp)) if !base.is_empty() && !exp.is_empty() => {
+                format!("sup:{base}^{exp}").into()
+            }
+            _ => other.into(),
+        },
     };
     crate::egui_app::render::draw_math_icon(
         painter,
@@ -145,6 +152,38 @@ pub fn static_math_function(
         ctx.port_label_widths,
     );
     true
+}
+
+/// Whether a Trigonometry block's `Operator` produces the sine and the cosine
+/// of its input on two separate outputs.
+fn trig_is_sincos(operator: Option<&str>) -> bool {
+    operator.is_some_and(|o| o.trim().eq_ignore_ascii_case("sincos"))
+}
+
+/// Static renderer for the Trigonometry block.
+///
+/// The `sincos` variant has no caption at all: Simulink identifies it by the
+/// names of its two outputs, drawn by the port-label pass.  Every other
+/// operator falls through to the definition's textual label.
+pub fn static_trigonometry(
+    _painter: &Painter,
+    _block: &Block,
+    _rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    trig_is_sincos(ctx.metadata.get("Operator"))
+}
+
+/// Output port labels for the Trigonometry block: only `sincos` names them.
+pub fn trigonometry_port_labels(
+    _block: &Block,
+    meta: &super::metadata::BlockMetadata,
+    is_input: bool,
+) -> Vec<String> {
+    if is_input || !trig_is_sincos(meta.get("Operator")) {
+        return Vec::new();
+    }
+    vec!["sin".to_string(), "cos".to_string()]
 }
 
 /// A saturation curve (flat, ramp, flat) normalised to the icon area – the
@@ -166,19 +205,31 @@ fn is_external(ctx: &RenderContext<'_>, key: &str) -> bool {
     })
 }
 
+/// An open circular arrow with an arrow head on either end – the marker
+/// Simulink draws around (or beside) a state that wraps.
+const WRAP_ARROW: &str = "sb 0.50,0.50,0.48,0.06,0.94";
+
 /// Static renderer for the continuous Integrator block.
 ///
 /// The `1/s` core is constant; the configuration decorates it: `LimitOutput`
-/// adds the saturation curve, `WrapState` encircles the fraction.
+/// adds the saturation curve, `WrapState` encircles the fraction with the wrap
+/// arrow, and `ExternalReset` prints its trigger pictogram at the reset port.
 pub fn static_integrator(
     painter: &Painter,
-    _block: &Block,
+    block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
     let limited = is_on(ctx, "LimitOutput");
     let wrapped = is_on(ctx, "WrapState");
-    if !limited && !wrapped {
+    let reset = draw_port_pictograms(
+        painter,
+        rect,
+        ctx,
+        &integrator_port_labels(block, ctx.metadata, true),
+        ctx.metadata.get("ExternalReset"),
+    );
+    if !limited && !wrapped && !reset {
         return false; // fall back to the definition's plain `frac:1/s` icon
     }
     let split = rect.left() + rect.width() * if limited { 0.60 } else { 1.0 };
@@ -196,7 +247,7 @@ pub fn static_integrator(
             painter,
             &frac_rect,
             ctx.font_scale,
-            "c 0.5,0.5 0.46",
+            WRAP_ARROW,
             ctx.text_color,
             None,
         );
@@ -242,7 +293,9 @@ pub fn static_second_order_integrator(
     if is_on(ctx, "LimitX") {
         spec.push_str("p 0.06,0.44 0.34,0.44 0.70,0.10 0.94,0.10;");
     } else if is_on(ctx, "WrapX") {
-        spec.push_str("c 0.50,0.26 0.26; p 0.62,0.06 0.76,0.14 0.60,0.22;");
+        // The `x` state wraps: an arc open towards the output port, with an
+        // arrow head on both ends, in the upper half of the marker column.
+        spec.push_str("sb 0.50,0.26,0.34,0.13,0.87;");
     }
     if is_on(ctx, "LimitDXDT") {
         spec.push_str("p 0.06,0.92 0.34,0.92 0.70,0.58 0.94,0.58;");
@@ -274,8 +327,10 @@ pub fn integrator_port_labels(
         return Vec::new();
     }
     let mut labels = vec![String::new()];
-    if let Some(glyph) = reset_glyph(meta.get("ExternalReset")) {
-        labels.push(glyph.to_string());
+    if reset_spec(meta.get("ExternalReset")).is_some() {
+        // The reset pictogram is line art drawn by the renderer, so the port
+        // itself carries no text label.
+        labels.push(RESET_PORT.to_string());
     }
     if matches!(meta.get("InitialConditionSource"), Some(s) if s.trim().eq_ignore_ascii_case("external"))
     {
@@ -306,16 +361,83 @@ pub fn second_order_integrator_port_labels(
     labels
 }
 
-/// The pictogram Simulink prints beside a reset port for each trigger edge.
-fn reset_glyph(external_reset: Option<&str>) -> Option<&'static str> {
+/// Marks the input port whose "label" is the reset pictogram: line art drawn
+/// by the block's renderer rather than a text label.  [`super::render::port_label`]
+/// suppresses it so the marker never reaches the screen as text.
+pub const RESET_PORT: &str = "\u{1}reset";
+
+/// Marks the input port drawn with the enable pictogram (a square pulse).
+pub const ENABLE_PORT: &str = "\u{1}enable";
+
+/// The square pulse Simulink draws at an enable port and at a level-triggered
+/// reset port.
+const LEVEL_PULSE: &str = "p 0.05,0.95 0.30,0.95 0.30,0.15 0.70,0.15 0.70,0.95 0.95,0.95";
+
+/// The pictogram Simulink prints beside a reset port, per trigger edge: a step
+/// with an arrow head on the triggering edge, or a plain square pulse for the
+/// level-triggered modes.
+fn reset_spec(external_reset: Option<&str>) -> Option<&'static str> {
     match external_reset?.trim().to_ascii_lowercase().as_str() {
         "" | "none" => None,
-        "rising" => Some("\u{2197}"),     // ↗
-        "falling" => Some("\u{2198}"),    // ↘
-        "either" => Some("\u{2195}"),     // ↕
-        "level hold" => Some("\u{2294}"), // ⊔
-        _ => Some("\u{2293}"),            // ⊓  (level)
+        "rising" => {
+            Some("p 0.05,0.95 0.45,0.95 0.45,0.15 0.95,0.15; p 0.29,0.42 0.45,0.10 0.61,0.42")
+        }
+        "falling" => {
+            Some("p 0.05,0.15 0.45,0.15 0.45,0.95 0.95,0.95; p 0.29,0.68 0.45,1.00 0.61,0.68")
+        }
+        "either" => Some(concat!(
+            "p 0.05,0.95 0.30,0.95 0.30,0.15 0.70,0.15 0.70,0.95 0.95,0.95;",
+            "p 0.17,0.42 0.30,0.10 0.43,0.42; p 0.57,0.68 0.70,1.00 0.83,0.68"
+        )),
+        // `level` and `level hold` share the square-pulse pictogram.
+        _ => Some(LEVEL_PULSE),
     }
+}
+
+/// Draw the pictograms of the marked input ports inside `rect`.
+///
+/// `labels` is the block's input-port label list: entries equal to
+/// [`RESET_PORT`] / [`ENABLE_PORT`] stand for line art rather than text, and
+/// the list length is the port count the ports are distributed over.  Returns
+/// whether anything was drawn.
+fn draw_port_pictograms(
+    painter: &Painter,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+    labels: &[String],
+    external_reset: Option<&str>,
+) -> bool {
+    let count = labels.len().max(1) as f32;
+    let size = (rect.height() / (count + 1.0))
+        .min(rect.width() * 0.30)
+        .min(16.0 * ctx.font_scale)
+        .max(4.0);
+    let mut drawn = false;
+    for (index, label) in labels.iter().enumerate() {
+        let spec = match label.as_str() {
+            RESET_PORT => reset_spec(external_reset),
+            ENABLE_PORT => Some(LEVEL_PULSE),
+            _ => None,
+        };
+        let Some(spec) = spec else { continue };
+        // Same distribution as `geometry::port_anchor_pos`.
+        let y =
+            rect.top() + (2.0 * (index as f32 + 1.0) - 0.5) / (2.0 * count + 1.0) * rect.height();
+        let glyph = Rect::from_min_size(
+            eframe::egui::pos2(rect.left() + size * 0.1, y - size * 0.5),
+            eframe::egui::vec2(size, size),
+        );
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            &glyph,
+            ctx.font_scale,
+            spec,
+            ctx.text_color,
+            None,
+        );
+        drawn = true;
+    }
+    drawn
 }
 
 /// Static renderer for the n-D Lookup Table: the `<n>-D T(u)` caption Simulink
@@ -387,11 +509,14 @@ pub fn static_switch(
     true
 }
 
-/// Static renderer for a SubSystem: a miniature of its contents.
+/// Static renderer for a SubSystem.
 ///
-/// Simulink previews a subsystem by drawing the blocks it contains at reduced
-/// scale; for the common case that is one In port wired across to one Out port
-/// per signal, plus the enable/trigger badges on the top edge.
+/// A plain subsystem has **no** icon in Simulink (what looks like one is a
+/// preview of its contents), so this only paints the symbols the contents
+/// impose: the enable/trigger pictograms beneath the control ports on the top
+/// edge, the for-each stack, and the lifecycle pictogram plus event name of a
+/// contained `EventListener`.  It always reports "handled" so the generic icon
+/// path never stamps a placeholder on a subsystem.
 pub fn static_subsystem(
     painter: &Painter,
     block: &Block,
@@ -400,115 +525,81 @@ pub fn static_subsystem(
 ) -> bool {
     let content = SubsystemContent::of(block);
     let mut spec = String::new();
-    // A pictogram on the top edge pushes the wiring into the lower half.
-    let top_glyph =
-        content.enabled || content.triggered || content.for_each || content.event.is_some();
-    let (band_top, band_height) = if top_glyph {
-        (0.56, 0.36)
-    } else {
-        (0.20, 0.60)
+
+    // The control pictograms sit under the top-edge ports they belong to.
+    // Keep them square by scaling their width with the block's aspect ratio.
+    let controls = usize::from(content.enabled) + usize::from(content.triggered);
+    let half = (0.09 * rect.height() / rect.width().max(1.0)).clamp(0.03, 0.12);
+    let mut control = 0;
+    let mut next_x = || {
+        control += 1;
+        control as f32 / (controls + 1) as f32
     };
-    let rows = content
-        .in_count
-        .max(content.out_count)
-        .max(usize::from(!content.markers.is_empty()));
-    // The boundary port *names* are drawn by the port-label pass; the preview
-    // itself is Simulink's miniature wiring: a terminal per boundary port with
-    // the signal running across the subsystem between them, and a marker for
-    // every other block the subsystem contains.
-    for row in 0..rows {
-        let y = band_top + (row as f32 + 0.5) / rows as f32 * band_height;
-        let left = row < content.in_count;
-        let right = row < content.out_count;
-        if left {
-            spec.push_str(&format!("o 0.14,{y:.3},0.14,0.14;"));
-        }
-        if right {
-            spec.push_str(&format!("o 0.86,{y:.3},0.14,0.14;"));
-        }
-        if row > 0 || content.markers.is_empty() {
-            if left && right {
-                spec.push_str(&format!("p 0.21,{y:.3} 0.79,{y:.3};"));
-            }
-            continue;
-        }
-        let (from, to) = (
-            if left { 0.21 } else { 0.28 },
-            if right { 0.79 } else { 0.72 },
-        );
-        spec.push_str(&format!("p {from:.3},{y:.3} {to:.3},{y:.3};"));
-        let count = content.markers.len() as f32;
-        for (i, marker) in content.markers.iter().enumerate() {
-            let x = from + (i as f32 + 0.5) / count * (to - from);
-            spec.push_str(&match marker {
-                Marker::State => format!(
-                    "p {:.3},{y:.3} {x:.3},{:.3} {:.3},{y:.3} {x:.3},{:.3} {:.3},{y:.3};",
-                    x - 0.05,
-                    y - 0.09,
-                    x + 0.05,
-                    y + 0.09,
-                    x - 0.05
-                ),
-                Marker::Block => format!(
-                    "r {:.3},{:.3} {:.3},{:.3};",
-                    x - 0.06,
-                    y - 0.10,
-                    x + 0.06,
-                    y + 0.10
-                ),
-            });
-        }
-    }
-    // Simulink prints the conditional-execution pictogram of the port block the
-    // subsystem contains above the wiring preview.
     if content.enabled {
-        spec.push_str("p 0.40,0.13 0.44,0.13 0.44,0.05 0.56,0.05 0.56,0.13 0.60,0.13;");
+        // Square pulse: the level the subsystem executes at.
+        let x = next_x();
+        spec.push_str(&format!(
+            "p {:.3},0.30 {:.3},0.30 {:.3},0.10 {:.3},0.10 {:.3},0.30 {:.3},0.30;",
+            x - half,
+            x - half * 0.55,
+            x - half * 0.55,
+            x + half * 0.55,
+            x + half * 0.55,
+            x + half
+        ));
     }
     if content.triggered {
-        spec.push_str("p 0.42,0.13 0.42,0.05 0.50,0.05 0.50,0.13 0.58,0.13 0.58,0.05;");
+        // Rising edge: the trigger the subsystem responds to.
+        let x = next_x();
+        spec.push_str(&format!(
+            "p {:.3},0.30 {:.3},0.30 {:.3},0.10 {:.3},0.10;",
+            x - half,
+            x - half * 0.1,
+            x - half * 0.1,
+            x + half
+        ));
     }
     if content.for_each {
+        // Stacked copies of the same block – one per element of the input.
         spec.push_str(concat!(
-            "t 0.52,0.09,0.18 N;",
-            "b 0.54,0.12 0.72,0.44; r 0.54,0.12 0.72,0.44;",
-            "r 0.48,0.18 0.66,0.50; r 0.42,0.24 0.60,0.56"
+            "t 0.62,0.22,0.22 N;",
+            "r 0.52,0.26 0.74,0.66; r 0.44,0.34 0.66,0.74; r 0.36,0.42 0.58,0.82"
         ));
     }
     if let Some(event) = content.event.as_ref() {
         // Simulink heads a function subsystem with the lifecycle pictogram of
         // the event its EventListener responds to, and the event's name.
-        spec.push_str("c 0.16,0.26,0.09;");
         spec.push_str(match event.kind {
             // Circular arrow.
-            EventKind::Reset => "p 0.16,0.13 0.23,0.16 0.16,0.20;",
+            EventKind::Reset => "sa 0.18,0.34,0.13,0.80,1.70;",
             // Bar fully inside the ring.
-            EventKind::Terminate => "p 0.16,0.20 0.16,0.32;",
-            // Power symbol: the bar breaks through the top of the ring.
-            EventKind::Initialize | EventKind::Reinitialize => "p 0.16,0.12 0.16,0.26;",
+            EventKind::Terminate => "c 0.18,0.34 0.13; p 0.18,0.26 0.18,0.42;",
+            // Power symbol: the bar breaks through the gap at the top of the ring.
+            EventKind::Initialize | EventKind::Reinitialize => {
+                "s 0.18,0.34,0.13,0.80,1.70; p 0.18,0.16 0.18,0.34;"
+            }
         });
-        spec.push_str(&format!("t 0.58,0.26,0.30 {};", event.caption));
+        spec.push_str(&format!("t 0.62,0.34,0.30 {};", event.caption));
     }
-    crate::egui_app::render::draw_plot_icon(
-        painter,
-        rect,
-        ctx.font_scale,
-        &spec,
-        ctx.text_color,
-        None,
-    );
+
+    if !spec.is_empty() {
+        crate::egui_app::render::draw_plot_icon(
+            painter,
+            rect,
+            ctx.font_scale,
+            &spec,
+            ctx.text_color,
+            None,
+        );
+    }
     true
 }
 
 /// The parts of a subsystem's contents that shape how Simulink draws it.
 struct SubsystemContent {
-    in_count: usize,
-    out_count: usize,
     enabled: bool,
     triggered: bool,
     for_each: bool,
-    /// A miniature per contained block that is neither a boundary port nor a
-    /// pictogram of its own.
-    markers: Vec<Marker>,
     /// The lifecycle event a contained `EventListener` responds to – what
     /// distinguishes initialize/reset/reinitialize/terminate function
     /// subsystems from one another.
@@ -518,13 +609,6 @@ struct SubsystemContent {
 struct SubsystemEvent {
     kind: EventKind,
     caption: String,
-}
-
-/// How a contained block shows up in the miniature: Simulink draws state
-/// reads/writes as a diamond and everything else as a small rectangle.
-enum Marker {
-    State,
-    Block,
 }
 
 #[derive(PartialEq, Eq)]
@@ -573,25 +657,19 @@ impl SubsystemEvent {
 impl SubsystemContent {
     fn of(block: &Block) -> Self {
         let mut content = SubsystemContent {
-            in_count: 0,
-            out_count: 0,
             enabled: false,
             triggered: false,
             for_each: false,
-            markers: Vec::new(),
             event: None,
         };
         if let Some(system) = block.subsystem.as_deref() {
             for child in &system.blocks {
                 match child.block_type.as_str() {
-                    "Inport" => content.in_count += 1,
-                    "Outport" => content.out_count += 1,
                     "EnablePort" => content.enabled = true,
                     "TriggerPort" => content.triggered = true,
                     "ForEach" => content.for_each = true,
                     "EventListener" => content.event = Some(SubsystemEvent::of(child)),
-                    "StateReader" | "StateWriter" => content.markers.push(Marker::State),
-                    _ => content.markers.push(Marker::Block),
+                    _ => {}
                 }
             }
         }
@@ -669,10 +747,17 @@ pub fn static_is_triangular(
 /// port (`DelayLengthSource = Input port`).
 pub fn static_delay(
     painter: &Painter,
-    _block: &Block,
+    block: &Block,
     rect: &Rect,
     ctx: &RenderContext<'_>,
 ) -> bool {
+    draw_port_pictograms(
+        painter,
+        rect,
+        ctx,
+        &delay_port_labels(block, ctx.metadata, true),
+        ctx.metadata.get("ExternalReset"),
+    );
     let exponent = if is_external(ctx, "DelayLengthSource") {
         "d".to_string()
     } else {
@@ -833,10 +918,8 @@ pub fn delay_port_labels(
         .iter()
         .map(|token| match token.chars().next() {
             Some('u') => "u".to_string(),
-            Some('e') => "\u{2293}".to_string(),
-            Some('r') => reset_glyph(meta.get("ExternalReset"))
-                .unwrap_or("\u{2293}")
-                .to_string(),
+            Some('e') => ENABLE_PORT.to_string(),
+            Some('r') => RESET_PORT.to_string(),
             // `p1` is the delay length, `p4` the initial condition; Simulink
             // lists the length first.
             Some('p') if *token == "p1" => "d".to_string(),
@@ -1270,9 +1353,11 @@ pub fn static_c_function(
         rect,
         ctx.font_scale,
         concat!(
-            "t 0.38,0.52,0.60 C;",
-            "p 0.62,0.30 0.78,0.30; p 0.70,0.22 0.70,0.38;",
-            "p 0.62,0.60 0.78,0.60; p 0.70,0.52 0.70,0.68"
+            // A bold `C` with the two raised plus signs of `C++` stacked
+            // beside it, the way Simulink draws the C Function block.
+            "t 0.40,0.54,0.66 C;",
+            "p 0.64,0.26 0.78,0.26; p 0.71,0.19 0.71,0.33;",
+            "p 0.64,0.46 0.78,0.46; p 0.71,0.39 0.71,0.53"
         ),
         ctx.text_color,
         ctx.port_label_widths,

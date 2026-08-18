@@ -12,6 +12,7 @@ use eframe::egui::{self, Vec2};
 use crate::editor::operations::EditorHistory;
 use crate::model::{Annotation, Block, Chart, Line, SlxArchive, System};
 use crate::parser::{FsSource, SimulinkParser, ZipSource};
+use crate::simulink_libraries::labels::MATLAB_FUNCTION_NAME_PROPERTY;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct LayoutSnapshot {
@@ -162,6 +163,8 @@ fn load_source_model(
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        let mut system = system;
+        annotate_matlab_function_names(&mut system, &charts, &chart_map);
         return Ok((system, charts, chart_map));
     }
 
@@ -180,7 +183,42 @@ fn load_source_model(
     for (name, cid) in parser.get_system_to_chart_map().iter() {
         chart_map.entry(name.clone()).or_insert(*cid);
     }
+    let mut system = system;
+    annotate_matlab_function_names(&mut system, &charts, &chart_map);
     Ok((system, charts, chart_map))
+}
+
+/// Record the MATLAB function each MATLAB Function block runs on the block
+/// itself.
+///
+/// The name (`fcn`, `test`, …) lives in the block's Stateflow chart, which the
+/// renderers cannot reach; copying it into the block's properties lets the
+/// catalog caption the block with it like Simulink does.
+fn annotate_matlab_function_names(
+    system: &mut System,
+    charts: &BTreeMap<u32, Chart>,
+    chart_map: &BTreeMap<String, u32>,
+) {
+    for block in &mut system.blocks {
+        if block.is_matlab_function || block.block_type == "MATLAB Function" {
+            let name = block
+                .sid
+                .as_ref()
+                .and_then(|sid| chart_map.get(sid))
+                .or_else(|| chart_map.get(&block.name))
+                .and_then(|id| charts.get(id))
+                .and_then(|chart| chart.eml_name.clone())
+                .filter(|name| !name.trim().is_empty());
+            if let Some(name) = name {
+                block
+                    .properties
+                    .insert(MATLAB_FUNCTION_NAME_PROPERTY.to_string(), name);
+            }
+        }
+        if let Some(subsystem) = block.subsystem.as_deref_mut() {
+            annotate_matlab_function_names(subsystem, charts, chart_map);
+        }
+    }
 }
 
 // use super::geometry::parse_block_rect;
@@ -1140,6 +1178,7 @@ impl SubsystemApp {
     /// If the block is a non-chart subsystem, open it and return true.
     pub fn open_block_if_subsystem(&mut self, b: &Block) -> bool {
         if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            && !b.is_matlab_function
             && let Some(sub) = &b.subsystem
             && sub.chart.is_none()
         {

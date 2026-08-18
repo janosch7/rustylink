@@ -810,6 +810,47 @@ pub fn draw_plot_icon(
                     painter.circle_filled(c, r, color);
                 }
             }
+            // Circular arc `cx,cy,r,from,to` (angles in turns, clockwise on
+            // screen); `sa` puts an arrow head on the end, `sb` on both ends.
+            // The radius is a fraction of the smaller side so the arc stays a
+            // circle in a non-square icon area.
+            "s" | "sa" | "sb" if nums.len() >= 5 => {
+                let c = at(nums[0], nums[1]);
+                let r = nums[2] * avail.width().min(avail.height());
+                let (a0, a1) = (
+                    nums[3] * std::f32::consts::TAU,
+                    nums[4] * std::f32::consts::TAU,
+                );
+                let steps = 48;
+                let point = |a: f32| Pos2::new(c.x + r * a.cos(), c.y + r * a.sin());
+                let pts: Vec<Pos2> = (0..=steps)
+                    .map(|i| point(a0 + (a1 - a0) * i as f32 / steps as f32))
+                    .collect();
+                painter.add(egui::Shape::line(pts, stroke));
+                let head = |a: f32, backwards: bool| {
+                    let tip = point(a);
+                    // Tangent of the arc at `a`, pointing along the travel
+                    // direction, and the inward normal.
+                    let dir = if (a1 > a0) != backwards { 1.0 } else { -1.0 };
+                    let t = Vec2::new(-a.sin(), a.cos()) * dir;
+                    let n = Vec2::new(a.cos(), a.sin());
+                    let len = (r * 0.28).clamp(2.0, 10.0);
+                    painter.add(egui::Shape::line(
+                        vec![
+                            tip - t * len + n * len * 0.5,
+                            tip,
+                            tip - t * len - n * len * 0.5,
+                        ],
+                        stroke,
+                    ));
+                };
+                if kind == "sa" || kind == "sb" {
+                    head(a1, false);
+                }
+                if kind == "sb" {
+                    head(a0, true);
+                }
+            }
             _ => {}
         }
     }
@@ -1635,15 +1676,17 @@ pub fn render_product_block(
 ) {
     let has_div = operators.contains(&'/');
     if !has_div {
+        // A single multiply port collapses the input vector: Simulink shows the
+        // product-of-elements symbol `∏`, drawn as large as the block allows,
+        // rather than the element-wise `×`.
+        if matches!(operators, [c] if *c == '*') && !matrix {
+            render_center_glyph_maximized(painter, rect, font_scale, "\u{220F}", text, None);
+            return;
+        }
         let font_size = (rect.height() * 0.5).clamp(9.0, 30.0) * font_scale;
         let font_id = egui::FontId::proportional(font_size);
-        // A single multiply port collapses the input vector: Simulink shows the
-        // product-of-elements symbol `∏` rather than the element-wise `×`.
-        let collapse = matches!(operators, [c] if *c == '*');
         let glyph = if matrix {
             "[\u{00D7}]"
-        } else if collapse {
-            "\u{220F}" // ∏
         } else {
             "\u{00D7}" // ×
         };

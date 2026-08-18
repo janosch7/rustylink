@@ -191,8 +191,10 @@ fn icon_lookup_prefers_sourceblock_over_block_type() {
     );
     b.library_block_path = None;
 
-    let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_product.svg")));
+    // The matrix library entry now carries its own definition (and typeset
+    // icon) instead of an SVG asset, so assert the origin wins the lookup.
+    let def = rustylink::simulink_libraries::resolve_definition(&b);
+    assert_eq!(def.block_type, "Matrix Multiply");
 }
 
 #[test]
@@ -207,8 +209,8 @@ fn icon_lookup_accepts_normalized_slx_library_path() {
     );
     b.library_block_path = Some("matrix_library.slx/MatrixMultiply".to_string());
 
-    let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_product.svg")));
+    let def = rustylink::simulink_libraries::resolve_definition(&b);
+    assert_eq!(def.block_type, "Matrix Multiply");
 }
 
 /// Blocks whose SLX name uses different capitalisation than the registry key
@@ -222,8 +224,8 @@ fn icon_lookup_cross_product_case_insensitive() {
     // Simulate what the parser sets: library_block_path from SourceBlock.
     b.library_block_path = Some("matrix_library/Cross product".to_string());
 
-    let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/cross_product.svg")));
+    let def = rustylink::simulink_libraries::resolve_definition(&b);
+    assert_eq!(def.block_type, "Cross Product");
 }
 
 #[test]
@@ -260,46 +262,34 @@ fn icon_lookup_diagonal_matrix_alias() {
         rustylink::editor::operations::create_default_block("SubSystem", "Foo", 0, 0, 1, 1);
     blk.library_block_path = Some("matrix_library/DiagonalMatrix".to_string());
     let cfg = rustylink::egui_app::get_block_type_cfg(&blk);
-    assert_eq!(
-        cfg.icon,
-        Some(IconSpec::Svg("matrix/create_diagonal_matrix.svg"))
-    );
+    let diagonal = cfg.icon.expect("diagonal matrix icon");
+    assert!(matches!(diagonal, IconSpec::Plot(_)));
 
     // and the generic fallback via block_type (used by the catalog) also works
     let blk2 =
         rustylink::editor::operations::create_default_block("DiagonalMatrix", "Bar", 0, 0, 1, 1);
     let cfg2 = rustylink::egui_app::get_block_type_cfg(&blk2);
-    assert_eq!(
-        cfg2.icon,
-        Some(IconSpec::Svg("matrix/create_diagonal_matrix.svg"))
-    );
+    assert_eq!(cfg2.icon, Some(diagonal));
 
     // check extract-diagonal alias as well (library path variant)
     let mut blk3 =
         rustylink::editor::operations::create_default_block("SubSystem", "Qux", 0, 0, 1, 1);
     blk3.library_block_path = Some("matrix_library/ExtractDiag".to_string());
     let cfg3 = rustylink::egui_app::get_block_type_cfg(&blk3);
-    assert_eq!(
-        cfg3.icon,
-        Some(IconSpec::Svg("matrix/extract_diagonal.svg"))
-    );
+    assert!(matches!(cfg3.icon, Some(IconSpec::Plot(_))));
 }
 
 #[test]
-fn icon_lookup_product_matrix_multiplication_uses_svg() {
-    let mut b = rustylink::editor::operations::create_default_block(
-        "Product",
-        "Matrix Multiply",
-        0,
-        0,
-        2,
-        1,
-    );
+fn icon_lookup_product_matrix_multiplication_uses_matrix_definition() {
+    let mut b =
+        rustylink::editor::operations::create_default_block("Product", "Product1", 0, 0, 2, 1);
     b.properties
         .insert("Multiplication".to_string(), "Matrix(*)".to_string());
 
-    let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_product.svg")));
+    // `Multiplication="Matrix(*)"` is how Simulink encodes a matrix multiply,
+    // so the block resolves to the matrix library definition.
+    let def = rustylink::simulink_libraries::resolve_definition(&b);
+    assert_eq!(def.block_type, "Matrix Multiply");
 }
 
 #[test]
@@ -352,7 +342,7 @@ fn icon_lookup_matrix_square_alias_square() {
     b.library_block_path = Some("matrix_library/Square".to_string());
 
     let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_square.svg")));
+    assert_eq!(cfg.icon, Some(IconSpec::Math("sup:A^H A")));
 }
 
 /// SLX XML can embed line-breaks inside long property values, e.g.
@@ -377,7 +367,7 @@ fn icon_lookup_matrix_square_newline_in_source_block() {
     b.library_block_path = Some("matrix_library/Matrix\nSquare".to_string());
 
     let cfg = rustylink::egui_app::get_block_type_cfg(&b);
-    assert_eq!(cfg.icon, Some(IconSpec::Svg("matrix/matrix_square.svg")));
+    assert_eq!(cfg.icon, Some(IconSpec::Math("sup:A^H A")));
 }
 
 #[test]
@@ -387,12 +377,10 @@ fn signal_routing_blocks_have_explicit_visible_configs() {
             rustylink::editor::operations::create_default_block(block_type, block_type, 0, 0, 1, 1);
         let cfg = rustylink::egui_app::get_block_type_cfg(&block);
         assert!(cfg.known, "{block_type} should be known");
+        // Simulink draws bus/mux blocks as a solid bar, so they carry the
+        // FilledBlack shape and no interior icon.
+        assert_eq!(cfg.icon, None, "{block_type} should have no interior icon");
         assert_eq!(
-            cfg.icon,
-            Some(IconSpec::Utf8("☰")),
-            "{block_type} should have a visible icon"
-        );
-        assert_ne!(
             cfg.shape,
             rustylink::simulink_libraries::types::SimulinkShape::FilledBlack
         );
@@ -400,7 +388,7 @@ fn signal_routing_blocks_have_explicit_visible_configs() {
 }
 
 #[test]
-fn complex_to_real_imag_has_fixed_port_names_and_no_visible_icon() {
+fn complex_to_real_imag_is_drawn_by_its_renderer() {
     let block = rustylink::editor::operations::create_default_block(
         "ComplexToRealImag",
         "ComplexToRealImag",
@@ -412,9 +400,13 @@ fn complex_to_real_imag_has_fixed_port_names_and_no_visible_icon() {
     let cfg = rustylink::egui_app::get_block_type_cfg(&block);
 
     assert!(cfg.known);
-    assert_eq!(cfg.icon, Some(IconSpec::Utf8("")));
-    assert_eq!(cfg.input_port_names, vec!["Re+Im"]);
-    assert_eq!(cfg.output_port_names, vec!["Re", "Im"]);
+    // The `Re`/`Im` fork is part of the drawn icon, so there is neither a
+    // static icon nor a set of fixed port labels.
+    assert_eq!(cfg.icon, None);
+    assert!(cfg.input_port_names.is_empty());
+    assert!(cfg.output_port_names.is_empty());
+    let def = rustylink::simulink_libraries::resolve_definition(&block);
+    assert!(def.static_renderer.is_some());
 }
 
 #[test]

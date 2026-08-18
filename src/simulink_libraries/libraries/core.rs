@@ -102,7 +102,10 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
     SimulinkBlockDefinition::new("MATLAB Function", "User-Defined Functions")
         .with_description("Author block behaviour in MATLAB")
         .with_ports(IOPorts::Variable(1), IOPorts::Variable(1))
-        .with_block_label(BlockLabelPolicy::Fixed("fcn"))
+        .with_metadata_keys(&[MetadataKey::new(labels::MATLAB_FUNCTION_NAME_PROPERTY)])
+        .with_block_label(BlockLabelPolicy::MetadataDependent(
+            labels::matlab_function_name,
+        ))
         .with_port_labels(
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),

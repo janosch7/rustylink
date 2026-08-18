@@ -75,6 +75,7 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::Fixed(2), IOPorts::Fixed(1))
         .with_block_label(BlockLabelPolicy::Fixed("cross")),
     SimulinkBlockDefinition::new("Matrix Multiply", CAT)
+        .with_aliases(&["MatrixMultiply"])
         .with_description("Matrix multiplication")
         .with_ports(IOPorts::Variable(2), IOPorts::Fixed(1))
         .with_block_label(BlockLabelPolicy::Fixed("Matrix\nMultiply")),

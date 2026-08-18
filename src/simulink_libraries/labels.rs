@@ -113,6 +113,16 @@ pub fn bit_set(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     ))
 }
 
+/// Property under which the name of a MATLAB Function block's function is
+/// recorded while the model is loaded (it lives in the Stateflow chart, out of
+/// reach of the renderers).
+pub const MATLAB_FUNCTION_NAME_PROPERTY: &str = "MATLABFunctionName";
+
+/// MATLAB Function label: the name of the function the block runs, e.g. `test`.
+pub fn matlab_function_name(_block: &Block, meta: &BlockMetadata) -> Option<String> {
+    Some(nonempty(meta.get(MATLAB_FUNCTION_NAME_PROPERTY)).unwrap_or_else(|| "fcn".into()))
+}
+
 /// Trigonometry function label: reads `Operator` (sin, cos, acos, atan2, …).
 pub fn trig_function(_block: &Block, meta: &BlockMetadata) -> Option<String> {
     nonempty(meta.get("Operator"))

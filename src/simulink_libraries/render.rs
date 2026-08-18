@@ -172,7 +172,9 @@ pub fn port_label(block: &Block, index: u32, is_input: bool) -> Option<String> {
     }
     names
         .get((index - 1) as usize)
-        .filter(|s| !s.is_empty())
+        // The reset marker stands for line art the block's renderer paints, not
+        // for a text label.
+        .filter(|s| !s.is_empty() && s.as_str() != super::renderers::RESET_PORT)
         .cloned()
 }
 

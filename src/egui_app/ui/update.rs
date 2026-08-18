@@ -2771,6 +2771,24 @@ pub(crate) fn update_internal(
                     );
                 }
             }
+            // Enable/trigger ports enter through the block's top edge.
+            let control_count = b
+                .port_counts
+                .as_ref()
+                .map(|p| p.control_count())
+                .unwrap_or(0);
+            for i in 0..control_count {
+                let x = r_screen.left()
+                    + (i as f32 + 1.0) / (control_count as f32 + 1.0) * r_screen.width();
+                paint_port_chevron_placed(
+                    &painter,
+                    egui::pos2(x, r_screen.top()),
+                    true,
+                    Some(crate::simulink_libraries::types::PortPlacement::Top),
+                    font_scale,
+                    Color32::from_rgb(60, 60, 200),
+                );
+            }
             let fg = contrast_color(*bg);
             #[cfg(feature = "dashboard")]
             update_scope_live_sample(app, b, &sys_lines);
