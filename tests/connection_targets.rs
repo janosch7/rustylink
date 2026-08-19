@@ -1786,3 +1786,213 @@ fn signal_names_accumulate_through_mux() {
         alpha.signal_names
     );
 }
+
+#[test]
+fn subsystem_input_sees_signal_produced_by_another_subsystem() {
+    // Producer: a constant driving the subsystem's Outport.
+    let producer = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "Constant",
+                "Src",
+                "20",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "Outport",
+                "Out1",
+                "21",
+                vec![port("in", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+        ],
+        lines: vec![line("20", 1, "21", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    // Consumer: the subsystem's Inport driving a sink.
+    let consumer = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "Inport",
+                "In1",
+                "30",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+            block(
+                "Display",
+                "Sink",
+                "31",
+                vec![port("in", 1, None)],
+                None,
+                &[],
+            ),
+        ],
+        lines: vec![line("30", 1, "31", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block(
+                "SubSystem",
+                "Producer",
+                "1",
+                vec![port("out", 1, None)],
+                Some(producer),
+                &[],
+            ),
+            block(
+                "SubSystem",
+                "Consumer",
+                "2",
+                vec![port("in", 1, None)],
+                Some(consumer),
+                &[],
+            ),
+        ],
+        lines: vec![line("1", 1, "2", 1, Some("bus"))],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    // Inside the consumer the signal must resolve back to the producing
+    // subsystem, exactly as it does when the line starts at a root-level block.
+    let inner = resolver.line_targets_for_line(
+        &["Consumer".to_string()],
+        &system.blocks[1].subsystem.as_ref().unwrap().lines[0],
+    );
+    assert!(
+        inner
+            .iter()
+            .any(|target| target.path == "model/Producer/Out1"),
+        "consumer inport lost the producing subsystem: {inner:#?}"
+    );
+    assert!(
+        inner
+            .iter()
+            .any(|target| target.signal_name.as_deref() == Some("bus")),
+        "consumer inport lost the signal name: {inner:#?}"
+    );
+}
+
+#[test]
+fn bus_built_in_one_subsystem_is_selectable_in_the_next() {
+    // Producer: two constants joined into a bus behind the subsystem boundary.
+    let producer = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block("Constant", "A", "20", vec![port("out", 1, None)], None, &[]),
+            block("Constant", "B", "21", vec![port("out", 1, None)], None, &[]),
+            block(
+                "BusCreator",
+                "BusCreator",
+                "22",
+                vec![
+                    port("in", 1, None),
+                    port("in", 2, None),
+                    port("out", 1, None),
+                ],
+                None,
+                &[],
+            ),
+            block(
+                "Outport",
+                "Out1",
+                "23",
+                vec![port("in", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+        ],
+        lines: vec![
+            line("20", 1, "22", 1, Some("alpha")),
+            line("21", 1, "22", 2, Some("beta")),
+            line("22", 1, "23", 1, None),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    // Consumer: pick `beta` back out of the bus that crossed the boundary.
+    let consumer = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "Inport",
+                "In1",
+                "30",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+            block(
+                "BusSelector",
+                "BusSelector",
+                "31",
+                vec![port("in", 1, None), port("out", 1, Some("beta"))],
+                None,
+                &[],
+            ),
+            block(
+                "Display",
+                "Sink",
+                "32",
+                vec![port("in", 1, None)],
+                None,
+                &[],
+            ),
+        ],
+        lines: vec![line("30", 1, "31", 1, None), line("31", 1, "32", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block(
+                "SubSystem",
+                "Producer",
+                "1",
+                vec![port("out", 1, None)],
+                Some(producer),
+                &[],
+            ),
+            block(
+                "SubSystem",
+                "Consumer",
+                "2",
+                vec![port("in", 1, None)],
+                Some(consumer),
+                &[],
+            ),
+        ],
+        lines: vec![line("1", 1, "2", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let selected = resolver.line_targets_for_line(
+        &["Consumer".to_string()],
+        &system.blocks[1].subsystem.as_ref().unwrap().lines[1],
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|target| target.path == "model/Producer/B"),
+        "bus element built in the producer was not selectable: {selected:#?}"
+    );
+}

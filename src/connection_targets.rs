@@ -61,7 +61,13 @@ impl ConnectionTarget {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// How often a system re-resolves its children while their input contexts are
+/// still changing (chains of sibling subsystems feeding one another).  Only
+/// children whose context actually changed are resolved again, so a pass over
+/// a settled system costs nothing but the comparison.
+const MAX_CHILD_RESOLVE_PASSES: usize = 8;
+
+#[derive(Debug, Clone, Default, PartialEq)]
 struct ParentSubsystemContext {
     incoming_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
     outgoing_by_port: BTreeMap<u32, Vec<ConnectionTarget>>,
@@ -166,37 +172,56 @@ impl ConnectionTargetResolver {
             &mut line_targets,
         );
 
+        // Resolving a child needs the targets of the lines feeding it, and a
+        // line fed by a *sibling* subsystem only gets its real targets once
+        // that sibling has been resolved.  So alternate between resolving the
+        // children and re-propagating this system's lines until the children's
+        // contexts stop changing; a child whose context is unchanged is not
+        // resolved again, which keeps the common case a single pass.
         let mut child_summaries: HashMap<String, ChildSubsystemSummary> = HashMap::new();
-        for block in &system.blocks {
-            if let Some(subsystem) = &block.subsystem {
-                let child_path = child_system_path(system_path, &block.name);
-                let parent_ctx = ParentSubsystemContext {
-                    incoming_by_port: incoming_targets_by_port(system, block, &line_targets),
-                    outgoing_by_port: outgoing_targets_by_port(system, block, &line_targets),
-                };
-                let summary = self.resolve_system(subsystem, &child_path, Some(&parent_ctx));
-                if let Some(sid) = &block.sid {
-                    child_summaries.insert(sid.clone(), summary);
+        let mut child_contexts: HashMap<&str, ParentSubsystemContext> = HashMap::new();
+        for _ in 0..MAX_CHILD_RESOLVE_PASSES {
+            let mut resolved_any = false;
+            for block in &system.blocks {
+                if let Some(subsystem) = &block.subsystem {
+                    let child_ctx = ParentSubsystemContext {
+                        incoming_by_port: incoming_targets_by_port(system, block, &line_targets),
+                        outgoing_by_port: outgoing_targets_by_port(system, block, &line_targets),
+                    };
+                    if child_contexts.get(block.name.as_str()) == Some(&child_ctx) {
+                        continue;
+                    }
+                    let child_path = child_system_path(system_path, &block.name);
+                    let summary = self.resolve_system(subsystem, &child_path, Some(&child_ctx));
+                    child_contexts.insert(block.name.as_str(), child_ctx);
+                    if let Some(sid) = &block.sid {
+                        child_summaries.insert(sid.clone(), summary);
+                    }
+                    resolved_any = true;
                 }
             }
-        }
 
-        self.propagate_line_targets(
-            system,
-            system_path,
-            &block_lookup,
-            parent_ctx,
-            &child_summaries,
-            &mut line_targets,
-        );
-        self.propagate_line_metadata_upward(
-            system,
-            system_path,
-            &block_lookup,
-            parent_ctx,
-            &child_summaries,
-            &mut line_targets,
-        );
+            self.propagate_line_targets(
+                system,
+                system_path,
+                &block_lookup,
+                parent_ctx,
+                &child_summaries,
+                &mut line_targets,
+            );
+            self.propagate_line_metadata_upward(
+                system,
+                system_path,
+                &block_lookup,
+                parent_ctx,
+                &child_summaries,
+                &mut line_targets,
+            );
+
+            if !resolved_any {
+                break;
+            }
+        }
 
         for (line, targets) in system.lines.iter().zip(line_targets.iter()) {
             self.line_targets.insert(
