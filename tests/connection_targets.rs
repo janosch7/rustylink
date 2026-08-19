@@ -2,7 +2,9 @@ use indexmap::IndexMap;
 use rustylink::connection_targets::{
     ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
 };
-use rustylink::model::{Block, EndpointRef, Line, NameLocation, Point, Port, System, ValueKind};
+use rustylink::model::{
+    Block, Branch, EndpointRef, Line, NameLocation, Point, Port, System, ValueKind,
+};
 
 fn block(
     block_type: &str,
@@ -90,6 +92,32 @@ fn line(src_sid: &str, src_port: u32, dst_sid: &str, dst_port: u32, name: Option
         points: vec![Point { x: 0, y: 0 }, Point { x: 10, y: 0 }],
         labels: None,
         branches: Vec::new(),
+        properties: IndexMap::new(),
+    }
+}
+
+/// A line that fans out to several destinations, the way Simulink stores a
+/// branched signal: the line itself has no `dst`, every leg is a branch.
+fn branched_line(src_sid: &str, src_port: u32, dsts: &[(&str, &str, u32)]) -> Line {
+    Line {
+        name: None,
+        zorder: None,
+        src: Some(endpoint(src_sid, "out", src_port)),
+        dst: None,
+        points: vec![Point { x: 0, y: 0 }, Point { x: 10, y: 0 }],
+        labels: None,
+        branches: dsts
+            .iter()
+            .map(|(sid, port_type, port_index)| Branch {
+                name: None,
+                zorder: None,
+                dst: Some(endpoint(sid, port_type, *port_index)),
+                points: Vec::new(),
+                labels: None,
+                branches: Vec::new(),
+                properties: IndexMap::new(),
+            })
+            .collect(),
         properties: IndexMap::new(),
     }
 }
@@ -1994,5 +2022,234 @@ fn bus_built_in_one_subsystem_is_selectable_in_the_next() {
             .iter()
             .any(|target| target.path == "model/Producer/B"),
         "bus element built in the producer was not selectable: {selected:#?}"
+    );
+}
+
+#[test]
+fn branched_line_feeds_the_subsystem_port_it_actually_ends_at() {
+    // Two inports, each wired to its own sink so the two paths stay distinct.
+    let child = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "Inport",
+                "In1",
+                "30",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+            block(
+                "Inport",
+                "In2",
+                "31",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "2")],
+            ),
+            block(
+                "Display",
+                "Sink1",
+                "32",
+                vec![port("in", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "Display",
+                "Sink2",
+                "33",
+                vec![port("in", 1, None)],
+                None,
+                &[],
+            ),
+        ],
+        lines: vec![line("30", 1, "32", 1, None), line("31", 1, "33", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+            block("Display", "Tap", "4", vec![port("in", 1, None)], None, &[]),
+            block(
+                "SubSystem",
+                "Sub",
+                "3",
+                vec![port("in", 1, None), port("in", 2, None)],
+                Some(child),
+                &[],
+            ),
+        ],
+        lines: vec![
+            line("2", 1, "3", 1, None),
+            // `A` branches to the second input and to a tap.
+            branched_line("1", 1, &[("3", "in", 2), ("4", "in", 1)]),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let child_system = system.blocks[3].subsystem.as_ref().unwrap();
+    let from_in1 = resolver.line_targets_for_line(&["Sub".to_string()], &child_system.lines[0]);
+    let from_in2 = resolver.line_targets_for_line(&["Sub".to_string()], &child_system.lines[1]);
+
+    assert!(
+        from_in1.iter().any(|t| t.path == "model/B")
+            && !from_in1.iter().any(|t| t.path == "model/A"),
+        "port 1 must carry only B: {from_in1:#?}"
+    );
+    assert!(
+        from_in2.iter().any(|t| t.path == "model/A")
+            && !from_in2.iter().any(|t| t.path == "model/B"),
+        "the branch ends at port 2, so it must carry A: {from_in2:#?}"
+    );
+}
+
+#[test]
+fn control_port_signal_does_not_land_on_the_first_data_port() {
+    let child = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "EnablePort",
+                "Enable",
+                "29",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "Inport",
+                "In1",
+                "30",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+            block(
+                "Display",
+                "Sink",
+                "31",
+                vec![port("in", 1, None)],
+                None,
+                &[],
+            ),
+        ],
+        lines: vec![line("30", 1, "31", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let mut enable_line = line("2", 1, "3", 1, None);
+    enable_line.dst = Some(endpoint("3", "enable", 1));
+
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block(
+                "Constant",
+                "Data",
+                "1",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "Constant",
+                "Switch",
+                "2",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "SubSystem",
+                "Sub",
+                "3",
+                vec![port("in", 1, None)],
+                Some(child),
+                &[],
+            ),
+        ],
+        lines: vec![line("1", 1, "3", 1, None), enable_line],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let child_system = system.blocks[2].subsystem.as_ref().unwrap();
+    let from_in1 = resolver.line_targets_for_line(&["Sub".to_string()], &child_system.lines[0]);
+
+    // The enable signal is not data port 1.
+    assert!(
+        from_in1.iter().any(|t| t.path == "model/Data")
+            && !from_in1.iter().any(|t| t.path == "model/Switch"),
+        "data port 1 picked up the enable signal: {from_in1:#?}"
+    );
+}
+
+#[test]
+fn branched_line_into_a_mux_keeps_its_element_index() {
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+            block("Display", "Tap", "5", vec![port("in", 1, None)], None, &[]),
+            block(
+                "Mux",
+                "Mux",
+                "3",
+                vec![
+                    port("in", 1, None),
+                    port("in", 2, None),
+                    port("out", 1, None),
+                ],
+                None,
+                &[],
+            ),
+            block(
+                "Demux",
+                "Demux",
+                "4",
+                vec![
+                    port("in", 1, None),
+                    port("out", 1, None),
+                    port("out", 2, None),
+                ],
+                None,
+                &[],
+            ),
+            block("Display", "S1", "6", vec![port("in", 1, None)], None, &[]),
+            block("Display", "S2", "7", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![
+            line("1", 1, "3", 1, None),
+            // `B` branches into the *second* mux input and into a tap.
+            branched_line("2", 1, &[("3", "in", 2), ("5", "in", 1)]),
+            line("3", 1, "4", 1, None),
+            line("4", 1, "6", 1, None),
+            line("4", 2, "7", 1, None),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let first = resolver.line_targets_for_line(&[], &system.lines[3]);
+    let second = resolver.line_targets_for_line(&[], &system.lines[4]);
+
+    assert!(
+        first.iter().any(|t| t.path == "model/A") && !first.iter().any(|t| t.path == "model/B"),
+        "demux output 1 must be the mux's first input: {first:#?}"
+    );
+    assert!(
+        second.iter().any(|t| t.path == "model/B") && !second.iter().any(|t| t.path == "model/A"),
+        "demux output 2 must be the branch that ends at mux input 2: {second:#?}"
     );
 }

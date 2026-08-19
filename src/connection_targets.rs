@@ -487,19 +487,20 @@ impl ConnectionTargetResolver {
             else {
                 continue;
             };
-            let input_index = incoming.dst.as_ref().map(|dst| dst.port_index).unwrap_or(1);
             let signal_name = explicit_line_signal_name(incoming);
-            for mut target in line_targets[line_index].clone() {
-                let next_signal_name = signal_name.clone().or(target.signal_name.clone());
-                let next_resolve_signal = signal_name
-                    .clone()
-                    .or_else(|| target.signal_name.clone())
-                    .or_else(|| resolve_signal_value(&target.resolve).map(str::to_string))
-                    .or_else(|| Some(format!("signal{input_index}")));
-                set_signal_name_only(&mut target, next_signal_name);
-                set_signal_resolve(&mut target, next_resolve_signal);
-                target.origin = ConnectionTargetOrigin::BusCreator;
-                targets.push(target);
+            for input_index in input_port_indices(block, incoming) {
+                for mut target in line_targets[line_index].clone() {
+                    let next_signal_name = signal_name.clone().or(target.signal_name.clone());
+                    let next_resolve_signal = signal_name
+                        .clone()
+                        .or_else(|| target.signal_name.clone())
+                        .or_else(|| resolve_signal_value(&target.resolve).map(str::to_string))
+                        .or_else(|| Some(format!("signal{input_index}")));
+                    set_signal_name_only(&mut target, next_signal_name);
+                    set_signal_resolve(&mut target, next_resolve_signal);
+                    target.origin = ConnectionTargetOrigin::BusCreator;
+                    targets.push(target);
+                }
             }
         }
         targets
@@ -569,14 +570,15 @@ impl ConnectionTargetResolver {
             else {
                 continue;
             };
-            let input_index = incoming.dst.as_ref().map(|dst| dst.port_index).unwrap_or(1);
             let signal_name = explicit_line_signal_name(incoming);
-            for mut target in line_targets[line_index].clone() {
-                target.resolve = Some(ConnectionTargetResolve::Index(input_index));
-                let next_signal_name = signal_name.clone().or(target.signal_name.clone());
-                set_signal_name_only(&mut target, next_signal_name);
-                target.origin = ConnectionTargetOrigin::Mux;
-                targets.push(target);
+            for input_index in input_port_indices(block, incoming) {
+                for mut target in line_targets[line_index].clone() {
+                    target.resolve = Some(ConnectionTargetResolve::Index(input_index));
+                    let next_signal_name = signal_name.clone().or(target.signal_name.clone());
+                    set_signal_name_only(&mut target, next_signal_name);
+                    target.origin = ConnectionTargetOrigin::Mux;
+                    targets.push(target);
+                }
             }
         }
         targets
@@ -874,6 +876,56 @@ fn boundary_port_index(block: &Block) -> u32 {
         .unwrap_or(1)
 }
 
+/// The data input ports of `block_sid` that `line` ends at, counting every
+/// branch: a branched signal reaches a port through `line.branches`, where the
+/// line's own `dst` says nothing about which port that is.  Control endpoints
+/// (`enable`, `trigger`, …) are skipped — they belong to the matching control
+/// port block, not to the numbered `Inport`s.
+fn line_data_input_ports(line: &Line, block_sid: &str) -> BTreeSet<u32> {
+    fn collect(dst: Option<&EndpointRef>, block_sid: &str, ports: &mut BTreeSet<u32>) {
+        if let Some(dst) = dst
+            && dst.sid == block_sid
+            && !is_control_port_type(&dst.port_type)
+        {
+            ports.insert(dst.port_index);
+        }
+    }
+
+    fn collect_branches(branches: &[Branch], block_sid: &str, ports: &mut BTreeSet<u32>) {
+        for branch in branches {
+            collect(branch.dst.as_ref(), block_sid, ports);
+            collect_branches(&branch.branches, block_sid, ports);
+        }
+    }
+
+    let mut ports = BTreeSet::new();
+    collect(line.dst.as_ref(), block_sid, &mut ports);
+    collect_branches(&line.branches, block_sid, &mut ports);
+    ports
+}
+
+/// The input ports of `block` that `line` ends at, falling back to port 1 when
+/// the wiring does not say (a block without a SID).
+fn input_port_indices(block: &Block, line: &Line) -> Vec<u32> {
+    let ports = block
+        .sid
+        .as_deref()
+        .map(|sid| line_data_input_ports(line, sid))
+        .unwrap_or_default();
+    if ports.is_empty() {
+        vec![1]
+    } else {
+        ports.into_iter().collect()
+    }
+}
+
+fn is_control_port_type(port_type: &str) -> bool {
+    matches!(
+        port_type.to_ascii_lowercase().as_str(),
+        "enable" | "trigger" | "ifaction" | "action" | "reset" | "state"
+    )
+}
+
 fn incoming_targets_by_port(
     system: &System,
     block: &Block,
@@ -885,13 +937,7 @@ fn incoming_targets_by_port(
     };
 
     for (line, targets) in system.lines.iter().zip(line_targets.iter()) {
-        if line_targets_block_sid(line, block_sid) {
-            let port_index = line
-                .dst
-                .as_ref()
-                .filter(|dst| dst.sid == block_sid)
-                .map(|dst| dst.port_index)
-                .unwrap_or(1);
+        for port_index in line_data_input_ports(line, block_sid) {
             by_port
                 .entry(port_index)
                 .or_insert_with(Vec::new)
