@@ -1,4 +1,4 @@
-use rustylink::editor::block_catalog::get_block_catalog;
+use rustylink::simulink_libraries::browser::get_block_catalog;
 
 #[test]
 fn catalog_has_at_least_750_entries() {
@@ -61,13 +61,17 @@ fn catalog_search_empty_returns_all() {
 
 #[test]
 fn catalog_contains_virtual_library_blocks() {
-    use rustylink::builtin_libraries::VIRTUAL_LIBRARIES;
+    use rustylink::simulink_libraries::stubs::STUB_LIBRARIES;
     let catalog = get_block_catalog();
-    for lib in VIRTUAL_LIBRARIES {
-        for b in (lib.get_blocks)() {
-            // canonical name should appear as a block_type entry
+    for lib in STUB_LIBRARIES {
+        for b in lib.blocks {
+            // canonical name (or one of its aliases) should appear as a
+            // block_type entry in the browser catalog.
+            let present = catalog
+                .iter()
+                .any(|e| e.block_type == b.name || b.aliases.iter().any(|a| *a == e.block_type));
             assert!(
-                catalog.iter().any(|e| e.block_type == b.name),
+                present,
                 "catalog missing entry for virtual block {}",
                 b.name
             );

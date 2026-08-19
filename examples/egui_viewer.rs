@@ -40,17 +40,25 @@ struct Args {
 
 #[cfg(feature = "egui")]
 fn main() -> Result<()> {
+    // Limit rayon to 2 threads — the only parallel work is parsing, which is
+    // done before the GUI starts.  This avoids spawning one thread per logical
+    // core (24+ sleeping threads) that contribute to overall system overhead.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build_global()
+        .ok();
+
     let args = Args::parse();
     let path = Utf8PathBuf::from(&args.file);
 
     // Build library search paths up-front (dir of the provided file + any -L entries)
     let mut lib_paths: Vec<Utf8PathBuf> = Vec::new();
-    if let Some(parent) = path.parent() {
-        if parent.as_str() != "" {
-            lib_paths.push(parent.to_path_buf());
-        }
+    if let Some(parent) = path.parent()
+        && parent.as_str() != ""
+    {
+        lib_paths.push(parent.to_path_buf());
     }
-    lib_paths.extend(args.lib.iter().map(|s| Utf8PathBuf::from(s)));
+    lib_paths.extend(args.lib.iter().map(Utf8PathBuf::from));
 
     // Collect referenced library names (may be filled inside parser branches)
     let mut referenced_lib_names: std::collections::HashSet<String> =
@@ -75,10 +83,10 @@ fn main() -> Result<()> {
             acc: &mut std::collections::HashSet<String>,
         ) {
             for b in &sys.blocks {
-                if let Some(src) = b.properties.get("SourceBlock") {
-                    if let Some((lib, _)) = src.split_once('/') {
-                        acc.insert(lib.to_string());
-                    }
+                if let Some(src) = b.properties.get("SourceBlock")
+                    && let Some((lib, _)) = src.split_once('/')
+                {
+                    acc.insert(lib.to_string());
                 }
                 if let Some(sub) = &b.subsystem {
                     collect_sys_libs(sub, acc);
@@ -100,6 +108,7 @@ fn main() -> Result<()> {
         // Build combined chart map: include name-based keys
         let chart_map: std::collections::BTreeMap<String, u32> = name_map;
 
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts_by_id, &chart_map);
         (sys, charts_by_id, chart_map)
     } else {
         let root_dir = Utf8PathBuf::from(".");
@@ -118,10 +127,10 @@ fn main() -> Result<()> {
             acc: &mut std::collections::HashSet<String>,
         ) {
             for b in &sys.blocks {
-                if let Some(src) = b.properties.get("SourceBlock") {
-                    if let Some((lib, _)) = src.split_once('/') {
-                        acc.insert(lib.to_string());
-                    }
+                if let Some(src) = b.properties.get("SourceBlock")
+                    && let Some((lib, _)) = src.split_once('/')
+                {
+                    acc.insert(lib.to_string());
                 }
                 if let Some(sub) = &b.subsystem {
                     collect_sys_libs(sub, acc);
@@ -148,6 +157,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     };
 
@@ -188,19 +198,17 @@ fn main() -> Result<()> {
         let resolver = LibraryResolver::new(lib_paths.iter());
         let lookup = resolver.locate(referenced_lib_names.iter().map(|s| s.as_str()));
         lookup_opt = Some(lookup);
-        if let Some(lu) = &lookup_opt {
-            if !lu.not_found.is_empty() {
-                eprintln!(
-                    "[rustylink] Libraries referenced by model but NOT found in search paths:"
-                );
-                for n in &lu.not_found {
-                    // extra sanity: don't report virtual libs even if the resolver
-                    // somehow returned them
-                    if is_virtual_library(n) {
-                        continue;
-                    }
-                    eprintln!("  - {}", n);
+        if let Some(lu) = &lookup_opt
+            && !lu.not_found.is_empty()
+        {
+            eprintln!("[rustylink] Libraries referenced by model but NOT found in search paths:");
+            for n in &lu.not_found {
+                // extra sanity: don't report virtual libs even if the resolver
+                // somehow returned them
+                if is_virtual_library(n) {
+                    continue;
                 }
+                eprintln!("  - {}", n);
             }
         }
     }
@@ -218,12 +226,11 @@ fn main() -> Result<()> {
             } else {
                 format!("{}/{}", prefix, b.name)
             };
-            if let Some(src) = b.properties.get("SourceBlock") {
-                if let Some((lib, blk)) = src.split_once('/') {
-                    if b.library_block_path.is_none() {
-                        acc.push((lib.to_string(), blk.to_string(), host_path.clone()));
-                    }
-                }
+            if let Some(src) = b.properties.get("SourceBlock")
+                && let Some((lib, blk)) = src.split_once('/')
+                && b.library_block_path.is_none()
+            {
+                acc.push((lib.to_string(), blk.to_string(), host_path.clone()));
             }
             if let Some(sub) = &b.subsystem {
                 let next_prefix = if prefix.is_empty() {
@@ -242,7 +249,7 @@ fn main() -> Result<()> {
         for (lib, blk, host) in &unresolved_blocks {
             let lib_missing = lookup_opt
                 .as_ref()
-                .map_or(false, |lu| lu.not_found.iter().any(|n| n == lib));
+                .is_some_and(|lu| lu.not_found.iter().any(|n| n == lib));
             // clean each component before printing to avoid newlines or tabs
             let lib_c = clean_whitespace(lib);
             let blk_c = clean_whitespace(blk);
@@ -323,6 +330,7 @@ fn main() -> Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(
@@ -330,6 +338,7 @@ fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::light());
+            rustylink::egui_app::fonts::install(&cc.egui_ctx);
             Ok(Box::new(app.clone()))
         }),
     )

@@ -4,6 +4,7 @@ use crate::egui_app::state::{BlockDialog, ChartView, SignalDialog, SubsystemApp}
 use crate::egui_app::text::matlab_syntax_job;
 use crate::model::EndpointRef;
 use eframe::egui::{self, Color32, RichText};
+use std::sync::Arc;
 
 fn build_chart_view_for_block(
     app: &SubsystemApp,
@@ -67,20 +68,13 @@ pub fn apply_update_response(app: &mut SubsystemApp, response: &UpdateResponse) 
             // build a cleaned title using our helper function
             let title_cleaned = block_dialog_title(block);
 
-            if let Some(cv) = build_chart_view_for_block(app, block) {
-                app.chart_view = Some(cv);
-                app.block_view = Some(BlockDialog {
-                    title: title_cleaned.clone(),
-                    block: block.clone(),
-                    open: true,
-                });
-            } else {
-                app.block_view = Some(BlockDialog {
-                    title: title_cleaned.clone(),
-                    block: block.clone(),
-                    open: true,
-                });
-            }
+            // A MATLAB Function block shows its source in the block window
+            // itself (see `show_block_window`) rather than in a chart popup.
+            app.block_view = Some(BlockDialog {
+                title: title_cleaned.clone(),
+                block: Arc::new(block.clone()),
+                open: true,
+            });
         }
     }
 }
@@ -113,7 +107,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
     if let Some(sd) = &app.signal_view {
         let mut open_flag = sd.open;
         let title = format!("Signal: {}", sd.title);
-        let sys = app.current_system().map(|s| s.clone());
+        let sys = app.current_system().cloned();
         let line_idx = sd.line_idx;
         egui::Window::new(title)
             .open(&mut open_flag)
@@ -154,7 +148,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             collect_branch_dsts(b, &mut outputs);
                         }
                         egui::CollapsingHeader::new("Inputs")
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
                                 if let Some(src) = &line.src {
                                     let bname = sys
@@ -199,7 +193,7 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                                 }
                             });
                         egui::CollapsingHeader::new("Outputs")
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
                                 if outputs.is_empty() {
                                     ui.label("<none>");
@@ -249,10 +243,8 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             ui.label(RichText::new("Actions").strong());
                             ui.horizontal_wrapped(|ui| {
                                 for btn in &app.signal_buttons {
-                                    if (btn.filter)(line) {
-                                        if ui.button(&btn.label).clicked() {
-                                            (btn.on_click)(line);
-                                        }
+                                    if (btn.filter)(line) && ui.button(&btn.label).clicked() {
+                                        (btn.on_click)(line);
                                     }
                                 }
                             });
@@ -275,9 +267,17 @@ fn show_signal_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
 }
 
 fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
+    // The MATLAB source of a MATLAB Function block lives in its Stateflow
+    // chart; resolve it up front so the window body can borrow the dialog.
+    let matlab_source = app
+        .block_view
+        .as_ref()
+        .and_then(|bd| build_chart_view_for_block(app, &bd.block))
+        .map(|view| view.script)
+        .filter(|script| !script.trim().is_empty());
     if let Some(bd) = &app.block_view {
         let mut open_flag = bd.open;
-        let block = bd.block.clone();
+        let block = &bd.block;
         // the title was cleaned when the dialog was created; normalize again just
         // in case the string was mutated by a custom button handler.
         let win_title = crate::parser::helpers::clean_whitespace(&bd.title);
@@ -325,76 +325,87 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             });
                         }
                     });
-                if let Some(id) = &block.instance_data {
-                    if !id.properties.is_empty() {
-                        ui.separator();
-                        egui::CollapsingHeader::new("Instance Parameters")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                for (k, v) in &id.properties {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(
-                                                crate::parser::helpers::clean_whitespace(k),
-                                            )
+                if let Some(id) = &block.instance_data
+                    && !id.properties.is_empty()
+                {
+                    ui.separator();
+                    egui::CollapsingHeader::new("Instance Parameters")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for (k, v) in &id.properties {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(crate::parser::helpers::clean_whitespace(k))
                                             .strong(),
-                                        );
-                                        ui.label(crate::parser::helpers::clean_whitespace(v));
-                                    });
-                                }
-                            });
-                    }
+                                    );
+                                    ui.label(crate::parser::helpers::clean_whitespace(v));
+                                });
+                            }
+                        });
                 }
-                if block.block_type == "CFunction" {
-                    if let Some(cfg) = &block.c_function {
-                        ui.separator();
-                        egui::CollapsingHeader::new("C/C++ Code")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                if let Some(s) = &cfg.start_code {
-                                    ui.label(RichText::new("StartCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.output_code {
-                                    ui.label(RichText::new("OutputCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.terminate_code {
-                                    ui.label(RichText::new("TerminateCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_start_code {
-                                    ui.label(RichText::new("CodegenStartCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_output_code {
-                                    ui.label(RichText::new("CodegenOutputCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                                if let Some(s) = &cfg.codegen_terminate_code {
-                                    ui.label(RichText::new("CodegenTerminateCode").strong());
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut s.clone())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                }
-                            });
-                    }
+                if block.block_type == "CFunction"
+                    && let Some(cfg) = &block.c_function
+                {
+                    ui.separator();
+                    egui::CollapsingHeader::new("C/C++ Code")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            if let Some(s) = &cfg.start_code {
+                                ui.label(RichText::new("StartCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.output_code {
+                                ui.label(RichText::new("OutputCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.terminate_code {
+                                ui.label(RichText::new("TerminateCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_start_code {
+                                ui.label(RichText::new("CodegenStartCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_output_code {
+                                ui.label(RichText::new("CodegenOutputCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                            if let Some(s) = &cfg.codegen_terminate_code {
+                                ui.label(RichText::new("CodegenTerminateCode").strong());
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut s.clone())
+                                        .desired_width(f32::INFINITY),
+                                );
+                            }
+                        });
+                }
+                if let Some(script) = matlab_source.as_ref() {
+                    ui.separator();
+                    egui::CollapsingHeader::new("MATLAB Code")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let mut source = script.clone();
+                            ui.add(
+                                egui::TextEdit::multiline(&mut source)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
                 }
                 egui::CollapsingHeader::new("Ports")
                     .default_open(false)
@@ -445,10 +456,8 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new("Actions").strong());
                     ui.horizontal_wrapped(|ui| {
                         for btn in &app.block_buttons {
-                            if (btn.filter)(&block) {
-                                if ui.button(&btn.label).clicked() {
-                                    (btn.on_click)(&block);
-                                }
+                            if (btn.filter)(block) && ui.button(&btn.label).clicked() {
+                                (btn.on_click)(block);
                             }
                         }
                     });

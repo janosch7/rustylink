@@ -1,8 +1,12 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Block, Branch, DashboardBinding, DashboardTargetPath, Line, System};
+use crate::model::{
+    Block, Branch, DashboardBinding, DashboardTargetPath, EndpointRef, Line, System,
+};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
@@ -28,11 +32,17 @@ pub enum ConnectionTargetResolve {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 pub struct ConnectionTarget {
-    pub path: String, 
-    pub signal_name: Option<String>, 
-    pub resolve: Option<ConnectionTargetResolve>, 
-    pub element_index: Option<u32>, 
-    pub origin: ConnectionTargetOrigin, 
+    pub path: String,
+    pub signal_name: Option<String>,
+    /// Every signal name this target carries along the traced signal line,
+    /// including names picked up crossing subsystem In/Outport boundaries and
+    /// passing through Bus/Mux/Demux blocks. Order-preserving and deduplicated;
+    /// `signal_name` (when set) is always included as the primary alias.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signal_names: Vec<String>,
+    pub resolve: Option<ConnectionTargetResolve>,
+    pub element_index: Option<u32>,
+    pub origin: ConnectionTargetOrigin,
     pub signals_only: bool,
     pub testpoint: bool,
     /// The Simulink block type that produced this target (e.g. "Reference",
@@ -91,6 +101,19 @@ impl ConnectionTargetResolver {
         self.block_targets.get(&key).cloned().unwrap_or_default()
     }
 
+    /// Like `block_targets_for_block` but returns a reference to avoid cloning.
+    pub fn block_targets_for_block_ref(
+        &self,
+        system_path: &[String],
+        block: &Block,
+    ) -> &[ConnectionTarget] {
+        let key = block_cache_key(system_path, block);
+        self.block_targets
+            .get(&key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     pub fn line_targets_for_line(
         &self,
         system_path: &[String],
@@ -98,6 +121,19 @@ impl ConnectionTargetResolver {
     ) -> Vec<ConnectionTarget> {
         let key = line_cache_key(system_path, line);
         self.line_targets.get(&key).cloned().unwrap_or_default()
+    }
+
+    /// Like `line_targets_for_line` but returns a reference to avoid cloning.
+    pub fn line_targets_for_line_ref(
+        &self,
+        system_path: &[String],
+        line: &Line,
+    ) -> &[ConnectionTarget] {
+        let key = line_cache_key(system_path, line);
+        self.line_targets
+            .get(&key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     fn resolve_system(
@@ -292,7 +328,7 @@ impl ConnectionTargetResolver {
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
-                    "From" => self.from_block_targets(system, block, line_targets),
+                    "From" => self.resolve_from_block_targets(system, block, line_targets),
                     _ => self.base_line_targets(system, system_path, block_lookup, line),
                 };
 
@@ -554,7 +590,7 @@ impl ConnectionTargetResolver {
             .collect()
     }
 
-    fn from_block_targets(
+    fn resolve_from_block_targets(
         &self,
         system: &System,
         block: &Block,
@@ -570,13 +606,7 @@ impl ConnectionTargetResolver {
             .blocks
             .iter()
             .filter(|b| b.block_type == "Goto")
-            .filter(|b| {
-                b.properties
-                    .get("GotoTag")
-                    .map(|s| s.trim())
-                    .unwrap_or("A")
-                    == tag
-            })
+            .filter(|b| b.properties.get("GotoTag").map(|s| s.trim()).unwrap_or("A") == tag)
             .collect();
 
         let mut targets = Vec::new();
@@ -595,6 +625,7 @@ impl ConnectionTargetResolver {
         targets
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn upstream_propagated_targets(
         &self,
         system: &System,
@@ -626,10 +657,8 @@ impl ConnectionTargetResolver {
                         .and_then(|dst| summary.incoming_by_port.get(&dst.port_index))
                 })
                 .map(|targets| {
-                    let mut propagated = boundary_targets(
-                        targets,
-                        self.full_block_path(system_path, &block.name),
-                    );
+                    let mut propagated =
+                        boundary_targets(targets, self.full_block_path(system_path, &block.name));
                     if block.block_type == "Reference" {
                         for t in &mut propagated {
                             t.block_type = Some("Reference".to_string());
@@ -783,10 +812,11 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} resolve={:?} index={:?} signals_only={} testpoint={} block_type={:?}",
+            "    - path='{}' origin={:?} signal={:?} signal_names={:?} resolve={:?} index={:?} signals_only={} testpoint={} block_type={:?}",
             target.path,
             target.origin,
             target.signal_name,
+            target.signal_names,
             target.resolve,
             target.element_index,
             target.signals_only,
@@ -978,6 +1008,9 @@ fn merge_upstream_metadata(
                 .or(propagated_name)
                 .or(target.signal_name.clone()),
         );
+        for candidate in &propagated {
+            merge_signal_aliases(target, &candidate.signal_names);
+        }
         target.testpoint = explicit_testpoint
             || target.testpoint
             || propagated.iter().any(|candidate| candidate.testpoint);
@@ -1026,7 +1059,28 @@ fn metadata_paths_match(
 }
 
 fn set_signal_name_only(target: &mut ConnectionTarget, signal_name: Option<String>) {
-    target.signal_name = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+    let normalized = signal_name.and_then(|signal_name| normalized_path_segment(&signal_name));
+    if let Some(name) = &normalized {
+        push_signal_alias(target, name);
+    }
+    target.signal_name = normalized;
+}
+
+/// Record `name` as one of the signal names this target carries, keeping
+/// insertion order and skipping duplicates. `name` is expected to already be a
+/// normalized path segment.
+fn push_signal_alias(target: &mut ConnectionTarget, name: &str) {
+    if !target.signal_names.iter().any(|existing| existing == name) {
+        target.signal_names.push(name.to_string());
+    }
+}
+
+/// Union `aliases` into `target.signal_names`, preserving order and dropping
+/// duplicates.
+fn merge_signal_aliases(target: &mut ConnectionTarget, aliases: &[String]) {
+    for alias in aliases {
+        push_signal_alias(target, alias);
+    }
 }
 
 fn set_signal_resolve(target: &mut ConnectionTarget, signal_name: Option<String>) {
@@ -1083,13 +1137,12 @@ fn apply_line_resolve_hint(
         return;
     }
 
-    if let Some(dst) = &line.dst {
-        if let Some(block) = block_lookup.get(dst.sid.as_str()) {
-            if block.block_type == "Mux" {
-                target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
-                return;
-            }
-        }
+    if let Some(dst) = &line.dst
+        && let Some(block) = block_lookup.get(dst.sid.as_str())
+        && block.block_type == "Mux"
+    {
+        target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
+        return;
     }
 
     if target.resolve.is_none() && target.element_index.is_some() {
@@ -1326,6 +1379,7 @@ fn dashboard_binding_target_path(binding: &DashboardBinding) -> &DashboardTarget
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
     let mut seen: BTreeMap<
         (
@@ -1345,12 +1399,13 @@ pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
             target.signal_name.clone(),
             target.resolve.clone(),
             target.element_index,
-            target.origin.clone(),
+            target.origin,
             target.signals_only,
         );
         if let Some(index) = seen.get(&key).copied() {
             if let Some(existing) = out.get_mut(index) {
                 existing.testpoint = existing.testpoint || target.testpoint;
+                merge_signal_aliases(existing, &target.signal_names);
             }
         } else {
             seen.insert(key, out.len());
@@ -1360,3 +1415,102 @@ pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
     out
 }
 
+/// Property keys that only affect a block's or line's *geometry* (position,
+/// stacking, routing waypoints) and therefore never change the resolved signal
+/// / target-path graph.  They are skipped by [`model_topology_signature`].
+const GEOMETRY_PROPERTY_KEYS: &[&str] = &["Position", "ZOrder", "Points", "SortIndex"];
+
+/// A cheap 64-bit signature of everything in the model that the connection
+/// target resolver depends on, deliberately *excluding* geometry (block
+/// positions, z-order, line waypoints).
+///
+/// Building the resolver walks the whole subsystem tree and re-propagates every
+/// signal, which is far more expensive than hashing.  Layout-only edits (moving
+/// a block, dragging a line waypoint) leave this signature unchanged, so the
+/// cached resolver can be reused instead of rebuilt every frame while dragging.
+pub fn model_topology_signature(root: &System) -> u64 {
+    let mut h = DefaultHasher::new();
+    hash_system(root, &mut h);
+    h.finish()
+}
+
+fn hash_system(sys: &System, h: &mut DefaultHasher) {
+    if let Some(name) = sys.properties.get("Name") {
+        name.hash(h);
+    }
+    sys.blocks.len().hash(h);
+    for block in &sys.blocks {
+        hash_block(block, h);
+    }
+    sys.lines.len().hash(h);
+    for line in &sys.lines {
+        hash_line(line, h);
+    }
+}
+
+fn hash_non_geometry_properties(
+    properties: &indexmap::IndexMap<String, String>,
+    h: &mut DefaultHasher,
+) {
+    for (key, value) in properties {
+        if GEOMETRY_PROPERTY_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        key.hash(h);
+        value.hash(h);
+    }
+}
+
+fn hash_block(block: &Block, h: &mut DefaultHasher) {
+    block.block_type.hash(h);
+    block.name.hash(h);
+    block.sid.hash(h);
+    block.commented.hash(h);
+    block.value.hash(h);
+    if let Some(pc) = &block.port_counts {
+        pc.ins.hash(h);
+        pc.outs.hash(h);
+    }
+    block.ports.len().hash(h);
+    for port in &block.ports {
+        port.port_type.hash(h);
+        port.index.hash(h);
+    }
+    hash_non_geometry_properties(&block.properties, h);
+    block.dashboard_binding.is_some().hash(h);
+    if let Some(subsystem) = &block.subsystem {
+        hash_system(subsystem, h);
+    }
+}
+
+fn hash_endpoint(endpoint: &Option<EndpointRef>, h: &mut DefaultHasher) {
+    match endpoint {
+        Some(e) => {
+            1u8.hash(h);
+            e.sid.hash(h);
+            e.port_type.hash(h);
+            e.port_index.hash(h);
+        }
+        None => 0u8.hash(h),
+    }
+}
+
+fn hash_branch(branch: &Branch, h: &mut DefaultHasher) {
+    branch.name.hash(h);
+    hash_endpoint(&branch.dst, h);
+    branch.branches.len().hash(h);
+    for child in &branch.branches {
+        hash_branch(child, h);
+    }
+}
+
+fn hash_line(line: &Line, h: &mut DefaultHasher) {
+    line.name.hash(h);
+    hash_endpoint(&line.src, h);
+    hash_endpoint(&line.dst, h);
+    line.branches.len().hash(h);
+    for branch in &line.branches {
+        hash_branch(branch, h);
+    }
+    hash_non_geometry_properties(&line.properties, h);
+}

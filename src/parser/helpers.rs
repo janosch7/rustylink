@@ -18,10 +18,10 @@ pub fn parse_points(s: &str) -> Vec<Point> {
             continue;
         }
         let mut it = pair.split(',').map(|v| v.trim()).filter(|t| !t.is_empty());
-        if let (Some(x), Some(y)) = (it.next(), it.next()) {
-            if let (Ok(xv), Ok(yv)) = (x.parse::<i32>(), y.parse::<i32>()) {
-                points.push(Point { x: xv, y: yv });
-            }
+        if let (Some(x), Some(y)) = (it.next(), it.next())
+            && let (Ok(xv), Ok(yv)) = (x.parse::<i32>(), y.parse::<i32>())
+        {
+            points.push(Point { x: xv, y: yv });
         }
     }
     points
@@ -59,7 +59,7 @@ pub fn clean_whitespace(s: &str) -> String {
 /// Resolve a system reference like `"system_22"` to a full XML path.
 pub fn resolve_system_reference(reference: &str, base_dir: &Utf8Path) -> Utf8PathBuf {
     let mut candidate = Utf8PathBuf::from(reference);
-    if !candidate.extension().is_some_and(|e| e == "xml") {
+    if candidate.extension().is_none_or(|e| e != "xml") {
         candidate.set_extension("xml");
     }
     if candidate.is_absolute() {

@@ -1,30 +1,49 @@
-use super::colors::{block_base_color, contrast_color};
+use super::colors::{
+    area_annotation_border, area_annotation_fill, block_fill_color, block_has_model_color,
+    contrast_color, monochrome_block_border, monochrome_line_color,
+};
 use super::corner_ops;
-use super::helpers::{is_block_subsystem, record_interaction};
+use super::helpers::record_interaction;
 use super::line_coloring;
 use super::signal_routing;
 use super::types::{ClickAction, UpdateResponse};
 use super::view_transform;
 use super::zoom_controls::show_zoom_controls;
-use crate::block_types::BlockShape;
 use crate::editor::operations;
 #[cfg(feature = "dashboard")]
 use crate::egui_app::DashboardControlValue;
 use crate::egui_app::geometry::endpoint_pos_maybe_mirrored;
 use crate::egui_app::geometry::{parse_block_rect, parse_rect_str};
 use crate::egui_app::navigation::resolve_subsystem_by_vec;
+use crate::egui_app::render::wrap_text_to_max_width;
 use crate::egui_app::render::{ComputedPortYCoordinates, PortLabelMaxWidths};
-use crate::egui_app::render::{
-    get_interior_renderer, render_manual_switch, wrap_text_to_max_width,
-};
 use crate::egui_app::state::ViewerDragState;
 use crate::egui_app::state::{
     LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
 };
 use crate::egui_app::text::highlight_query_job;
-use crate::egui_app::{get_block_type_cfg, port_label_display_name, render_block_icon};
+use crate::egui_app::{get_block_type_cfg, port_label_defined_name, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use egui_phosphor_icons::icons::{ARROW_UP, FOLDER_OPEN};
 use std::collections::{BTreeSet, HashMap};
+
+/// Shallow clone of a block that prunes the expensive subsystem tree.
+///
+/// Rendering a subsystem needs its *direct* children – Simulink previews a
+/// subsystem from the boundary ports and conditional-execution port blocks it
+/// contains – but never the nested systems below them, which are what make a
+/// deep clone expensive.
+fn shallow_clone_block(b: &crate::model::Block) -> crate::model::Block {
+    let mut clone = b.clone();
+    if let Some(system) = clone.subsystem.as_deref_mut() {
+        system.lines.clear();
+        system.annotations.clear();
+        for child in &mut system.blocks {
+            child.subsystem = None;
+        }
+    }
+    clone
+}
 
 pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     let mut text = format!("{value:.6}");
@@ -210,20 +229,13 @@ fn toggle_manual_switch_setting(
     app: &mut SubsystemApp,
     block: &crate::model::Block,
 ) -> Option<bool> {
-    let Some(block_sid) = block.sid.as_ref() else {
-        return None;
-    };
+    let block_sid = block.sid.as_ref()?;
     let path = app.path.clone();
-    let Some(system) = resolve_subsystem_by_vec_mut(&mut app.root, &path) else {
-        return None;
-    };
-    let Some(live_block) = system
+    let system = resolve_subsystem_by_vec_mut(&mut app.root, &path)?;
+    let live_block = system
         .blocks
         .iter_mut()
-        .find(|candidate| candidate.sid.as_ref() == Some(block_sid))
-    else {
-        return None;
-    };
+        .find(|candidate| candidate.sid.as_ref() == Some(block_sid))?;
 
     let enabled = !matches!(live_block.current_setting.as_deref(), Some("1"));
     live_block.current_setting = Some(if enabled { "1" } else { "0" }.to_string());
@@ -343,7 +355,7 @@ fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Colo
     painter.rect_stroke(
         marker_rect,
         4.0,
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -355,33 +367,7 @@ fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Colo
     );
 }
 
-fn uses_dashboard_control_widget_renderer(block_type: &str) -> bool {
-    #[cfg(not(feature = "dashboard"))]
-    {
-        let _ = block_type;
-        false
-    }
-
-    #[cfg(feature = "dashboard")]
-    {
-        matches!(
-            block_type,
-            "Checkbox"
-                | "ComboBox"
-                | "EditField"
-                | "KnobBlock"
-                | "PushButtonBlock"
-                | "RadioButtonGroup"
-                | "RockerSwitchBlock"
-                | "RotarySwitchBlock"
-                | "SliderBlock"
-                | "SliderSwitchBlock"
-                | "ToggleSwitchBlock"
-        )
-    }
-}
-
-fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
+pub(crate) fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
     if value >= 0.5 { "1" } else { "0" }
 }
 
@@ -406,10 +392,10 @@ fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
 #[cfg(feature = "dashboard")]
 fn first_input_signal_name(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) -> Option<String> {
     let sid = block.sid.as_deref()?;
-    entities.lines.iter().find_map(|line| {
+    lines.iter().find_map(|line| {
         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
         let branched = line
             .branches
@@ -424,26 +410,22 @@ fn first_input_signal_name(
 }
 
 #[cfg(feature = "dashboard")]
-fn scope_title_for_block(
-    block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
-) -> String {
+fn scope_title_for_block(block: &crate::model::Block, lines: &[crate::model::Line]) -> String {
     if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
         block.dashboard_binding.as_ref()
+        && !signal_name.trim().is_empty()
     {
-        if !signal_name.trim().is_empty() {
-            return signal_name.clone();
-        }
+        return signal_name.clone();
     }
 
-    first_input_signal_name(block, entities).unwrap_or_else(|| block.name.clone())
+    first_input_signal_name(block, lines).unwrap_or_else(|| block.name.clone())
 }
 
 #[cfg(feature = "dashboard")]
 fn update_scope_live_sample(
     app: &mut SubsystemApp,
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) {
     if !matches!(block.block_type.as_str(), "Scope" | "DashboardScope") {
         return;
@@ -454,7 +436,7 @@ fn update_scope_live_sample(
     };
 
     let scope_key = app.scope_key_for_block(block);
-    let scope_title = scope_title_for_block(block, entities);
+    let scope_title = scope_title_for_block(block, lines);
     let mut scopes = app.scope_instances.lock().unwrap();
     let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
         crate::egui_app::scope_widget::MiniScope::new((
@@ -472,6 +454,34 @@ fn block_live_value(_app: &SubsystemApp, _block: &crate::model::Block) -> Option
     None
 }
 
+/// Live value fed to a block's unified `LiveRendererFn`.
+///
+/// Interactive dashboard controls (those carrying a `dashboard_control` kind)
+/// resolve a value through the selector-aware [`dashboard_widget_value`] so the
+/// widget reflects/edits the bound parameter; every other block uses the plain
+/// signal value.
+#[cfg(feature = "dashboard")]
+fn live_block_value_for_renderer(
+    app: &SubsystemApp,
+    block: &crate::model::Block,
+    def: &crate::simulink_libraries::types::SimulinkBlockDefinition,
+) -> Option<f64> {
+    if def.dashboard_control.is_some() {
+        Some(dashboard_widget_value(app, block))
+    } else {
+        block_live_value(app, block)
+    }
+}
+
+#[cfg(not(feature = "dashboard"))]
+fn live_block_value_for_renderer(
+    app: &SubsystemApp,
+    block: &crate::model::Block,
+    _def: &crate::simulink_libraries::types::SimulinkBlockDefinition,
+) -> Option<f64> {
+    block_live_value(app, block)
+}
+
 pub(crate) fn update_internal(
     app: &mut SubsystemApp,
     ui: &mut egui::Ui,
@@ -482,9 +492,9 @@ pub(crate) fn update_internal(
     let mut clear_search = false;
     let path_snapshot = app.path.clone();
 
-    egui::Panel::top(app.egui_id("top_panel")).show_inside(ui, |ui| {
+    egui::Panel::top(app.egui_id("top_panel")).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let up_label = egui::RichText::new("⬆ Up");
+            let up_label = egui::RichText::new(format!("{} Up", ARROW_UP.as_str()));
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
             if up.clicked() {
                 let mut p = path_snapshot.clone();
@@ -539,8 +549,14 @@ pub(crate) fn update_internal(
                 app.move_mode_enabled = !app.move_mode_enabled;
             }
             if app.move_mode_enabled {
-                let undo_btn = egui::Button::new("Undo");
-                let redo_btn = egui::Button::new("Redo");
+                let undo_btn = egui::Button::new(format!(
+                    "{} Undo",
+                    egui_phosphor_icons::icons::ARROW_COUNTER_CLOCKWISE.as_str()
+                ));
+                let redo_btn = egui::Button::new(format!(
+                    "{} Redo",
+                    egui_phosphor_icons::icons::ARROW_CLOCKWISE.as_str()
+                ));
                 if ui
                     .add_enabled(app.viewer_history.can_undo(), undo_btn)
                     .clicked()
@@ -644,6 +660,33 @@ pub(crate) fn update_internal(
                 }
             }
 
+            ui.separator();
+            // Open the folder containing the source model in the OS file explorer
+            if ui
+                .add_enabled(
+                    app.source_model_path.is_some(),
+                    egui::Button::new(format!("{} Open folder", FOLDER_OPEN.as_str())),
+                )
+                .on_hover_text("Open the folder containing this model in the file explorer")
+                .clicked()
+                && let Some(model_path) = app.source_model_path.as_ref()
+            {
+                let dir = model_path.parent().unwrap_or(model_path.as_path());
+                #[cfg(target_os = "linux")]
+                let cmd = "xdg-open";
+                #[cfg(target_os = "macos")]
+                let cmd = "open";
+                #[cfg(target_os = "windows")]
+                let cmd = "explorer";
+                if let Err(err) = std::process::Command::new(cmd).arg(dir.as_str()).spawn() {
+                    app.show_notification(format!("Failed to open folder: {err}"), 5000);
+                }
+            }
+
+            // "Less color" and "Dark" toggles live in the floating zoom-controls
+            // overlay (shared by editor and viewer), so they are not duplicated
+            // here.
+
             // Render transient in-GUI notification (right-aligned in the top bar)
             if let Some((msg, expiry)) = &app.transient_notification {
                 if std::time::Instant::now() > *expiry {
@@ -678,15 +721,8 @@ pub(crate) fn update_internal(
         }
     });
 
-    // Owned snapshot for use inside the UI closure to avoid immutable borrows of `app`
-    let entities_opt = app.current_entities();
-    let system_valid = entities_opt.is_some();
-    // Snapshot the current system name (prefer system properties, fall back to last path segment or <root>)
-    let system_name_snapshot: String = app
-        .current_system()
-        .and_then(|s| s.properties.get("Name").cloned())
-        .or_else(|| path_snapshot.last().cloned())
-        .unwrap_or_else(|| "<root>".to_string());
+    // Check if current system is valid (zero-cost, no cloning)
+    let system_valid = app.current_system().is_some();
 
     let mut staged_zoom = app.zoom;
     let mut staged_pan = app.pan;
@@ -700,7 +736,7 @@ pub(crate) fn update_internal(
     let block_menu_items_snapshot = app.block_menu_items.clone();
     let signal_menu_items_snapshot = app.signal_menu_items.clone();
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         if !system_valid {
             // Provide detailed diagnostics to help the user resolve missing subsystems / libraries.
             let requested = if app.path.is_empty() {
@@ -775,9 +811,6 @@ pub(crate) fn update_internal(
             ui.label("Hints: use -L <dir> to add library search paths, or open the library .slx directly.");
             return;
         }
-        // Use entities snapshot for this frame
-        let entities = entities_opt.as_ref().unwrap();
-
         // ── Keyboard shortcuts for undo/redo ──
         if app.move_mode_enabled {
             let undo_requested = ui.input(|i| {
@@ -804,49 +837,69 @@ pub(crate) fn update_internal(
                 app.view_cache.invalidate();
             }
         }
-        // Compute blocks with positions from snapshot. Also inject SystemName
-        // into a temporary, enriched block clone so later code can read it from properties.
-        let system_name = system_name_snapshot.clone();
-        let mut enriched_blocks: Vec<crate::model::Block> =
-            Vec::with_capacity(entities.blocks.len());
-        for b in &entities.blocks {
-            let mut bc = b.clone();
-            // Do not overwrite if already present
-            bc.properties
-                .entry("SystemName".to_string())
-                .or_insert(system_name.clone());
-            enriched_blocks.push(bc);
+        // Get system reference AFTER undo/redo (which may mutate app.root)
+        let sys = match resolve_subsystem_by_vec(&app.root, &app.path) {
+            Some(s) => s,
+            None => return,
+        };
+        // Use cached cloned data when the path and generation haven't changed,
+        // avoiding expensive per-frame cloning of all blocks, lines, and annotations.
+        // We use std::mem::take to move data out of the cache (zero-clone) and
+        // restore it after the closure. If we return early, the cache is
+        // invalidated and will be rebuilt next frame.
+        let cache_gen = app.view_cache.generation;
+        let cache_valid = app.view_cache.is_valid(&app.path, cache_gen)
+            && !app.view_cache.cached_owned_blocks.is_empty();
+        if !cache_valid {
+            app.view_cache.cached_sys_lines = sys.lines.clone();
+            app.view_cache.cached_sys_annotations = sys.annotations.iter()
+                .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+                .cloned()
+                .collect();
+            app.view_cache.cached_owned_blocks = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .map(shallow_clone_block)
+                .collect();
+            app.view_cache.cached_subsystem_block_lookup = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
+                    && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+                .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
+                .collect();
         }
-        let blocks: Vec<(&crate::model::Block, Rect)> = enriched_blocks
+        // Move data out of cache to avoid cloning — will be restored after closure.
+        let sys_lines: Vec<crate::model::Line> = std::mem::take(&mut app.view_cache.cached_sys_lines);
+        let sys_annotations: Vec<crate::model::Annotation> = std::mem::take(&mut app.view_cache.cached_sys_annotations);
+        let owned_blocks: Vec<crate::model::Block> = std::mem::take(&mut app.view_cache.cached_owned_blocks);
+        let subsystem_block_lookup: HashMap<String, crate::model::Block> = std::mem::take(&mut app.view_cache.cached_subsystem_block_lookup);
+        let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
             .iter()
             .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
             .collect::<Vec<_>>();
-        let annotations: Vec<(&crate::model::Annotation, Rect)> = entities_opt
-            .as_ref()
-            .map(|entities| {
-                entities
-                    .annotations
-                    .iter()
-                    .filter_map(|a| {
-                        a.position
-                            .as_deref()
-                            .and_then(|s| parse_rect_str(s))
-                            .map(|pos| (a, pos))
-                    })
-                    .collect()
+        let annotations: Vec<(&crate::model::Annotation, Rect)> = sys_annotations
+            .iter()
+            .filter_map(|a| {
+                a.position
+                    .as_deref()
+                    .and_then(parse_rect_str)
+                    .map(|pos| (a, pos))
             })
-            .unwrap_or_default();
+            .collect();
         if blocks.is_empty() && annotations.is_empty() {
             ui.colored_label(
                 Color32::YELLOW,
                 "No blocks or annotations with positions to render",
             );
+            // Restore cache data before early return.
+            app.view_cache.cached_sys_lines = sys_lines;
+            app.view_cache.cached_sys_annotations = sys_annotations;
+            app.view_cache.cached_owned_blocks = owned_blocks;
+            app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
             return;
         }
-        let mut content_bb = blocks
-            .get(0)
+        let mut content_bb = blocks.first()
             .map(|x| x.1)
-            .or_else(|| annotations.get(0).map(|x| x.1))
+            .or_else(|| annotations.first().map(|x| x.1))
             .unwrap();
         for (_, r) in &blocks {
             content_bb = content_bb.union(*r);
@@ -855,12 +908,13 @@ pub(crate) fn update_internal(
             content_bb = content_bb.union(*r);
         }
 
-        let bb = if staged_reset || staged_view_bounds.is_none() {
-            let fitted = content_bb.expand(20.0);
-            staged_view_bounds = Some(fitted);
-            fitted
-        } else {
-            staged_view_bounds.unwrap()
+        let mut bb = match staged_view_bounds {
+            Some(bounds) if !staged_reset => bounds,
+            _ => {
+                let fitted = content_bb.expand(20.0);
+                staged_view_bounds = Some(fitted);
+                fitted
+            }
         };
 
         // Interaction space
@@ -872,13 +926,7 @@ pub(crate) fn update_internal(
         let height = (bb.height()).max(1.0);
         let sx = (avail_size.x - 2.0 * margin) / width;
         let sy = (avail_size.y - 2.0 * margin) / height;
-        let base_scale = sx.min(sy).max(0.1);
-
-        if staged_reset {
-            staged_zoom = 1.0;
-            staged_pan = Vec2::ZERO;
-            staged_reset = false;
-        }
+        let mut base_scale = sx.min(sy).max(0.1);
 
         let canvas_sense = if app.move_mode_enabled {
             Sense::click()
@@ -919,13 +967,27 @@ pub(crate) fn update_internal(
             Pos2::new(avail.left() + margin, avail.top() + margin),
             avail.center(),
             &mut staged_reset,
+            &mut app.monochrome,
         );
 
-        if staged_reset && app.apply_authored_navigation_view_state_for_current_path() {
-            staged_zoom = app.zoom;
-            staged_pan = app.pan;
-            staged_view_bounds = app.view_bounds;
+        // Reset always fits every block into the viewport, recomputing the
+        // fit from the fresh content bounds in the same frame the button is
+        // pressed (no stale authored view, no multi-frame delay).
+        if staged_reset {
+            let fitted = content_bb.expand(20.0);
+            staged_view_bounds = Some(fitted);
+            bb = fitted;
+            let w = bb.width().max(1.0);
+            let h = bb.height().max(1.0);
+            let sx = (avail_size.x - 2.0 * margin) / w;
+            let sy = (avail_size.y - 2.0 * margin) / h;
+            base_scale = sx.min(sy).max(0.1);
+            staged_zoom = 1.0;
+            let extra_x = (avail_size.x - 2.0 * margin - bb.width() * base_scale).max(0.0);
+            let extra_y = (avail_size.y - 2.0 * margin - bb.height() * base_scale).max(0.0);
+            staged_pan = Vec2::new(extra_x * 0.5, extra_y * 0.5);
             staged_reset = false;
+            ui.ctx().request_repaint();
         }
 
         let to_screen = |p: Pos2| -> Pos2 {
@@ -935,9 +997,38 @@ pub(crate) fn update_internal(
             Pos2::new(x, y)
         };
 
-        // In-canvas font scaling: baseline is 400% zoom -> scale = zoom / 4.0
-        // User requested double font size, so we use / 2.0 instead of / 4.0
-        let font_scale: f32 = (staged_zoom / 2.0).max(0.01);
+        // In-canvas text/icon scaling is coupled to the model's measurement
+        // unit: `base_scale * staged_zoom` is the screen-pixels-per-model-unit
+        // scale (identical to the one used for block geometry), so names and
+        // icons grow and shrink exactly with the on-screen block size. Smaller
+        // models (fewer blocks, each drawn larger) therefore get proportionally
+        // larger text than big, space-filling models. The `*_font_factor`
+        // values remain the size relative to the blocks.
+        let font_scale: f32 = (base_scale * staged_zoom / 2.0).max(0.01);
+
+        let monochrome = app.monochrome;
+        let dark_mode = ui.visuals().dark_mode;
+
+        // Draw area annotations (colored regions) behind the blocks.  Areas keep
+        // their model-defined colors even in "less colorful" mode.
+        for (a, r_model) in &annotations {
+            if let Some(fill) = area_annotation_fill(a) {
+                let r_screen =
+                    Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
+                if !r_screen.intersects(viewport_rect) {
+                    continue;
+                }
+                ui.painter().rect_filled(r_screen, 2.0, fill);
+                if let Some(border) = area_annotation_border(a) {
+                    ui.painter().rect_stroke(
+                        r_screen,
+                        2.0,
+                        Stroke::new(1.0_f32, border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        }
 
         // Draw blocks and setup interaction maps
         let mut sid_map: HashMap<String, Rect> = HashMap::new();
@@ -995,11 +1086,10 @@ pub(crate) fn update_internal(
             };
             let resp = ui.allocate_rect(r_screen, block_sense);
             let cfg = get_block_type_cfg(b);
-            let bg = block_base_color(b, &cfg);
-            let mut effective_bg = bg;
+            let bg = block_fill_color(b, &cfg, monochrome, dark_mode);
 
-            if app.move_mode_enabled && resp.drag_started() {
-                if let Some(sid) = &b.sid {
+            if app.move_mode_enabled && resp.drag_started()
+                && let Some(sid) = &b.sid {
                     if !app.selected_block_sids.contains(sid) {
                         app.selected_block_sids.clear();
                         app.selected_block_sids.insert(sid.clone());
@@ -1010,7 +1100,6 @@ pub(crate) fn update_internal(
                         current_dy: 0,
                     };
                 }
-            }
             if app.move_mode_enabled
                 && resp.dragged()
                 && b
@@ -1048,30 +1137,30 @@ pub(crate) fn update_internal(
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
-                                #[cfg(feature = "dashboard")]
-                                {
+                            #[cfg(feature = "dashboard")]
                             app.queue_dashboard_control(
                                 (*b).clone(),
                                 DashboardControlValue::Bool(enabled),
                             );
-                                }
+                            #[cfg(not(feature = "dashboard"))]
+                            let _ = enabled;
                             any_block_clicked = true;
                         }
                     } else {
                         // Dashboard / UI block click: print connected block and signal info.
                         // Also handle traditional signal-line blocks like Scope and Display.
-                        if crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
+                        if crate::simulink_libraries::stubs::is_dashboard_block_type(
                             &b.block_type,
                         ) || matches!(b.block_type.as_str(), "Scope" | "Display")
                         {
-                            print_dashboard_connected_signals(b, entities);
+                            print_dashboard_connected_signals(b, &sys_lines);
                         }
                         // Open a scope popout window when a Scope/DashboardScope is clicked.
                         #[cfg(feature = "dashboard")]
                         if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
                             let key = app.scope_key_for_block(b);
                             app.scope_popout = Some(crate::egui_app::state::ScopePopout {
-                                title: scope_title_for_block(b, entities),
+                                title: scope_title_for_block(b, &sys_lines),
                                 scope_key: key,
                                 open: true,
                             });
@@ -1104,8 +1193,8 @@ pub(crate) fn update_internal(
             }
 
             // Clear selection when clicking empty canvas.
-            if canvas_resp.clicked() && !any_block_clicked {
-                if let Some(pos) = canvas_resp.interact_pointer_pos() {
+            if canvas_resp.clicked() && !any_block_clicked
+                && let Some(pos) = canvas_resp.interact_pointer_pos() {
                     let hit_any = blocks.iter().any(|(_, br)| {
                         let br_screen = Rect::from_min_max(to_screen(br.min), to_screen(br.max));
                         br_screen.contains(pos)
@@ -1115,7 +1204,6 @@ pub(crate) fn update_internal(
                         app.selected_line_indices.clear();
                     }
                 }
-            }
 
             // Paint selection shadow behind the block (outside-only).
             if b
@@ -1126,8 +1214,8 @@ pub(crate) fn update_internal(
             {
                 let rounding = if b.commented { 0.0 } else { 6.0 };
                 paint_selected_shadow(ui.painter(), r_screen, rounding, font_scale);
-                if app.move_mode_enabled {
-                    if let Some(sid) = &b.sid {
+                if app.move_mode_enabled
+                    && let Some(sid) = &b.sid {
                         draw_viewer_resize_handles(
                             ui,
                             &r_screen,
@@ -1137,86 +1225,38 @@ pub(crate) fn update_internal(
                             base_scale * staged_zoom,
                         );
                     }
-                }
             }
 
-            match cfg.shape {
-                BlockShape::Triangle => {
-                    // Gain-style: right-pointing triangle fill.
-                    // Vertices: left-top, right-center, left-bottom.
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.center().y),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    let mut tri = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    tri.fill = bg;
-                    ui.painter().add(egui::Shape::Path(tri));
-                }
-                BlockShape::Circle => {
-                    let center = r_screen.center();
-                    let radius = r_screen.size().min_elem() / 2.0;
-                    ui.painter().circle_filled(center, radius, bg);
-                }
-                BlockShape::FilledBlack => {
-                    ui.painter().rect_filled(r_screen, 0.0, Color32::BLACK);
-                }
-                BlockShape::Goto => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
-                    ];
-                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    path.fill = bg;
-                    ui.painter().add(egui::Shape::Path(path));
-                }
-                BlockShape::From => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
-                    path.fill = bg;
-                    ui.painter().add(egui::Shape::Path(path));
-                }
-                BlockShape::Rectangle => {
-                    if b.commented {
-                        let commented_bg = Color32::from_rgb(230, 230, 230);
-                        effective_bg = commented_bg;
-                        ui.painter().rect_filled(r_screen, 0.0, commented_bg);
-                    } else {
-                        ui.painter().rect_filled(r_screen, 6.0, bg);
-                    }
-                }
-            }
+            let effective_bg = crate::egui_app::render::fill_block_body(
+                ui.painter(),
+                r_screen,
+                cfg.shape,
+                bg,
+                b.commented,
+            );
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
+                        let block_for_response = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .unwrap_or_else(|| (*b).clone());
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Block {
                                 action: ClickAction::Secondary,
-                                block: (*b).clone(),
+                                block: block_for_response,
                                 handled: false,
                             },
                         );
                         ui.close();
                     }
                     for item in &block_menu_items_snapshot {
-                        if (item.filter)(b) {
-                            if ui.button(&item.label).clicked() {
+                        if (item.filter)(b)
+                            && ui.button(&item.label).clicked() {
                                 (item.on_click)(b);
                                 ui.close();
                             }
-                        }
                     }
                 });
             }
@@ -1231,8 +1271,8 @@ pub(crate) fn update_internal(
                     }
                     // Double-click on Constant block opens inline editor.
                     #[cfg(feature = "dashboard")]
-                    if !handled && b.block_type == "Constant" {
-                        if let Some(sid) = &b.sid {
+                    if !handled && b.block_type == "Constant"
+                        && let Some(sid) = &b.sid {
                             // Seed the edit buffer with the current value if not yet present.
                             if !app.constant_edits.contains_key(sid.as_str()) {
                                 let val = b.value.clone().unwrap_or_else(|| "1".to_string());
@@ -1241,10 +1281,13 @@ pub(crate) fn update_internal(
                             deferred_constant_edits.push((sid.clone(), r_screen));
                             handled = true;
                         }
-                    }
-                    if !handled && is_block_subsystem(b) {
-                        // Normal subsystem open
-                        block_to_open_subsystem = Some((*b).clone());
+                    if !handled && b.sid.as_ref().is_some_and(|sid| subsystem_block_lookup.contains_key(sid)) {
+                        // Normal subsystem open — use original block with subsystem intact
+                        block_to_open_subsystem = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .or_else(|| Some((*b).clone()));
+                        handled = true;
                     } else if !handled && b.block_type == "Reference" && b.subsystem.is_none() {
                         // Inform user when a Reference block can't be opened because the
                         // referenced library/subsystem was not resolved.
@@ -1266,17 +1309,21 @@ pub(crate) fn update_internal(
                         app.show_notification(msg, 5000);
                     }
                 }
+                let block_for_response = b.sid.as_ref()
+                    .and_then(|sid| subsystem_block_lookup.get(sid))
+                    .cloned()
+                    .unwrap_or_else(|| (*b).clone());
                 record_interaction(
                     &mut interaction,
                     UpdateResponse::Block {
                         action,
-                        block: (*b).clone(),
+                        block: block_for_response,
                         handled,
                     },
                 );
             }
-            if app.move_mode_enabled && resp.drag_stopped() {
-                if let ViewerDragState::Blocks {
+            if app.move_mode_enabled && resp.drag_stopped()
+                && let ViewerDragState::Blocks {
                     current_dx,
                     current_dy,
                 } = app.viewer_drag_state.clone()
@@ -1309,16 +1356,14 @@ pub(crate) fn update_internal(
                                 // Auto-adjust signal line corners for moved blocks
                                 for sid in &selected_sids {
                                     for line in &mut system.lines {
-                                        if let Some(src) = &line.src {
-                                            if src.sid == *sid {
+                                        if let Some(src) = &line.src
+                                            && src.sid == *sid {
                                                 corner_ops::auto_adjust_on_block_move(line, true, current_dx, current_dy);
                                             }
-                                        }
-                                        if let Some(dst) = &line.dst {
-                                            if dst.sid == *sid {
+                                        if let Some(dst) = &line.dst
+                                            && dst.sid == *sid {
                                                 corner_ops::auto_adjust_on_block_move(line, false, current_dx, current_dy);
                                             }
-                                        }
                                         corner_ops::auto_adjust_branches_on_block_move(&mut line.branches, sid, current_dx, current_dy);
                                     }
                                 }
@@ -1334,14 +1379,18 @@ pub(crate) fn update_internal(
                     }
                     app.viewer_drag_state = ViewerDragState::None;
                 }
-            }
             block_views.push((b, r_screen, resp.clicked(), effective_bg));
         }
 
-        // Draw annotations (convert HTML-rich content to plain text) without background
+        // Draw annotations (convert HTML-rich content to plain text).  Area
+        // annotations (whose colored background is drawn behind the blocks) get
+        // a text color that contrasts with their fill.
         for (a, r_model) in &annotations {
             let r_screen = Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
             let _resp = ui.allocate_rect(r_screen, Sense::hover());
+            let text_color = area_annotation_fill(a)
+                .map(contrast_color)
+                .unwrap_or(Color32::WHITE);
             let raw = a.text.clone().unwrap_or_default();
             let parsed =
                 crate::egui_app::text::annotation_to_rich_text(&raw, a.interpreter.as_deref());
@@ -1351,7 +1400,7 @@ pub(crate) fn update_internal(
             let galley = ui.painter().layout_job(job.clone());
             let paint_pos = r_screen.left_top();
             if galley.size().x <= r_screen.width() {
-                ui.painter().galley(paint_pos, galley, Color32::WHITE);
+                ui.painter().galley(paint_pos, galley, text_color);
             } else {
                 job.wrap.max_width = r_screen.width();
                 let job_for_wrap = job.clone();
@@ -1359,7 +1408,7 @@ pub(crate) fn update_internal(
                     let wrapped = child_ui.painter().layout_job(job_for_wrap);
                     child_ui
                         .painter()
-                        .galley(paint_pos, wrapped, Color32::WHITE);
+                        .galley(paint_pos, wrapped, text_color);
                 });
             }
             // no special tooltip; text is directly visible inside the rectangle
@@ -1373,37 +1422,34 @@ pub(crate) fn update_internal(
             }
         }
 
+        // The connection-target resolver depends only on model topology and is
+        // rebuilt only when that changes (not on navigation or layout drags).
+        let connection_target_resolver = app.view_cache.ensure_resolver(&app.root);
+
         // Use cached line colors and port info when possible; recompute on model change.
         let cache_gen = app.view_cache.generation;
         if !app.view_cache.is_valid(&app.path, cache_gen) {
-            let line_adjacency = line_coloring::compute_line_adjacency(&entities.lines);
+            let line_adjacency = line_coloring::compute_line_adjacency(&sys_lines);
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
-            app.view_cache.connection_target_resolver = Some(std::sync::Arc::new(
-                crate::connection_targets::ConnectionTargetResolver::new(&app.root),
-            ));
 
-            let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
-                &entities.lines,
-                &block_refs.iter().cloned().cloned().collect::<Vec<_>>(),
+                &sys_lines,
+                &owned_blocks,
             );
             app.view_cache.port_counts = pc;
             app.view_cache.connected_ports = cp;
             app.view_cache.mark_valid(&app.path, cache_gen);
         }
-        let line_colors = app.view_cache.line_colors.clone();
-        let port_counts = app.view_cache.port_counts.clone();
-        let connected_ports = app.view_cache.connected_ports.clone();
-        let connection_target_resolver = app
-            .view_cache
-            .connection_target_resolver
-            .clone()
-            .expect("connection target resolver cache should be populated");
+        // Move cached computed values out to avoid per-frame cloning.
+        let line_colors = std::mem::take(&mut app.view_cache.line_colors);
+        let port_counts = std::mem::take(&mut app.view_cache.port_counts);
+        let connected_ports = std::mem::take(&mut app.view_cache.connected_ports);
 
-        let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
+        let line_stroke_default = Stroke::new(2.0_f32, Color32::LIGHT_GREEN);
 
         // Build lines in screen space and interactive hit rects
+        #[allow(clippy::type_complexity)]
         let mut line_views: Vec<(
             &crate::model::Line,
             Vec<Pos2>,
@@ -1421,7 +1467,7 @@ pub(crate) fn update_internal(
                 sid_mirrored.insert(sid.clone(), b.block_mirror.unwrap_or(false));
             }
         }
-        for (li, line) in entities.lines.iter().enumerate() {
+        for (li, line) in sys_lines.iter().enumerate() {
             let Some(src) = line.src.as_ref() else {
                 continue;
             };
@@ -1441,7 +1487,7 @@ pub(crate) fn update_internal(
             }
             let mut screen_pts: Vec<Pos2> = offsets_pts.iter().map(|p| to_screen(*p)).collect();
             if let Some(src_ep) = line.src.as_ref() {
-                let src_screen = *screen_pts.get(0).unwrap_or(&to_screen(cur));
+                let src_screen = *screen_pts.first().unwrap_or(&to_screen(cur));
                 port_label_requests.push((
                     src_ep.sid.clone(),
                     src_ep.port_index,
@@ -1450,13 +1496,12 @@ pub(crate) fn update_internal(
                 ));
                 port_y_screen.insert((src_ep.sid.clone(), src_ep.port_index, false), src_screen.y);
             }
-            if let Some(dst) = line.dst.as_ref() {
-                if let Some(dr) = sid_map.get(&dst.sid) {
+            if let Some(dst) = line.dst.as_ref()
+                && let Some(dr) = sid_map.get(&dst.sid) {
                     let num_dst = port_counts
                         .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
                         .copied();
-                    let mirrored_dst = entities
-                        .blocks
+                    let mirrored_dst = owned_blocks
                         .iter()
                         .find(|b| b.sid.as_ref() == Some(&dst.sid))
                         .and_then(|b| b.block_mirror)
@@ -1479,7 +1524,6 @@ pub(crate) fn update_internal(
                         port_y_screen.insert((dst.sid.clone(), dst.port_index, true), dst_screen.y);
                     }
                 }
-            }
             if screen_pts.is_empty() {
                 continue;
             }
@@ -1555,6 +1599,7 @@ pub(crate) fn update_internal(
         }
 
         // Collect segments for a branch tree (model coords in, screen-space segments out)
+        #[allow(clippy::too_many_arguments)]
         fn collect_branch_segments_rec(
             to_screen: &dyn Fn(Pos2) -> Pos2,
             sid_map: &HashMap<String, Rect>,
@@ -1573,8 +1618,8 @@ pub(crate) fn update_internal(
             }
             let screen_pts: Vec<Pos2> = pts.iter().map(|p| to_screen(*p)).collect();
             signal_routing::push_orthogonal_segments(&screen_pts, out);
-            if let Some(dstb) = &br.dst {
-                if let Some(dr) = sid_map.get(&dstb.sid) {
+            if let Some(dstb) = &br.dst
+                && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
                         if dstb.port_type == "out" { 1 } else { 0 },
@@ -1594,7 +1639,6 @@ pub(crate) fn update_internal(
                         port_y_screen.insert((dstb.sid.clone(), dstb.port_index, true), b.y);
                     }
                 }
-            }
             for sub in &br.branches {
                 collect_branch_segments_rec(
                     to_screen,
@@ -1639,6 +1683,7 @@ pub(crate) fn update_internal(
             ));
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn draw_branch_rec(
             painter: &egui::Painter,
             to_screen: &dyn Fn(Pos2) -> Pos2,
@@ -1661,8 +1706,8 @@ pub(crate) fn update_internal(
             for seg in signal_routing::orthogonalize_polyline(&screen_pts).windows(2) {
                 painter.line_segment([seg[0], seg[1]], stroke);
             }
-            if let Some(dstb) = &br.dst {
-                if let Some(dr) = sid_map.get(&dstb.sid) {
+            if let Some(dstb) = &br.dst
+                && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
                         if dstb.port_type == "out" { 1 } else { 0 },
@@ -1694,7 +1739,6 @@ pub(crate) fn update_internal(
                         }
                     }
                 }
-            }
             for sub in &br.branches {
                 draw_branch_rec(
                     painter,
@@ -1725,17 +1769,21 @@ pub(crate) fn update_internal(
         }
 
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
-            let show_testpoint_marker = line_has_testpoint(&line_targets);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
+            let show_testpoint_marker = line_has_testpoint(line_targets);
             let stroke = Stroke::new(
-                line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
+                line_stroke_width(line_targets, app.selected_line_indices.contains(li)),
                 color,
             );
-            let has_in_dst = line.dst.as_ref().map_or(false, |dst| dst.port_type == "in");
+            let has_in_dst = line.dst.as_ref().is_some_and(|dst| dst.port_type == "in");
             let mut draw_pts = screen_pts.clone();
             if draw_pts.len() >= 2 {
                 let dx = draw_pts[1].x - draw_pts[0].x;
@@ -1772,11 +1820,10 @@ pub(crate) fn update_internal(
                     &sid_mirrored,
                 );
             }
-            if show_testpoint_marker {
-                if let Some(marker_pos) = line_testpoint_marker_position(&draw_pts) {
+            if show_testpoint_marker
+                && let Some(marker_pos) = line_testpoint_marker_position(&draw_pts) {
                     draw_line_testpoint_marker(&painter, marker_pos, color);
                 }
-            }
             // Precise per-segment distance check.  We detect clicks via
             // pointer state instead of from the bounding-box response so that
             // line rects (which can be very large) never steal clicks from
@@ -1804,7 +1851,7 @@ pub(crate) fn update_internal(
                         let ap_y = cp.y - a.y;
                         let ab_len2 = (ab_x * ab_x + ab_y * ab_y).max(1e-6);
                         let t = (ap_x * ab_x + ap_y * ab_y) / ab_len2;
-                        let t_clamped = t.max(0.0).min(1.0);
+                        let t_clamped = t.clamp(0.0, 1.0);
                         let proj_x = a.x + ab_x * t_clamped;
                         let proj_y = a.y + ab_y * t_clamped;
                         let dx = cp.x - proj_x;
@@ -1880,12 +1927,11 @@ pub(crate) fn update_internal(
                                 ui.close();
                             }
                             for item in &signal_menu_items_snapshot {
-                                if (item.filter)(line) {
-                                    if ui.button(&item.label).clicked() {
+                                if (item.filter)(line)
+                                    && ui.button(&item.label).clicked() {
                                         (item.on_click)(line);
                                         ui.close();
                                     }
-                                }
                             }
                         });
                     }
@@ -1917,7 +1963,7 @@ pub(crate) fn update_internal(
                     ui.painter().rect_stroke(
                         handle_rect.shrink(2.0),
                         1.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                         egui::StrokeKind::Outside,
                     );
                     if resp.drag_started() {
@@ -1938,16 +1984,15 @@ pub(crate) fn update_internal(
                         }
                         ui.ctx().request_repaint();
                     }
-                    if resp.drag_stopped() {
-                        if let ViewerDragState::LinePointDrag { line_idx, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+                    if resp.drag_stopped()
+                        && let ViewerDragState::LinePointDrag { line_idx, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                             if acc_dx != 0 || acc_dy != 0 {
                                 let mut layout_changed = false;
-                                if let Some(system) = app.current_system_mut() {
-                                    if let Some(line_mut) = system.lines.get_mut(line_idx) {
+                                if let Some(system) = app.current_system_mut()
+                                    && let Some(line_mut) = system.lines.get_mut(line_idx) {
                                         signal_routing::move_line_point(line_mut, point_idx, acc_dx, acc_dy);
                                         layout_changed = true;
                                     }
-                                }
                                 if layout_changed {
                                     app.viewer_history.push(
                                         crate::editor::operations::EditorCommand::MoveLinePoint {
@@ -1963,15 +2008,13 @@ pub(crate) fn update_internal(
                             }
                             app.viewer_drag_state = ViewerDragState::None;
                         }
-                    }
                     // Double-click on a corner handle removes it
                     if resp.double_clicked() {
                         let mut removed_point = None;
-                        if let Some(system) = app.current_system_mut() {
-                            if let Some(line_mut) = system.lines.get_mut(*li) {
+                        if let Some(system) = app.current_system_mut()
+                            && let Some(line_mut) = system.lines.get_mut(*li) {
                                 removed_point = corner_ops::remove_corner(&mut line_mut.points, point_index);
                             }
-                        }
                         if let Some(rp) = removed_point {
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::RemoveCorner {
@@ -2006,7 +2049,7 @@ pub(crate) fn update_internal(
                     ui.painter().circle_stroke(
                         handle_rect.center(),
                         4.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                     );
                     if resp.drag_started() {
                         app.viewer_drag_state = ViewerDragState::BranchPointDrag {
@@ -2027,18 +2070,16 @@ pub(crate) fn update_internal(
                         }
                         ui.ctx().request_repaint();
                     }
-                    if resp.drag_stopped() {
-                        if let ViewerDragState::BranchPointDrag { line_idx, branch_path: bp, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+                    if resp.drag_stopped()
+                        && let ViewerDragState::BranchPointDrag { line_idx, branch_path: bp, point_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                             if acc_dx != 0 || acc_dy != 0 {
                                 let mut layout_changed = false;
-                                if let Some(system) = app.current_system_mut() {
-                                    if let Some(line_mut) = system.lines.get_mut(line_idx) {
-                                    if let Some(branch_mut) = signal_routing::get_branch_mut(&mut line_mut.branches, &bp) {
+                                if let Some(system) = app.current_system_mut()
+                                    && let Some(line_mut) = system.lines.get_mut(line_idx)
+                                    && let Some(branch_mut) = signal_routing::get_branch_mut(&mut line_mut.branches, &bp) {
                                             signal_routing::move_branch_point(branch_mut, point_idx, acc_dx, acc_dy);
                                             layout_changed = true;
                                         }
-                                    }
-                                }
                                 if layout_changed {
                                     app.viewer_history.push(
                                         crate::editor::operations::EditorCommand::MoveBranchPoint {
@@ -2055,7 +2096,6 @@ pub(crate) fn update_internal(
                             }
                             app.viewer_drag_state = ViewerDragState::None;
                         }
-                    }
                 }
             }
         }
@@ -2107,11 +2147,10 @@ pub(crate) fn update_internal(
                             // point *after* seg_idx positions (index seg_idx corresponds
                             // to the segment from anchor/model_pts[seg_idx] to points[seg_idx]).
                             let insert_idx = seg_idx;
-                            if let Some(system) = app.current_system_mut() {
-                                if let Some(line_mut) = system.lines.get_mut(*li) {
+                            if let Some(system) = app.current_system_mut()
+                                && let Some(line_mut) = system.lines.get_mut(*li) {
                                     corner_ops::insert_corner(&mut line_mut.points, insert_idx, offset.clone());
                                 }
-                            }
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::InsertCorner {
                                     line_index: *li,
@@ -2251,7 +2290,7 @@ pub(crate) fn update_internal(
                     for (i, ch) in bytes.iter() {
                         if *ch == ' ' {
                             let dist =
-                                (*i as isize - (label_text.len() as isize) / 2).abs() as usize;
+                                (*i as isize - (label_text.len() as isize) / 2).unsigned_abs();
                             if dist < best_dist {
                                 best_dist = dist;
                                 best_split = Some(*i);
@@ -2324,12 +2363,16 @@ pub(crate) fn update_internal(
         };
 
         for (line, screen_pts, main_anchor, _resp, li, _segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
-            draw_line_labels(line, &line_targets, screen_pts, *main_anchor, color, *li);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
+            draw_line_labels(line, line_targets, screen_pts, *main_anchor, color, *li);
         }
 
         // Clickable labels
@@ -2376,7 +2419,7 @@ pub(crate) fn update_internal(
                         app.selected_block_sids.clear();
                     }
                 } else {
-                    let line = &entities.lines[*li];
+                    let line = &sys_lines[*li];
                     record_interaction(
                         &mut interaction,
                         UpdateResponse::Signal {
@@ -2405,16 +2448,15 @@ pub(crate) fn update_internal(
                 }
                 ui.ctx().request_repaint();
             }
-            if app.move_mode_enabled && resp.drag_stopped() && app.selected_line_indices.contains(li) {
-                if let ViewerDragState::SignalLabelDrag { line_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
+            if app.move_mode_enabled && resp.drag_stopped() && app.selected_line_indices.contains(li)
+                && let ViewerDragState::SignalLabelDrag { line_idx, acc_dx, acc_dy } = app.viewer_drag_state.clone() {
                     if acc_dx != 0 || acc_dy != 0 {
                         let mut layout_changed = false;
-                        if let Some(system) = app.current_system_mut() {
-                            if let Some(line_mut) = system.lines.get_mut(line_idx) {
+                        if let Some(system) = app.current_system_mut()
+                            && let Some(line_mut) = system.lines.get_mut(line_idx) {
                                 signal_routing::move_line_layout(line_mut, acc_dx, acc_dy);
                                 layout_changed = true;
                             }
-                        }
                         if layout_changed {
                             app.viewer_history.push(
                                 crate::editor::operations::EditorCommand::MoveLineLayout {
@@ -2429,11 +2471,10 @@ pub(crate) fn update_internal(
                     }
                     app.viewer_drag_state = ViewerDragState::None;
                 }
-            }
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
-                        let line = &entities.lines[*li];
+                        let line = &sys_lines[*li];
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Signal {
@@ -2445,16 +2486,67 @@ pub(crate) fn update_internal(
                         );
                         ui.close();
                     }
-                    let line_ref = &entities.lines[*li];
+                    let line_ref = &sys_lines[*li];
                     for item in &signal_menu_items_snapshot {
-                        if (item.filter)(line_ref) {
-                            if ui.button(&item.label).clicked() {
+                        if (item.filter)(line_ref)
+                            && ui.button(&item.label).clicked() {
                                 (item.on_click)(line_ref);
                                 ui.close();
                             }
-                        }
                     }
                 });
+            }
+        }
+
+        // Simulink prints a port's label whether or not a signal is attached,
+        // so ask for one on every port the model/catalog actually names – the
+        // requests above only cover wired-up ports.
+        {
+            let wired: std::collections::HashSet<(String, u32, bool)> = port_label_requests
+                .iter()
+                .map(|(sid, index, is_input, _)| (sid.clone(), *index, *is_input))
+                .collect();
+            for (b, _) in &blocks {
+                let Some(sid) = b.sid.as_ref() else { continue };
+                let Some(brect) = sid_screen_map.get(sid).copied() else {
+                    continue;
+                };
+                let cfg = get_block_type_cfg(b);
+                let in_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.ins)
+                    .unwrap_or(cfg.default_ins);
+                let out_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.outs)
+                    .unwrap_or(cfg.default_outs);
+                if in_count == 0 && out_count == 0 {
+                    continue;
+                }
+                let (ins, outs) = crate::egui_app::geometry::port_indicator_positions_with_overrides(
+                    brect,
+                    in_count,
+                    out_count,
+                    b.block_mirror.unwrap_or(false),
+                    &cfg.port_position_overrides,
+                );
+                let mut request = |index: usize, is_input: bool, y: f32| {
+                    let index = index as u32 + 1;
+                    if wired.contains(&(sid.clone(), index, is_input)) {
+                        return;
+                    }
+                    if port_label_defined_name(b, index, is_input, &cfg).is_some() {
+                        port_label_requests.push((sid.clone(), index, is_input, y));
+                    }
+                };
+                for (i, p) in ins.iter().enumerate() {
+                    request(i, true, p.y);
+                }
+                for (i, p) in outs.iter().enumerate() {
+                    request(i, false, p.y);
+                }
             }
         }
 
@@ -2538,74 +2630,27 @@ pub(crate) fn update_internal(
         // Finish blocks (border, icon/value, labels) and click handling
         for (b, r_screen, _clicked, bg) in &block_views {
             let cfg = get_block_type_cfg(b);
-            let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
-            let stroke = Stroke::new(
-                2.0,
-                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
-            );
-            match cfg.shape {
-                BlockShape::Triangle => {
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.center().y),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::Circle => {
-                    let center = r_screen.center();
-                    let radius = r_screen.size().min_elem() / 2.0;
-                    painter.circle_stroke(center, radius, stroke);
-                }
-                BlockShape::FilledBlack => {
-                    // No separate border — the filled black rect is sufficient.
-                }
-                BlockShape::Goto => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                        egui::pos2(r_screen.left() - tab, r_screen.center().y),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::From => {
-                    let tab = r_screen.height() * 0.25;
-                    let pts = vec![
-                        egui::pos2(r_screen.left(), r_screen.top()),
-                        egui::pos2(r_screen.right(), r_screen.top()),
-                        egui::pos2(r_screen.right() + tab, r_screen.center().y),
-                        egui::pos2(r_screen.right(), r_screen.bottom()),
-                        egui::pos2(r_screen.left(), r_screen.bottom()),
-                    ];
-                    painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
-                        pts, stroke,
-                    )));
-                }
-                BlockShape::Rectangle => {
-                    painter.rect_stroke(*r_screen, 4.0, stroke, egui::StrokeKind::Inside);
-                }
-            }
+            // Neutral border only for blocks whose fill was actually grayed
+            // (i.e. no model-authored color); model-colored blocks keep theirs.
+            let border_color = if monochrome && !block_has_model_color(b) {
+                monochrome_block_border(dark_mode)
+            } else {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+            };
+            let stroke = Stroke::new(2.0_f32, border_color);
+            crate::egui_app::render::stroke_block_body(&painter, *r_screen, cfg.shape, stroke);
 
             fn paint_port_chevron_placed(
                 painter: &egui::Painter,
                 outline: Pos2,
                 is_left_side: bool,
-                placement: Option<crate::builtin_libraries::virtual_library::PortPlacement>,
+                placement: Option<crate::simulink_libraries::types::PortPlacement>,
                 font_scale: f32,
                 color: Color32,
             ) {
-                use crate::builtin_libraries::virtual_library::PortPlacement;
-                let scale = font_scale.max(0.2);
-                let stroke_w = (4.0 * scale).max(1.0);
-                let h = (8.0 * scale * 4.0).max(3.0 * 4.0);
-                let w = (6.0 * scale * 4.0).max(2.0 * 4.0);
+                use crate::simulink_libraries::types::PortPlacement;
+                let (h, w, stroke_w) = crate::egui_app::geometry::port_chevron_size(font_scale);
 
                 let points = match placement {
                     Some(PortPlacement::Bottom) => {
@@ -2689,7 +2734,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(true, port_idx, in_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))
@@ -2711,7 +2756,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| !o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(false, port_idx, out_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))
@@ -2726,13 +2771,31 @@ pub(crate) fn update_internal(
                     );
                 }
             }
+            // Enable/trigger ports enter through the block's top edge.
+            let control_count = b
+                .port_counts
+                .as_ref()
+                .map(|p| p.control_count())
+                .unwrap_or(0);
+            for i in 0..control_count {
+                let x = r_screen.left()
+                    + (i as f32 + 1.0) / (control_count as f32 + 1.0) * r_screen.width();
+                paint_port_chevron_placed(
+                    &painter,
+                    egui::pos2(x, r_screen.top()),
+                    true,
+                    Some(crate::simulink_libraries::types::PortPlacement::Top),
+                    font_scale,
+                    Color32::from_rgb(60, 60, 200),
+                );
+            }
             let fg = contrast_color(*bg);
             #[cfg(feature = "dashboard")]
-            update_scope_live_sample(app, b, entities);
+            update_scope_live_sample(app, b, &sys_lines);
             let display_signal_label = if b.block_type == "Display" {
                 let sid = b.sid.as_deref();
                 sid.and_then(|sid| {
-                    entities.lines.iter().find_map(|line| {
+                    sys_lines.iter().find_map(|line| {
                         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
                         let branched = line.branches.iter().any(|br| branch_hits_sid(br, sid));
                         if direct || branched {
@@ -2837,9 +2900,6 @@ pub(crate) fn update_internal(
                 let galley = painter.layout_no_wrap(text.clone(), font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
-            } else if app.live_mode_enabled && uses_dashboard_control_widget_renderer(&b.block_type)
-            {
-                let _ = render_dashboard_control_widget(app, ui, b, *r_screen, font_scale);
             } else if b
                 .value
                 .as_ref()
@@ -2865,8 +2925,9 @@ pub(crate) fn update_internal(
                     let pos = r_screen.center() - galley.size() * 0.5;
                     painter.galley(pos, galley, fg);
                 }
-            } else if let Some(instance_label) =
-                crate::builtin_libraries::compute_block_instance_label(b)
+            } else if let Some(instance_label) = crate::simulink_libraries::resolve_definition(b)
+                .compute_instance_label
+                .and_then(|f| f(b))
             {
                 // Per-instance label from InstanceData (e.g. "≤ 3.0" for Compare To Constant).
                 let beneath_font_px = 12.0 * font_scale;
@@ -2875,41 +2936,24 @@ pub(crate) fn update_internal(
                 let galley = painter.layout_no_wrap(instance_label, font_id.clone(), color);
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
-            } else if b.block_type == "ManualSwitch" {
-                let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
-                if app.live_mode_enabled {
-                    if let Some(live_value) = block_live_value(app, b) {
-                        let mut live_block = (*b).clone();
-                        live_block.current_setting = Some(
-                            manual_switch_setting_from_live_value(live_value).to_string(),
-                        );
-                        render_manual_switch(
-                            &painter,
-                            &live_block,
-                            r_screen,
-                            font_scale,
-                            coords_ref,
-                        );
-                    } else {
-                        render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
-                    }
-                } else {
-                    render_manual_switch(&painter, b, r_screen, font_scale, coords_ref);
-                }
-            } else if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
-                // With the `dashboard` feature: interactive liveplot scope.
-                // Without: simple static waveform glyph.
+            } else if app.live_mode_enabled
+                && matches!(b.block_type.as_str(), "Scope" | "DashboardScope")
+            {
+                // The live scope view is an interactive liveplot tile that needs
+                // `ui`/app state, so it cannot be a pure painter renderer and is
+                // the one block kind kept special-cased here.  The static
+                // waveform glyph (non-live / too-small) is handled by the general
+                // renderer's static renderer.
                 #[cfg(feature = "dashboard")]
                 {
-                    if app.live_mode_enabled {
-                        let scope_rect = r_screen.shrink(4.0);
-                        if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
-                            let key = app.scope_key_for_block(b);
-                            deferred_scope_rects.push((key, scope_title_for_block(b, entities), scope_rect));
-                        } else {
-                            // Too small for liveplot — draw a simple waveform glyph
-                            paint_scope_glyph(&painter, r_screen);
-                        }
+                    let scope_rect = r_screen.shrink(4.0);
+                    if scope_rect.width() > 20.0 && scope_rect.height() > 20.0 {
+                        let key = app.scope_key_for_block(b);
+                        deferred_scope_rects.push((
+                            key,
+                            scope_title_for_block(b, &sys_lines),
+                            scope_rect,
+                        ));
                     } else {
                         paint_scope_glyph(&painter, r_screen);
                     }
@@ -2918,52 +2962,65 @@ pub(crate) fn update_internal(
                 {
                     paint_scope_glyph(&painter, r_screen);
                 }
-            } else if app.live_mode_enabled
-                && crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
-                    &b.block_type,
-                )
-            {
-                if let Some(live_val) = block_live_value(app, b) {
-                    crate::egui_app::dashboard_widgets::paint_live_dashboard_value_overlay(
-                        &painter,
-                        b,
-                        r_screen,
-                        font_scale,
-                        live_val,
-                        Some(&app.live_display_defaults),
-                    );
-                } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                    renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
-                } else if cfg.shape != BlockShape::FilledBlack {
-                    render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
-                }
-            } else if let Some(renderer) = get_interior_renderer(&b.block_type) {
-                renderer(&painter, b, r_screen, font_scale, app.block_name_font_factor);
-            } else if app.live_mode_enabled && uses_live_value_text(&b.block_type)
-            {
-                // Live mode: show the current value for dashboard-bound blocks.
-                let live_val = block_live_value(app, b);
-                if let Some(val) = live_val {
-                    let font_id = egui::FontId::proportional(12.0 * font_scale);
-                    let text = format_live_scalar_csv(val);
-                    let galley = painter.layout_no_wrap(text, font_id, fg);
-                    let pos = r_screen.center() - galley.size() * 0.5;
-                    painter.galley(pos, galley, fg);
-                } else if cfg.shape == BlockShape::FilledBlack {
-                    // Solid-fill blocks need no interior rendering.
-                } else {
-                    render_block_icon(&painter, b, r_screen, font_scale, icon_port_label_widths);
-                }
-            } else if cfg.shape == BlockShape::FilledBlack {
-                // Solid-fill blocks (e.g. BusCreator/BusSelector) need no interior rendering.
             } else {
-                render_block_icon(
-                    &painter,
-                    b,
-                    r_screen,
-                    font_scale,
-                    icon_port_label_widths,
-                );
+                // General, definition-driven interior renderer.  There is no
+                // block-type-specific code here: the block's resolved
+                // `SimulinkBlockDefinition` selects the static/live renderer,
+                // block label and icon.
+                //
+                // In live mode the definition's single `LiveRendererFn` (the
+                // unified live hook — interactive controls *and* non-interactive
+                // gauges) is dispatched here with mutable `app`/`ui`.  Whatever
+                // it declines, plus every non-live block, falls through to the
+                // painter-only static path in `render_block_interior`.
+                let coords_ref = b.sid.as_ref().and_then(|sid| block_port_y_map.get(sid));
+                let def = crate::simulink_libraries::resolve_definition(b);
+                let live_handled = if app.live_mode_enabled {
+                    if let Some(live_fn) = def.live_renderer {
+                        let live_value = live_block_value_for_renderer(app, b, def);
+                        let live_text = block_live_text(app, b);
+                        let display_opts = app.live_display_defaults.clone();
+                        let metadata =
+                            crate::simulink_libraries::metadata::extract_metadata(b, def);
+                        let ctx = crate::simulink_libraries::types::RenderContext {
+                            live_mode: true,
+                            font_scale,
+                            name_font_factor: app.block_name_font_factor,
+                            metadata: &metadata,
+                            live_value,
+                            live_text: live_text.as_deref(),
+                            live_display_options: Some(&display_opts),
+                            port_y: coords_ref,
+                            port_label_widths: icon_port_label_widths,
+                            text_color: fg,
+                            fill_color: *bg,
+                            border_color,
+                        };
+                        live_fn(app, ui, b, r_screen, &ctx)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !live_handled {
+                    let params = crate::simulink_libraries::render::InteriorParams {
+                        live_mode: app.live_mode_enabled,
+                        font_scale,
+                        name_font_factor: app.block_name_font_factor,
+                        live_value: None,
+                        live_text: None,
+                        live_display_options: Some(&app.live_display_defaults),
+                        port_y: coords_ref,
+                        port_label_widths: icon_port_label_widths,
+                        text_color: fg,
+                        fill_color: *bg,
+                        border_color,
+                    };
+                    crate::simulink_libraries::render::render_block_interior(
+                        &painter, b, r_screen, &params,
+                    );
+                }
             }
 
             let live_hover_key = app.live_value_key_for_block(b);
@@ -3245,11 +3302,19 @@ pub(crate) fn update_internal(
                 );
             }
         }
+        // Restore cache data moved out before the closure (zero-clone round-trip).
+        app.view_cache.cached_sys_lines = sys_lines;
+        app.view_cache.cached_sys_annotations = sys_annotations;
+        app.view_cache.cached_owned_blocks = owned_blocks;
+        app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
+        app.view_cache.line_colors = line_colors;
+        app.view_cache.port_counts = port_counts;
+        app.view_cache.connected_ports = connected_ports;
     });
 
     // After the UI closure, call open_block_if_subsystem if needed
     if let Some(ref block) = block_to_open_subsystem {
-        app.open_block_if_subsystem(&block);
+        app.open_block_if_subsystem(block);
     }
 
     let navigated = navigate_to.is_some() || block_to_open_subsystem.is_some();
@@ -3293,7 +3358,7 @@ fn draw_viewer_resize_handles(
         ui.painter().rect_stroke(
             handle_rect.shrink(2.0),
             1.0,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
         if resp.drag_started() {
@@ -3317,16 +3382,15 @@ fn draw_viewer_resize_handles(
                 current_dy,
                 ..
             } = &mut app.viewer_drag_state
+                && resize_sid == sid
             {
-                if resize_sid == sid {
-                    *current_dx += dx;
-                    *current_dy += dy;
-                    ui.ctx().request_repaint();
-                }
+                *current_dx += dx;
+                *current_dy += dy;
+                ui.ctx().request_repaint();
             }
         }
-        if resp.drag_stopped() {
-            if let ViewerDragState::Resize {
+        if resp.drag_stopped()
+            && let ViewerDragState::Resize {
                 sid: resize_sid,
                 handle,
                 original_l,
@@ -3336,59 +3400,56 @@ fn draw_viewer_resize_handles(
                 current_dx,
                 current_dy,
             } = app.viewer_drag_state.clone()
+            && resize_sid == sid
+        {
+            let (nl, nt, nr, nb) = view_transform::compute_resized_rect(
+                original_l as f32,
+                original_t as f32,
+                original_r as f32,
+                original_b as f32,
+                handle,
+                current_dx as f32,
+                current_dy as f32,
+            );
+            let mut layout_changed = false;
+            let mut undo_cmd = None;
+            if let Some(system) = app.current_system_mut()
+                && let Some(block_index) = system
+                    .blocks
+                    .iter()
+                    .position(|block| block.sid.as_deref() == Some(sid))
             {
-                if resize_sid == sid {
-                    let (nl, nt, nr, nb) = view_transform::compute_resized_rect(
-                        original_l as f32,
-                        original_t as f32,
-                        original_r as f32,
-                        original_b as f32,
-                        handle,
-                        current_dx as f32,
-                        current_dy as f32,
-                    );
-                    let mut layout_changed = false;
-                    let mut undo_cmd = None;
-                    if let Some(system) = app.current_system_mut() {
-                        if let Some(block_index) = system
-                            .blocks
-                            .iter()
-                            .position(|block| block.sid.as_deref() == Some(sid))
-                        {
-                            undo_cmd = Some(operations::resize_block(
-                                system,
-                                block_index,
-                                nl,
-                                nt,
-                                nr,
-                                nb,
-                            ));
-                            layout_changed = true;
-                        }
-                    }
-                    if let Some(cmd) = undo_cmd {
-                        app.viewer_history.push(cmd);
-                    }
-                    if layout_changed {
-                        app.layout_dirty = true;
-                        app.view_cache.invalidate();
-                    }
-                    app.viewer_drag_state = ViewerDragState::None;
-                }
+                undo_cmd = Some(operations::resize_block(
+                    system,
+                    block_index,
+                    nl,
+                    nt,
+                    nr,
+                    nb,
+                ));
+                layout_changed = true;
             }
+            if let Some(cmd) = undo_cmd {
+                app.viewer_history.push(cmd);
+            }
+            if layout_changed {
+                app.layout_dirty = true;
+                app.view_cache.invalidate();
+            }
+            app.viewer_drag_state = ViewerDragState::None;
         }
     }
 }
 
 /// Draw a lightweight static sine waveform glyph inside a block rectangle.
-fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
+pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
     let inner = rect.shrink(6.0);
     if inner.width() < 10.0 || inner.height() < 10.0 {
         return;
     }
     painter.rect_filled(inner, 2.0, Color32::from_rgb(30, 30, 30));
     let color = Color32::from_rgb(50, 200, 50);
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let n = 40;
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
@@ -3415,10 +3476,7 @@ fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
 /// For blocks that use traditional signal lines instead of BindingPersistence
 /// (e.g., `Display`, `Scope`), this function falls back to scanning the
 /// current subsystem's lines for connections to/from this block.
-fn print_dashboard_connected_signals(
-    block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
-) {
+fn print_dashboard_connected_signals(block: &crate::model::Block, lines: &[crate::model::Line]) {
     println!(
         "  [Dashboard UI] Block '{}' (type: {})",
         block.name, block.block_type
@@ -3461,7 +3519,7 @@ fn print_dashboard_connected_signals(
                 print_dashboard_binding_debug(block);
             }
             // Fall back to line-based connection scanning
-            print_line_based_connections(block, entities);
+            print_line_based_connections(block, &[], lines);
         }
     }
 }
@@ -3573,15 +3631,10 @@ fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static 
         return None;
     }
 
-    let kind = match block.block_type.as_str() {
-        "Checkbox" | "ToggleSwitchBlock" | "SliderSwitchBlock" | "RockerSwitchBlock" => "bool",
-        "PushButtonBlock" => "pulse",
-        "RadioButtonGroup" | "ComboBox" | "RotarySwitchBlock" => "discrete",
-        "KnobBlock" | "SliderBlock" | "EditField" => "scalar",
-        _ => return None,
-    };
-
-    Some(kind)
+    // The control kind is data on the block's definition, not a block-type match.
+    crate::simulink_libraries::resolve_definition(block)
+        .dashboard_control
+        .map(|kind| kind.as_str())
 }
 
 #[cfg(feature = "dashboard")]
@@ -3620,39 +3673,6 @@ fn dashboard_widget_value(app: &SubsystemApp, block: &crate::model::Block) -> f6
 }
 
 #[cfg(feature = "dashboard")]
-fn render_dashboard_control_widget(
-    app: &mut SubsystemApp,
-    ui: &mut egui::Ui,
-    block: &crate::model::Block,
-    rect: Rect,
-    font_scale: f32,
-) -> bool {
-    let live_value = dashboard_widget_value(app, block);
-    let live_text = block_live_text(app, block);
-    crate::egui_app::dashboard_widgets::render_dashboard_control_widget(
-        app,
-        ui,
-        block,
-        rect,
-        font_scale,
-        app.block_name_font_factor,
-        live_value,
-        live_text.as_deref(),
-    )
-}
-
-#[cfg(not(feature = "dashboard"))]
-fn render_dashboard_control_widget(
-    _app: &mut SubsystemApp,
-    _ui: &mut egui::Ui,
-    _block: &crate::model::Block,
-    _rect: Rect,
-    _font_scale: f32,
-) -> bool {
-    false
-}
-
-#[cfg(feature = "dashboard")]
 fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
     fn parse_property(block: &crate::model::Block, keys: &[&str]) -> Option<f64> {
         keys.iter().find_map(|key| {
@@ -3673,7 +3693,8 @@ fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
 /// Scan lines in the current subsystem for connections to/from the given block.
 fn print_line_based_connections(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    blocks: &[crate::model::Block],
+    lines: &[crate::model::Line],
 ) {
     let block_sid = match &block.sid {
         Some(s) => s.as_str(),
@@ -3702,46 +3723,45 @@ fn print_line_based_connections(
     }
 
     // Build a SID→name lookup for blocks in this subsystem.
-    let block_name_by_sid: std::collections::HashMap<&str, &str> = entities
-        .blocks
+    let block_name_by_sid: std::collections::HashMap<&str, &str> = blocks
         .iter()
         .filter_map(|b| b.sid.as_deref().map(|s| (s, b.name.as_str())))
         .collect();
 
     let mut found_any = false;
 
-    for line in &entities.lines {
+    for line in lines {
         let signal_name = line.name.as_deref().unwrap_or("<unnamed>");
 
         // Check if this block is a source of the line
-        if let Some(ref src) = line.src {
-            if src.sid == block_sid {
-                let dst_sids = collect_dst_sids(line);
-                for dsid in &dst_sids {
-                    let dst_name = block_name_by_sid.get(dsid).copied().unwrap_or("?");
-                    println!(
-                        "    → drives signal '{}' to block '{}' (dst SID {})",
-                        signal_name, dst_name, dsid
-                    );
-                    found_any = true;
-                }
+        if let Some(ref src) = line.src
+            && src.sid == block_sid
+        {
+            let dst_sids = collect_dst_sids(line);
+            for dsid in &dst_sids {
+                let dst_name = block_name_by_sid.get(dsid).copied().unwrap_or("?");
+                println!(
+                    "    → drives signal '{}' to block '{}' (dst SID {})",
+                    signal_name, dst_name, dsid
+                );
+                found_any = true;
             }
         }
 
         // Check if this block is a destination of the line
         let all_dsts = collect_dst_sids(line);
-        if all_dsts.iter().any(|d| *d == block_sid) {
-            if let Some(ref src) = line.src {
-                let src_name = block_name_by_sid
-                    .get(src.sid.as_str())
-                    .copied()
-                    .unwrap_or("?");
-                println!(
-                    "    ← receives signal '{}' from block '{}' (src SID {})",
-                    signal_name, src_name, src.sid
-                );
-                found_any = true;
-            }
+        if all_dsts.contains(&block_sid)
+            && let Some(ref src) = line.src
+        {
+            let src_name = block_name_by_sid
+                .get(src.sid.as_str())
+                .copied()
+                .unwrap_or("?");
+            println!(
+                "    ← receives signal '{}' from block '{}' (src SID {})",
+                signal_name, src_name, src.sid
+            );
+            found_any = true;
         }
     }
 
@@ -3750,7 +3770,7 @@ fn print_line_based_connections(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dashboard"))]
 mod tests {
     use super::{
         dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,
@@ -4094,30 +4114,36 @@ mod tests {
             ConnectionTarget {
                 path: "Model/A".to_string(),
                 signal_name: Some("alpha".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
             ConnectionTarget {
                 path: "Model/B".to_string(),
                 signal_name: Some("beta".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
         ];
         let mux_targets = vec![ConnectionTarget {
             path: "Model/A".to_string(),
             signal_name: Some("alpha".to_string()),
+            signal_names: Vec::new(),
             resolve: Some(ConnectionTargetResolve::Index(1)),
             element_index: Some(1),
             origin: ConnectionTargetOrigin::Mux,
             signals_only: true,
             testpoint: false,
+            block_type: None,
         }];
 
         assert_eq!(resolved_line_label(&line, &bus_targets), None);
@@ -4129,30 +4155,36 @@ mod tests {
         let normal_targets = vec![ConnectionTarget {
             path: "Model/A".to_string(),
             signal_name: Some("alpha".to_string()),
+            signal_names: Vec::new(),
             resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
             element_index: None,
             origin: ConnectionTargetOrigin::SourceBlock,
             signals_only: true,
             testpoint: false,
+            block_type: None,
         }];
         let bus_targets = vec![
             ConnectionTarget {
                 path: "Model/A".to_string(),
                 signal_name: Some("alpha".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("alpha".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
             ConnectionTarget {
                 path: "Model/B".to_string(),
                 signal_name: Some("beta".to_string()),
+                signal_names: Vec::new(),
                 resolve: Some(ConnectionTargetResolve::Signal("beta".to_string())),
                 element_index: None,
                 origin: ConnectionTargetOrigin::BusCreator,
                 signals_only: true,
                 testpoint: false,
+                block_type: None,
             },
         ];
 

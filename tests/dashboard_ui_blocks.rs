@@ -7,13 +7,13 @@
 //! 4. Display blocks have the correct port counts (1 input, 0 outputs)
 //! 5. Other dashboard blocks have 0 ports
 
-use rustylink::builtin_libraries::simulink_dashboard::{
-    DASHBOARD_BLOCK_TYPES, is_dashboard_block_type, is_simulink_dashboard_name,
-};
 use rustylink::model::{
     DashboardBinding, DashboardTargetPath, SlxArchive, parse_mxarray_binding, parse_rels_xml,
 };
 use rustylink::parser::{SimulinkParser, ZipSource};
+use rustylink::simulink_libraries::stubs::{
+    DASHBOARD_BLOCK_TYPES, is_dashboard_block_type, is_simulink_dashboard_name,
+};
 
 // ── is_dashboard_block_type ────────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ fn archive_resolves_binding_persistence_refs() {
     // resolve_binding_persistence should locate the raw bytes
     let data = archive.resolve_binding_persistence("bdmxdata:BindingPersistence_151");
     assert!(data.is_some(), "Expected raw .mxarray data");
-    assert!(data.unwrap().len() > 0);
+    assert!(!data.unwrap().is_empty());
 }
 
 #[test]
@@ -571,8 +571,6 @@ fn dashboard_virtual_library_is_recognized() {
 
 #[cfg(feature = "egui")]
 mod visualization_tests {
-    use rustylink::egui_app::dashboard_widgets;
-
     /// All dashboard block types that are "UI elements" (i.e. should have a
     /// dedicated custom renderer instead of displaying a "?" fallback).
     const UI_BLOCK_TYPES: &[&str] = &[
@@ -598,46 +596,76 @@ mod visualization_tests {
 
     #[test]
     fn all_ui_block_types_have_custom_renderer() {
+        use rustylink::simulink_libraries::resolver::registry;
         for &bt in UI_BLOCK_TYPES {
+            let def = registry()
+                .lookup(bt)
+                .unwrap_or_else(|| panic!("no definition for {bt}"));
             assert!(
-                dashboard_widgets::is_dashboard_rendered(bt),
-                "Block type '{}' should have a custom dashboard renderer but none is registered",
+                def.static_renderer.is_some(),
+                "Block type '{}' should carry a static renderer in its definition",
                 bt
             );
         }
     }
 
     #[test]
-    fn all_ui_block_types_registered_in_interior_registry() {
-        use rustylink::egui_app::get_interior_renderer;
-        for &bt in UI_BLOCK_TYPES {
+    fn input_control_blocks_have_live_renderer() {
+        use rustylink::simulink_libraries::resolver::registry;
+        const CONTROL_TYPES: &[&str] = &[
+            "Checkbox",
+            "ComboBox",
+            "EditField",
+            "KnobBlock",
+            "PushButtonBlock",
+            "RadioButtonGroup",
+            "RockerSwitchBlock",
+            "RotarySwitchBlock",
+            "SliderBlock",
+            "SliderSwitchBlock",
+            "ToggleSwitchBlock",
+        ];
+        for &bt in CONTROL_TYPES {
+            let def = registry()
+                .lookup(bt)
+                .unwrap_or_else(|| panic!("no definition for {bt}"));
             assert!(
-                get_interior_renderer(bt).is_some(),
-                "Block type '{}' should be in the interior renderer registry",
-                bt
+                def.dashboard_control.is_some(),
+                "control block '{bt}' should declare a dashboard_control kind"
+            );
+            // Interactive controls dispatch through the unified `live_renderer`
+            // (which carries `&mut app`/`&mut Ui`); there is no separate
+            // control-renderer type any more.
+            assert!(
+                def.live_renderer.is_some(),
+                "control block '{bt}' should carry a live_renderer"
             );
         }
     }
 
     #[test]
-    fn dashboard_renderers_table_has_correct_count() {
-        // We expect exactly 18 dashboard renderers (all UI block types above)
-        assert_eq!(
-            dashboard_widgets::DASHBOARD_RENDERERS.len(),
-            UI_BLOCK_TYPES.len(),
-            "DASHBOARD_RENDERERS should contain exactly {} entries (one per UI block type)",
-            UI_BLOCK_TYPES.len()
-        );
+    fn ui_block_types_resolve_to_dashboard_definitions() {
+        // The single source of truth: every UI block resolves to exactly one
+        // Dashboard-category definition (no duplicate palette entry).
+        use rustylink::simulink_libraries::resolver::registry;
+        for &bt in UI_BLOCK_TYPES {
+            let def = registry()
+                .lookup(bt)
+                .unwrap_or_else(|| panic!("no definition for {bt}"));
+            assert_eq!(
+                def.category, "Dashboard",
+                "UI block '{bt}' should resolve to a Dashboard-category definition"
+            );
+        }
     }
 
     #[test]
-    fn all_declared_renderers_match_known_block_types() {
-        // Every entry in DASHBOARD_RENDERERS should be a known dashboard block type
-        for &(bt, _) in dashboard_widgets::DASHBOARD_RENDERERS {
+    fn all_dashboard_definitions_are_known_block_types() {
+        for def in rustylink::simulink_libraries::libraries::dashboard::BLOCKS {
             assert!(
-                rustylink::builtin_libraries::simulink_dashboard::is_dashboard_block_type(bt),
-                "Renderer registered for '{}' but it's not a known dashboard block type",
-                bt
+                rustylink::simulink_libraries::stubs::is_dashboard_block_type(def.block_type),
+                "dashboard definition '{}' is not a known dashboard block type",
+                def.block_type
             );
         }
     }
@@ -702,23 +730,27 @@ mod visualization_tests {
         //   - A non-None icon in the config (checked above)
         //
         // This is a structural check: verify both conditions hold.
-        use rustylink::egui_app::get_interior_renderer;
+        use rustylink::simulink_libraries::resolver::registry;
         let map = rustylink::block_types::get_block_type_config_map();
         let guard = map.read().unwrap();
 
         for &bt in UI_BLOCK_TYPES {
-            let has_renderer = get_interior_renderer(bt).is_some();
-            let has_icon = guard.get(bt).and_then(|c| c.icon.as_ref()).is_some();
+            let def = registry()
+                .lookup(bt)
+                .unwrap_or_else(|| panic!("no definition for {bt}"));
+            let has_renderer = def.static_renderer.is_some();
+            let has_icon =
+                def.icon.is_some() || guard.get(bt).and_then(|c| c.icon.as_ref()).is_some();
 
             assert!(
                 has_renderer || has_icon,
-                "Block type '{}' would render as '?' - it has neither a custom renderer nor an icon",
+                "Block type '{}' would render as '?' - it has neither a renderer nor an icon",
                 bt
             );
             // Prefer renderer (our primary fix)
             assert!(
                 has_renderer,
-                "Block type '{}' should have a custom interior renderer for proper visualization",
+                "Block type '{}' should have a static renderer for proper visualization",
                 bt
             );
         }
@@ -742,11 +774,14 @@ mod visualization_tests {
     #[test]
     fn sum_block_renderer_still_works() {
         // Sanity: the pre-existing Sum renderer should not be affected
-        // by adding dashboard renderers.
-        use rustylink::egui_app::get_interior_renderer;
+        // by the dashboard refactor.
+        use rustylink::simulink_libraries::resolver::registry;
         assert!(
-            get_interior_renderer("Sum").is_some(),
-            "Sum block should still have its custom interior renderer"
+            registry()
+                .lookup("Sum")
+                .and_then(|d| d.static_renderer)
+                .is_some(),
+            "Sum block should still carry its static renderer"
         );
     }
 
@@ -755,7 +790,7 @@ mod visualization_tests {
     /// all dashboard blocks parsed from the model.
     #[test]
     fn parsed_model_blocks_have_renderers() {
-        use rustylink::egui_app::get_interior_renderer;
+        use rustylink::simulink_libraries::resolve_definition;
 
         let path = std::path::Path::new("Simulink_UI_Test.slx");
         if !path.exists() {
@@ -765,14 +800,13 @@ mod visualization_tests {
         let system = archive.root_system().expect("no root system");
 
         for blk in &system.blocks {
-            if rustylink::builtin_libraries::simulink_dashboard::is_dashboard_block_type(
-                &blk.block_type,
-            ) && blk.block_type != "Display"
+            if rustylink::simulink_libraries::stubs::is_dashboard_block_type(&blk.block_type)
+                && blk.block_type != "Display"
             {
                 assert!(
-                    get_interior_renderer(&blk.block_type).is_some(),
-                    "Model block '{}' (type={}) should have a custom renderer, \
-                     but none is registered. It will render as '?'!",
+                    resolve_definition(blk).static_renderer.is_some(),
+                    "Model block '{}' (type={}) should resolve to a definition with a \
+                     static renderer, but none is present. It will render as '?'!",
                     blk.name,
                     blk.block_type
                 );

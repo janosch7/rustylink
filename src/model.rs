@@ -232,25 +232,33 @@ impl Block {
 // Supporting types
 // ────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum NameLocation {
     Top,
+    #[default]
     Bottom,
     Left,
     Right,
 }
 
-impl Default for NameLocation {
-    fn default() -> Self {
-        NameLocation::Bottom
-    }
-}
-
-/// Represents the `<PortCounts in="…" out="…"/>` XML element.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents the `<PortCounts in="…" out="…" enable="…" trigger="…"/>` XML
+/// element.  The control ports (`enable`/`trigger`) sit on the top edge of the
+/// block rather than on the input side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PortCounts {
     pub ins: Option<u32>,
     pub outs: Option<u32>,
+    #[serde(default)]
+    pub enable: Option<u32>,
+    #[serde(default)]
+    pub trigger: Option<u32>,
+}
+
+impl PortCounts {
+    /// Number of control ports on the block's top edge.
+    pub fn control_count(&self) -> u32 {
+        self.enable.unwrap_or(0) + self.trigger.unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -435,18 +443,13 @@ pub struct InstanceData {
     pub properties: IndexMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ValueKind {
+    #[default]
     Unknown,
     Scalar,
     Vector,
     Matrix,
-}
-
-impl Default for ValueKind {
-    fn default() -> Self {
-        ValueKind::Unknown
-    }
 }
 
 /// Simulink annotation (text or HTML) with position.
@@ -492,10 +495,10 @@ impl DashboardTargetPath {
     }
 
     pub fn element_index_zero_based(&self) -> Option<usize> {
-        if let Some(element) = self.element.as_deref() {
-            if let Ok(index) = element.trim().parse::<usize>() {
-                return Some(index);
-            }
+        if let Some(element) = self.element.as_deref()
+            && let Ok(index) = element.trim().parse::<usize>()
+        {
+            return Some(index);
         }
 
         let raw = self.element_raw_input.as_deref()?.trim();
@@ -559,25 +562,24 @@ fn extract_ascii_strings(data: &[u8], min_len: usize) -> Vec<(usize, String)> {
     let mut results = Vec::new();
     let mut start = None;
     for (i, &b) in data.iter().enumerate() {
-        if b >= 0x20 && b <= 0x7e {
+        if (0x20..=0x7e).contains(&b) {
             if start.is_none() {
                 start = Some(i);
             }
-        } else if let Some(s) = start.take() {
-            if i - s >= min_len {
-                if let Ok(text) = std::str::from_utf8(&data[s..i]) {
-                    results.push((s, text.to_string()));
-                }
-            }
+        } else if let Some(s) = start.take()
+            && i - s >= min_len
+            && let Ok(text) = std::str::from_utf8(&data[s..i])
+        {
+            results.push((s, text.to_string()));
         }
     }
     // Handle string at end of data
     if let Some(s) = start {
         let i = data.len();
-        if i - s >= min_len {
-            if let Ok(text) = std::str::from_utf8(&data[s..i]) {
-                results.push((s, text.to_string()));
-            }
+        if i - s >= min_len
+            && let Ok(text) = std::str::from_utf8(&data[s..i])
+        {
+            results.push((s, text.to_string()));
         }
     }
     results
@@ -779,10 +781,10 @@ fn find_numeric_field_value(strings: &[(usize, String)], field_names: &[&str]) -
                 if distance > 1024 {
                     break;
                 }
-                if value.chars().all(|ch| ch.is_ascii_digit()) {
-                    if let Ok(parsed) = value.parse::<u32>() {
-                        return Some(parsed);
-                    }
+                if value.chars().all(|ch| ch.is_ascii_digit())
+                    && let Ok(parsed) = value.parse::<u32>()
+                {
+                    return Some(parsed);
                 }
             }
         }
@@ -818,7 +820,7 @@ fn find_binary_signal_port_index(
         let value_bytes = data.get(offset + scalar_header.len()..offset + 16)?;
         let value = f64::from_le_bytes(value_bytes.try_into().ok()?);
         let rounded = value.round();
-        if value.is_finite() && value >= 1.0 && value <= 64.0 && (value - rounded).abs() <= 1e-9 {
+        if value.is_finite() && (1.0..=64.0).contains(&value) && (value - rounded).abs() <= 1e-9 {
             return Some(rounded as u32 - 1);
         }
     }
@@ -957,6 +959,7 @@ pub struct SlxArchiveEntry {
 
 /// Content of an SLX archive entry.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum SlxContent {
     /// Raw bytes for files that are preserved verbatim.
     Raw(Vec<u8>),

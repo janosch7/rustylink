@@ -48,17 +48,15 @@ pub fn parse_chart_from_text(text: &str, path_hint: Option<&str>) -> Result<Char
         if let Some(eml) = st
             .children()
             .find(|c| c.is_element() && c.has_tag_name("eml"))
-        {
-            if let Some(scr) = eml
+            && let Some(scr) = eml
                 .children()
                 .find(|c| {
                     c.is_element() && c.has_tag_name("P") && c.attribute("Name") == Some("script")
                 })
                 .and_then(|p| p.text())
-            {
-                script = Some(scr.to_string());
-                break;
-            }
+        {
+            script = Some(scr.to_string());
+            break;
         }
     }
 
@@ -136,14 +134,14 @@ pub fn parse_chart_from_text(text: &str, path_hint: Option<&str>) -> Result<Char
                                 }
                             }
                             _ => {
-                                if pp.has_tag_name("P") {
-                                    if let Some(nm) = pp.attribute("Name") {
-                                        let val = pp.text().unwrap_or("").to_string();
-                                        match nm {
-                                            "complexity" => complexity = Some(val),
-                                            "frame" => frame = Some(val),
-                                            _ => {}
-                                        }
+                                if pp.has_tag_name("P")
+                                    && let Some(nm) = pp.attribute("Name")
+                                {
+                                    let val = pp.text().unwrap_or("").to_string();
+                                    match nm {
+                                        "complexity" => complexity = Some(val),
+                                        "frame" => frame = Some(val),
+                                        _ => {}
                                     }
                                 }
                             }
@@ -182,4 +180,63 @@ pub fn parse_chart_from_text(text: &str, path_hint: Option<&str>) -> Result<Char
         outputs,
         properties,
     })
+}
+
+/// Record the MATLAB function each MATLAB Function block runs on the block
+/// itself.
+///
+/// The name (`fcn`, `test`, …) lives in the block's Stateflow chart, which the
+/// renderers cannot reach; copying it into the block's properties lets the
+/// catalog caption the block with it the way Simulink does.  Charts are keyed
+/// by SID and by block name, and the `function y = fcn(u)` header of the
+/// script is used when the chart carries no `eml` name.
+pub fn annotate_matlab_function_names(
+    system: &mut System,
+    charts: &BTreeMap<u32, Chart>,
+    chart_map: &BTreeMap<String, u32>,
+) {
+    for block in &mut system.blocks {
+        if block.is_matlab_function || block.block_type == "MATLAB Function" {
+            let chart = block
+                .sid
+                .as_ref()
+                .and_then(|sid| chart_map.get(sid))
+                .or_else(|| chart_map.get(&block.name))
+                .and_then(|id| charts.get(id));
+            let name = chart
+                .and_then(|chart| {
+                    chart.eml_name.clone().or_else(|| {
+                        chart
+                            .script
+                            .as_deref()
+                            .and_then(script_function_name)
+                            .map(str::to_string)
+                    })
+                })
+                .filter(|name| !name.trim().is_empty());
+            if let Some(name) = name {
+                block.properties.insert(
+                    crate::simulink_libraries::labels::MATLAB_FUNCTION_NAME_PROPERTY.to_string(),
+                    name,
+                );
+            }
+        }
+        if let Some(subsystem) = block.subsystem.as_deref_mut() {
+            annotate_matlab_function_names(subsystem, charts, chart_map);
+        }
+    }
+}
+
+/// The function name of a MATLAB script: `function [x,y] = test(u,v)` → `test`.
+fn script_function_name(script: &str) -> Option<&str> {
+    let header = script
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("function"))?;
+    let after_outputs = header
+        .rsplit_once('=')
+        .map(|(_, r)| r)
+        .unwrap_or(header.strip_prefix("function").unwrap_or(header));
+    let name = after_outputs.split('(').next()?.trim();
+    (!name.is_empty()).then_some(name)
 }

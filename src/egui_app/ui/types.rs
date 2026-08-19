@@ -9,6 +9,7 @@ pub enum ClickAction {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum UpdateResponse {
     None,
     Block {

@@ -194,6 +194,10 @@ impl LiveValueList {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn first_f64(&self) -> Option<f64> {
         match self {
             LiveValueList::Empty => None,
@@ -352,4 +356,3 @@ fn format_complex(re: f64, im: f64, display: &LiveValueDisplayOptions) -> String
     let sign = if im < 0.0 { '-' } else { '+' };
     format!("{re}{sign}{imag_value}i")
 }
-

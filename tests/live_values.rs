@@ -1,6 +1,6 @@
 use rustylink::live_values::{
-    LiveValue, LiveValueDisplayOptions, LiveValueEntry, LiveValueList,
-    scalar_requires_scientific, scalar_requires_scientific_with_bounds,
+    LiveValue, LiveValueDisplayOptions, LiveValueEntry, LiveValueList, scalar_requires_scientific,
+    scalar_requires_scientific_with_bounds,
 };
 
 #[test]
@@ -87,14 +87,13 @@ fn custom_scientific_bounds_are_used() {
 
 #[test]
 fn always_scientific_overrides_thresholds() {
-    let entry =
-        LiveValueEntry::new(LiveValue::new(vec![1], LiveValueList::Float64(vec![12.34])))
-            .with_display(LiveValueDisplayOptions {
-                float_decimals: 2,
-                scientific_lower_bound: 1.0,
-                scientific_upper_bound: 100.0,
-                always_scientific: true,
-            });
+    let entry = LiveValueEntry::new(LiveValue::new(vec![1], LiveValueList::Float64(vec![12.34])))
+        .with_display(LiveValueDisplayOptions {
+            float_decimals: 2,
+            scientific_lower_bound: 1.0,
+            scientific_upper_bound: 100.0,
+            always_scientific: true,
+        });
 
     assert_eq!(entry.formatted_text(), "1.23e1");
 }

@@ -7,7 +7,7 @@
 use eframe::egui::{Pos2, Rect, Vec2};
 
 #[inline]
-pub(crate) fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
+pub fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
     ((10.0 + 12.0 * font_scale.max(0.0)) * font_factor).max(1.0)
 }
 
@@ -75,11 +75,12 @@ impl ViewTransform {
 
     /// Font scaling factor for in-canvas text.
     ///
-    /// The baseline is 400% zoom → scale = zoom / 4.0.  The user requested
-    /// double font size, so we use zoom / 2.0 instead.
+    /// Coupled to the model's measurement unit: `base_scale * zoom` is the
+    /// screen-pixels-per-model-unit scale used for block geometry, so text and
+    /// icons scale exactly with the on-screen block size.
     #[inline]
     pub fn font_scale(&self) -> f32 {
-        (self.zoom / 2.0).max(0.01)
+        (self.base_scale * self.zoom / 2.0).max(0.01)
     }
 
     /// Compute the new zoom and pan values when zooming at `cursor` by `factor`.
@@ -114,7 +115,7 @@ pub fn preview_block_rect(
             current_dx,
             current_dy,
         } => {
-            if block_sid.map_or(false, |sid| selected_sids.contains(sid)) {
+            if block_sid.is_some_and(|sid| selected_sids.contains(sid)) {
                 rect.translate(Vec2::new(*current_dx as f32, *current_dy as f32))
             } else {
                 rect
@@ -225,7 +226,7 @@ pub fn compute_resized_rect(
         }
     }
     if nb - nt < min_size {
-        if matches!(handle, 0 | 1 | 2) {
+        if matches!(handle, 0..=2) {
             nt = nb - min_size;
         } else {
             nb = nt + min_size;

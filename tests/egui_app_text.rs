@@ -8,7 +8,7 @@ use rustylink::egui_app::text::{annotation_to_plain_text, annotation_to_rich_tex
 #[test]
 fn test_highlight_job() {
     let job = highlight_query_job("/A/B", "b");
-    assert!(job.sections.len() >= 1);
+    assert!(!job.sections.is_empty());
 }
 
 #[test]

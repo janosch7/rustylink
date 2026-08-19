@@ -1,9 +1,10 @@
 #![cfg(feature = "egui")]
 
+use eframe::egui::Color32;
+use rustylink::egui_app::ui::colors::hsv_to_color32;
 use rustylink::egui_app::ui::line_coloring::{
     assign_line_colors, circular_dist, compute_line_adjacency, hue_to_color32, rel_luminance,
 };
-use eframe::egui::Color32;
 
 #[test]
 fn circular_dist_basic() {
@@ -14,15 +15,15 @@ fn circular_dist_basic() {
 
 #[test]
 fn hsv_red_green_blue() {
-    let red = hue_to_color32(0.0, 1.0, 1.0);
+    let red = hsv_to_color32(0.0, 1.0, 1.0);
     assert_eq!(red.r(), 255);
     assert_eq!(red.g(), 0);
     assert_eq!(red.b(), 0);
 
-    let green = hue_to_color32(1.0 / 3.0, 1.0, 1.0);
+    let green = hsv_to_color32(1.0 / 3.0, 1.0, 1.0);
     assert_eq!(green.g(), 255);
 
-    let blue = hue_to_color32(2.0 / 3.0, 1.0, 1.0);
+    let blue = hsv_to_color32(2.0 / 3.0, 1.0, 1.0);
     assert_eq!(blue.b(), 255);
 }
 
