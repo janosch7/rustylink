@@ -110,7 +110,7 @@ pub fn clear_popout_state(viewer_instance_id: u64, scope_key: &str) {
 
 impl MiniScope {
     /// Create a new `MiniScope`.
-    pub fn new(_id: impl std::hash::Hash) -> Self {
+    pub fn new(_id: impl std::hash::Hash + std::fmt::Debug) -> Self {
         Self {
             signal_name: String::new(),
             next_x: 0.0,
@@ -252,7 +252,7 @@ impl MiniScope {
         painter.rect_stroke(
             frame_rect,
             4.0,
-            Stroke::new(1.0, BORDER),
+            Stroke::new(1.0_f32, BORDER),
             egui::StrokeKind::Inside,
         );
 
@@ -288,7 +288,7 @@ impl MiniScope {
                     Pos2::new(plot_rect.left(), y),
                     Pos2::new(plot_rect.right(), y),
                 ],
-                Stroke::new(0.75, GRID),
+                Stroke::new(0.75_f32, GRID),
             );
         }
         for i in 1..5 {
@@ -299,7 +299,7 @@ impl MiniScope {
                     Pos2::new(x, plot_rect.top()),
                     Pos2::new(x, plot_rect.bottom()),
                 ],
-                Stroke::new(0.75, GRID),
+                Stroke::new(0.75_f32, GRID),
             );
         }
 
@@ -340,7 +340,7 @@ impl MiniScope {
             ));
         }
         for segment in points.windows(2) {
-            painter.line_segment([segment[0], segment[1]], Stroke::new(1.5, TRACE));
+            painter.line_segment([segment[0], segment[1]], Stroke::new(1.5_f32, TRACE));
         }
     }
 }
@@ -356,7 +356,7 @@ pub fn draw_scope_glyph(ui: &mut Ui, rect: Rect) {
 
     let painter = ui.painter();
     let color = Color32::from_rgb(50, 200, 50);
-    let stroke = egui::Stroke::new(1.5, color);
+    let stroke = egui::Stroke::new(1.5_f32, color);
 
     // Draw a stylized sine wave
     let n = 60;

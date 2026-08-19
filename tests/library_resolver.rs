@@ -123,8 +123,8 @@ fn library_resolver_finds_and_reports_missing_libraries() {
         Utf8PathBuf::from_path_buf(dir2.clone()).unwrap(),
     ]);
 
-    let names = vec!["Regler", "OtherLib", "MissingLib"];
-    let res = resolver.locate(names.iter().map(|s| *s));
+    let names = ["Regler", "OtherLib", "MissingLib"];
+    let res = resolver.locate(names.iter().copied());
 
     // verify virtual library helper recognizes simulink virtual prefixes
     assert!(rustylink::parser::is_virtual_library(
@@ -155,14 +155,14 @@ fn library_resolver_finds_and_reports_missing_libraries() {
 
     // virtual libraries should not be reported as missing or found
     let res_virtual = resolver.locate(
-        vec![
+        [
             "simulink/Discrete",
             "SIMULINK",
             "simulink/Logic and Bit Operations",
             "matrix_library",
         ]
         .iter()
-        .map(|s| *s),
+        .copied(),
     );
     assert!(
         res_virtual.found.is_empty(),

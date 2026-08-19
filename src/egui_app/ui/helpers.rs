@@ -23,11 +23,15 @@ pub fn block_dialog_title(block: &crate::model::Block) -> String {
     )
 }
 
+/// Whether a block is a subsystem the user can descend into.
+///
+/// A MATLAB Function block is technically a subsystem wrapping a Stateflow
+/// S-function, but Simulink shows its MATLAB source rather than that wiring, so
+/// it is not treated as navigable here either.
 pub(crate) fn is_block_subsystem(b: &crate::model::Block) -> bool {
     (b.block_type == "SubSystem" || b.block_type == "Reference")
-        && b.subsystem
-            .as_ref()
-            .map_or(false, |sub| sub.chart.is_none())
+        && !b.is_matlab_function
+        && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none())
 }
 
 pub(crate) fn record_interaction(current: &mut UpdateResponse, new: UpdateResponse) {

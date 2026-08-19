@@ -41,12 +41,12 @@ fn main() -> Result<()> {
 
     // Build library search paths
     let mut lib_paths: Vec<Utf8PathBuf> = Vec::new();
-    if let Some(parent) = path.parent() {
-        if !parent.as_str().is_empty() {
-            lib_paths.push(parent.to_path_buf());
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_str().is_empty()
+    {
+        lib_paths.push(parent.to_path_buf());
     }
-    lib_paths.extend(args.lib.iter().map(|s| Utf8PathBuf::from(s)));
+    lib_paths.extend(args.lib.iter().map(Utf8PathBuf::from));
 
     // Parse system
     let (root_system, charts, chart_map) = if path.extension() == Some("slx") {
@@ -69,6 +69,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     } else {
         let root_dir = Utf8PathBuf::from(".");
@@ -89,6 +90,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     };
 
@@ -139,6 +141,7 @@ fn main() -> Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(
@@ -146,6 +149,7 @@ fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::light());
+            rustylink::egui_app::fonts::install(&cc.egui_ctx);
             Ok(Box::new(state))
         }),
     )

@@ -50,6 +50,7 @@ fn test_block_with_port_counts() {
             port_counts: Some(PortCounts {
                 ins: Some(1),
                 outs: Some(1),
+                ..Default::default()
             }),
             ports: vec![],
             subsystem: None,

@@ -10,20 +10,21 @@ use std::collections::BTreeMap;
 
 use crate::model::{Block, Chart, System};
 
-use super::block_catalog::{BlockCatalogCategory, get_block_catalog_by_category};
 use super::operations::EditorHistory;
 use super::selection::EditorSelection;
 use crate::egui_app::SubsystemApp;
 use crate::egui_app::resolve_subsystem_by_vec;
+use crate::simulink_libraries::browser::{BlockCatalogCategory, get_block_catalog_by_category};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Drag state
 // ────────────────────────────────────────────────────────────────────────────
 
 /// What the user is currently dragging.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum DragMode {
     /// Not dragging anything.
+    #[default]
     None,
     /// Dragging selected blocks by an accumulated pixel delta.
     Blocks {
@@ -62,12 +63,6 @@ pub enum DragMode {
     },
     /// Panning the canvas (same as viewer).
     Pan,
-}
-
-impl Default for DragMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -128,7 +123,7 @@ impl BlockBrowserState {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// State for the inline code editor window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CodeEditorState {
     /// Whether the editor is visible.
     pub open: bool,
@@ -140,18 +135,6 @@ pub struct CodeEditorState {
     pub code: String,
     /// The original code (to detect changes).
     pub original_code: String,
-}
-
-impl Default for CodeEditorState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            block_index: 0,
-            block_name: String::new(),
-            code: String::new(),
-            original_code: String::new(),
-        }
-    }
 }
 
 impl CodeEditorState {
@@ -423,26 +406,26 @@ impl EditorState {
 
     /// Undo the last operation.
     pub fn undo(&mut self) {
-        if let Some(system) = resolve_subsystem_by_vec_mut(&mut self.app.root, &self.app.path) {
-            if self.history.undo(system) {
-                self.dirty = true;
-            }
+        if let Some(system) = resolve_subsystem_by_vec_mut(&mut self.app.root, &self.app.path)
+            && self.history.undo(system)
+        {
+            self.dirty = true;
         }
     }
 
     /// Redo the last undone operation.
     pub fn redo(&mut self) {
-        if let Some(system) = resolve_subsystem_by_vec_mut(&mut self.app.root, &self.app.path) {
-            if self.history.redo(system) {
-                self.dirty = true;
-            }
+        if let Some(system) = resolve_subsystem_by_vec_mut(&mut self.app.root, &self.app.path)
+            && self.history.redo(system)
+        {
+            self.dirty = true;
         }
     }
 }
 
 impl eframe::App for EditorState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             super::ui::editor_update_with_info(self, ui);
         });
     }

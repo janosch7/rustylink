@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         println!("Library: {}", lib);
         if let Some(r) = &resolver {
             let lr = r.locate(std::iter::once(lib.as_str()));
-            if let Some((_, p)) = lr.found.get(0) {
+            if let Some((_, p)) = lr.found.first() {
                 println!("  located: {}", p);
             } else {
                 println!("  located: <not found in provided lib-paths>");
@@ -122,7 +122,7 @@ fn main() -> Result<()> {
             println!("    SID: {}", rr.sid);
             println!("    Type: {:?}", rr.r#type);
         }
-        println!("");
+        println!();
     }
 
     Ok(())

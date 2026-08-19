@@ -21,7 +21,7 @@ fn test_editor_state_new() {
     let state = EditorState::new(sys, vec![], BTreeMap::new(), BTreeMap::new());
     assert!(!state.dirty);
     assert!(state.selection.is_empty());
-    assert!(state.history.can_undo() == false);
+    assert!(!state.history.can_undo());
 }
 
 #[test]

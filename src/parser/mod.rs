@@ -17,13 +17,14 @@ pub mod library;
 pub mod source;
 
 // Re-export key types at the parser module level for backward compatibility.
+pub use chart::annotate_matlab_function_names;
 pub use graphical_interface::*;
 pub use helpers::{parse_endpoint, parse_points, resolve_system_reference};
 pub use library::*;
 pub use source::*;
 
-use crate::builtin_libraries::matrix_library;
 use crate::model::*;
+use crate::simulink_libraries::stubs;
 use anyhow::{Context, Result, anyhow};
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
@@ -164,133 +165,119 @@ impl<S: ContentSource> SimulinkParser<S> {
                 format!("{}/{}", system_path, block.name)
             };
 
-            if let Some(source_block) = block.properties.get("SourceBlock").cloned() {
-                if let Some((lib_name, block_path)) =
+            if let Some(source_block) = block.properties.get("SourceBlock").cloned()
+                && let Some((lib_name, block_path)) =
                     crate::parser::library::split_source_block_reference(&source_block)
-                {
-                    let lib_name = lib_name.trim();
-                    let block_path = block_path.trim();
-                    if !cache.contains_key(lib_name) {
-                        // Some virtual libraries include slashes in their logical name
-                        // (e.g. "simulink/Logic and Bit").  We therefore check both
-                        // the stripped library name and the full SourceBlock value.
-                        if crate::parser::library::is_virtual_library(lib_name)
-                            || crate::parser::library::is_virtual_library(&source_block)
-                        {
-                            // For most virtual libraries we just insert an empty system.
-                            // Some virtual libraries provide structured metadata so that
-                            // the UI can render reasonable placeholders (ports/icons).
-                            if let Some(sys) =
-                                crate::builtin_libraries::virtual_library_initial_system(lib_name)
-                            {
-                                cache.insert(lib_name.to_string(), sys);
-                            } else {
-                                cache.insert(lib_name.to_string(), empty_library_system());
-                            }
+            {
+                let lib_name = lib_name.trim();
+                let block_path = block_path.trim();
+                if !cache.contains_key(lib_name) {
+                    // Some virtual libraries include slashes in their logical name
+                    // (e.g. "simulink/Logic and Bit").  We therefore check both
+                    // the stripped library name and the full SourceBlock value.
+                    if crate::parser::library::is_virtual_library(lib_name)
+                        || crate::parser::library::is_virtual_library(&source_block)
+                    {
+                        // For most virtual libraries we just insert an empty system.
+                        // Some virtual libraries provide structured metadata so that
+                        // the UI can render reasonable placeholders (ports/icons).
+                        if let Some(sys) = stubs::virtual_library_initial_system(lib_name) {
+                            cache.insert(lib_name.to_string(), sys);
                         } else {
-                            let lookup = resolver.locate(std::iter::once(lib_name));
-                            if let Some((_, lib_file)) = lookup.found.first() {
-                                match Self::parse_library_file(lib_file) {
-                                    Ok(lib_system) => {
-                                        cache.insert(lib_name.to_string(), lib_system);
-                                    }
-                                    Err(e) => {
-                                        // sanitize each piece so stray whitespace doesn't
-                                        // create confusing log lines
-                                        let lib_name_clean =
-                                            crate::parser::helpers::clean_whitespace(lib_name);
-                                        let host_clean = crate::parser::helpers::clean_whitespace(
-                                            &block_host_path,
-                                        );
-                                        warn_yellow(format!(
-                                            "failed to parse library '{}' (requested by '{}'): {}",
-                                            lib_name_clean, host_clean, e
-                                        ));
-                                        continue;
-                                    }
+                            cache.insert(lib_name.to_string(), empty_library_system());
+                        }
+                    } else {
+                        let lookup = resolver.locate(std::iter::once(lib_name));
+                        if let Some((_, lib_file)) = lookup.found.first() {
+                            match Self::parse_library_file(lib_file) {
+                                Ok(lib_system) => {
+                                    cache.insert(lib_name.to_string(), lib_system);
                                 }
-                            } else {
-                                if !suppress_missing_external_warnings {
+                                Err(e) => {
+                                    // sanitize each piece so stray whitespace doesn't
+                                    // create confusing log lines
                                     let lib_name_clean =
                                         crate::parser::helpers::clean_whitespace(lib_name);
                                     let host_clean =
                                         crate::parser::helpers::clean_whitespace(&block_host_path);
                                     warn_yellow(format!(
-                                        "library '{}' not found (requested by '{}')",
-                                        lib_name_clean, host_clean
+                                        "failed to parse library '{}' (requested by '{}'): {}",
+                                        lib_name_clean, host_clean, e
                                     ));
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                    // after ensuring the library system is cached, we may need to
-                    // add a matrix-specific stub block for an unknown name.
-                    if matrix_library::is_matrix_library_name(lib_name) {
-                        if let Some(lib_system) = cache.get_mut(lib_name) {
-                            // add missing stub if necessary
-                            if !lib_system.blocks.iter().any(|b| b.name == block_path) {
-                                lib_system
-                                    .blocks
-                                    .push(matrix_library::create_stub(block_path));
-                            }
-                        }
-                    }
-
-                    // For Simulink virtual libraries we want to be permissive: any
-                    // referenced `simulink/...` block should resolve to a stub even
-                    // if it is not explicitly listed in one of the built-in virtual
-                    // library metadata modules.
-                    if crate::parser::library::is_virtual_library(lib_name) {
-                        let lib_norm = lib_name.trim().to_ascii_lowercase();
-                        let is_simulink_namespace =
-                            lib_norm == "simulink" || lib_norm.starts_with("simulink/");
-                        if is_simulink_namespace {
-                            if let Some(lib_system) = cache.get_mut(lib_name) {
-                                if !lib_system.blocks.iter().any(|b| b.name == block_path) {
-                                    let ins =
-                                        block.port_counts.as_ref().and_then(|p| p.ins).unwrap_or(1);
-                                    let outs = block
-                                        .port_counts
-                                        .as_ref()
-                                        .and_then(|p| p.outs)
-                                        .unwrap_or(1);
-                                    lib_system.blocks.push(
-                                        crate::builtin_libraries::virtual_library::create_stub_block(
-                                            block_path, ins, outs,
-                                        ),
-                                    );
+                                    continue;
                                 }
                             }
-                        }
-                    }
-                    if let Some(lib_system) = cache.get(lib_name) {
-                        if let Some(lib_block) = Self::find_block_by_name(lib_system, block_path) {
-                            if let Some(ref lib_subsystem) = lib_block.subsystem {
-                                block.subsystem = Some(lib_subsystem.clone());
-                            }
-                            // copy relevant metadata from the library stub so that the
-                            // host block can be rendered with proper ports, etc.
-                            block.port_counts = lib_block.port_counts.clone();
-                            block.ports = lib_block.ports.clone();
-
-                            block.library_source = Some(lib_name.to_string());
-                            block.library_block_path = Some(source_block.clone());
                         } else {
-                            let extra = if crate::parser::library::is_virtual_library(lib_name) {
-                                " (virtual library)"
-                            } else {
-                                ""
-                            };
-                            let source_clean =
-                                crate::parser::helpers::clean_whitespace(&source_block);
-                            let host_clean =
-                                crate::parser::helpers::clean_whitespace(&block_host_path);
-                            warn_yellow(format!(
-                                "library block '{}' not found{} (requested by '{}')",
-                                source_clean, extra, host_clean
-                            ));
+                            if !suppress_missing_external_warnings {
+                                let lib_name_clean =
+                                    crate::parser::helpers::clean_whitespace(lib_name);
+                                let host_clean =
+                                    crate::parser::helpers::clean_whitespace(&block_host_path);
+                                warn_yellow(format!(
+                                    "library '{}' not found (requested by '{}')",
+                                    lib_name_clean, host_clean
+                                ));
+                            }
+                            continue;
                         }
+                    }
+                }
+                // after ensuring the library system is cached, we may need to
+                // add a matrix-specific stub block for an unknown name.
+                if stubs::is_matrix_library_name(lib_name)
+                    && let Some(lib_system) = cache.get_mut(lib_name)
+                {
+                    // add missing stub if necessary
+                    if !lib_system.blocks.iter().any(|b| b.name == block_path) {
+                        lib_system
+                            .blocks
+                            .push(stubs::create_matrix_stub(block_path));
+                    }
+                }
+
+                // For Simulink virtual libraries we want to be permissive: any
+                // referenced `simulink/...` block should resolve to a stub even
+                // if it is not explicitly listed in one of the built-in virtual
+                // library metadata modules.
+                if crate::parser::library::is_virtual_library(lib_name) {
+                    let lib_norm = lib_name.trim().to_ascii_lowercase();
+                    let is_simulink_namespace =
+                        lib_norm == "simulink" || lib_norm.starts_with("simulink/");
+                    if is_simulink_namespace
+                        && let Some(lib_system) = cache.get_mut(lib_name)
+                        && !lib_system.blocks.iter().any(|b| b.name == block_path)
+                    {
+                        let ins = block.port_counts.as_ref().and_then(|p| p.ins).unwrap_or(1);
+                        let outs = block.port_counts.as_ref().and_then(|p| p.outs).unwrap_or(1);
+                        lib_system
+                            .blocks
+                            .push(stubs::create_stub_block(block_path, ins, outs));
+                    }
+                }
+                if let Some(lib_system) = cache.get(lib_name) {
+                    if let Some(lib_block) = Self::find_block_by_name(lib_system, block_path) {
+                        if let Some(ref lib_subsystem) = lib_block.subsystem {
+                            block.subsystem = Some(lib_subsystem.clone());
+                        }
+                        // copy relevant metadata from the library stub so that the
+                        // host block can be rendered with proper ports, etc.
+                        block.port_counts = lib_block.port_counts.clone();
+                        block.ports = lib_block.ports.clone();
+
+                        block.library_source = Some(lib_name.to_string());
+                        block.library_block_path = Some(source_block.clone());
+                    } else {
+                        let extra = if crate::parser::library::is_virtual_library(lib_name) {
+                            " (virtual library)"
+                        } else {
+                            ""
+                        };
+                        let source_clean = crate::parser::helpers::clean_whitespace(&source_block);
+                        let host_clean = crate::parser::helpers::clean_whitespace(&block_host_path);
+                        warn_yellow(format!(
+                            "library block '{}' not found{} (requested by '{}')",
+                            source_clean, extra, host_clean
+                        ));
                     }
                 }
             }
@@ -329,13 +316,12 @@ impl<S: ContentSource> SimulinkParser<S> {
     fn try_parse_stateflow_for(&mut self, system_xml_path: &Utf8Path) {
         let mut found_root: Option<Utf8PathBuf> = None;
         for anc in system_xml_path.ancestors() {
-            if anc.file_name() == Some("systems") {
-                if let Some(parent) = anc.parent() {
-                    if parent.file_name() == Some("simulink") {
-                        found_root = Some(parent.to_path_buf());
-                        break;
-                    }
-                }
+            if anc.file_name() == Some("systems")
+                && let Some(parent) = anc.parent()
+                && parent.file_name() == Some("simulink")
+            {
+                found_root = Some(parent.to_path_buf());
+                break;
             }
         }
         let sim_root: Utf8PathBuf = found_root.unwrap_or_else(|| self.root_dir.clone());
@@ -385,13 +371,12 @@ impl<S: ContentSource> SimulinkParser<S> {
     fn try_preload_systems_for(&mut self, system_xml_path: &Utf8Path) {
         let mut found_root: Option<Utf8PathBuf> = None;
         for anc in system_xml_path.ancestors() {
-            if anc.file_name() == Some("systems") {
-                if let Some(parent) = anc.parent() {
-                    if parent.file_name() == Some("simulink") {
-                        found_root = Some(parent.to_path_buf());
-                        break;
-                    }
-                }
+            if anc.file_name() == Some("systems")
+                && let Some(parent) = anc.parent()
+                && parent.file_name() == Some("simulink")
+            {
+                found_root = Some(parent.to_path_buf());
+                break;
             }
         }
         let sim_root: Utf8PathBuf = found_root.unwrap_or_else(|| self.root_dir.clone());
@@ -456,8 +441,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                     self.link_system_refs(&mut sub_cloned, sub_base_dir);
                     blk.subsystem = Some(Box::new(sub_cloned));
                 }
-            }
-            if let Some(ref mut sub) = blk.subsystem {
+            } else if let Some(ref mut sub) = blk.subsystem {
                 self.link_system_refs(sub, current_base);
             }
         }

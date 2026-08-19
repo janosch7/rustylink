@@ -81,13 +81,7 @@ fn testpoint_port(port_type: &str, index: u32, name: Option<&str>) -> Port {
     port
 }
 
-fn line(
-    src_sid: &str,
-    src_port: u32,
-    dst_sid: &str,
-    dst_port: u32,
-    name: Option<&str>,
-) -> Line {
+fn line(src_sid: &str, src_port: u32, dst_sid: &str, dst_port: u32, name: Option<&str>) -> Line {
     Line {
         name: name.map(str::to_string),
         zorder: None,
@@ -459,8 +453,7 @@ fn subsystem_block_includes_direct_internal_block_targets_only() {
     let targets = resolver.block_targets_for_block(&[], &system.blocks[0]);
 
     assert!(targets.iter().any(|target| {
-        target.path == "model/Sub/InnerDirect"
-            && target.origin == ConnectionTargetOrigin::Internal
+        target.path == "model/Sub/InnerDirect" && target.origin == ConnectionTargetOrigin::Internal
     }));
     assert!(targets.iter().any(|target| {
         target.path == "model/Sub/Nested" && target.origin == ConnectionTargetOrigin::Internal
@@ -779,6 +772,7 @@ fn canonical_signal_paths_strip_newlines_and_merge_testpoints() {
     targets.push(ConnectionTarget {
         path: "model/Source Block".to_string(),
         signal_name: None,
+        signal_names: Vec::new(),
         resolve: None,
         element_index: None,
         origin: ConnectionTargetOrigin::SourceBlock,
@@ -1572,4 +1566,223 @@ fn mux_targets_use_resolve_without_element_index() {
     assert_eq!(targets[0].resolve, Some(ConnectionTargetResolve::Index(1)));
     assert_eq!(targets[0].element_index, None);
     assert_eq!(targets[0].origin, ConnectionTargetOrigin::Mux);
+}
+
+#[test]
+fn topology_signature_ignores_geometry_but_tracks_topology() {
+    use rustylink::connection_targets::model_topology_signature;
+    use rustylink::model::Point;
+
+    let make = || System {
+        properties: props(&[("Name", "m")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Display", "Sink", "2", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![line("1", 1, "2", 1, None)],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let base = make();
+    let base_sig = model_topology_signature(&base);
+
+    // Geometry-only edits (block Position/ZOrder, line waypoints) must not
+    // change the signature.
+    let mut geom = make();
+    geom.blocks[0]
+        .properties
+        .insert("Position".to_string(), "[1, 2, 3, 4]".to_string());
+    geom.blocks[0]
+        .properties
+        .insert("ZOrder".to_string(), "99".to_string());
+    geom.lines[0].points = vec![Point { x: 5, y: 5 }, Point { x: 50, y: 50 }];
+    assert_eq!(
+        base_sig,
+        model_topology_signature(&geom),
+        "geometry-only edits should not change the topology signature"
+    );
+
+    // Topology edits must change the signature.
+    let mut renamed = make();
+    renamed.blocks[0].name = "A2".to_string();
+    assert_ne!(base_sig, model_topology_signature(&renamed));
+
+    let mut rewired = make();
+    rewired.lines[0] = line("1", 1, "2", 2, None);
+    assert_ne!(base_sig, model_topology_signature(&rewired));
+
+    let mut retyped = make();
+    retyped.blocks[0].block_type = "Gain".to_string();
+    assert_ne!(base_sig, model_topology_signature(&retyped));
+}
+
+#[test]
+fn signal_names_accumulate_through_subsystem_boundaries() {
+    let child_system = System {
+        properties: IndexMap::new(),
+        blocks: vec![
+            block(
+                "Inport",
+                "In1",
+                "10",
+                vec![port("out", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+            block(
+                "Outport",
+                "Out1",
+                "11",
+                vec![port("in", 1, None)],
+                None,
+                &[("Port", "1")],
+            ),
+        ],
+        lines: vec![line("10", 1, "11", 1, Some("sig_inner"))],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block(
+                "Constant",
+                "Src",
+                "1",
+                vec![port("out", 1, None)],
+                None,
+                &[],
+            ),
+            block(
+                "SubSystem",
+                "Sub",
+                "2",
+                vec![port("in", 1, None), port("out", 1, None)],
+                Some(child_system),
+                &[],
+            ),
+            block("Display", "Sink", "3", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![
+            line("1", 1, "2", 1, Some("sig_outer")),
+            line("2", 1, "3", 1, Some("sig_result")),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let targets = resolver.line_targets_for_line(&[], &system.lines[1]);
+
+    let src = targets
+        .iter()
+        .find(|target| target.path == "model/Src")
+        .unwrap_or_else(|| panic!("no model/Src target: {targets:?}"));
+    for name in ["sig_outer", "sig_inner", "sig_result"] {
+        assert!(
+            src.signal_names.iter().any(|n| n == name),
+            "expected alias {name:?} in {:?}",
+            src.signal_names
+        );
+    }
+}
+
+#[test]
+fn signal_names_accumulate_through_bus_creator() {
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+            block(
+                "BusCreator",
+                "BusCreator",
+                "3",
+                vec![
+                    port("in", 1, None),
+                    port("in", 2, None),
+                    port("out", 1, None),
+                ],
+                None,
+                &[],
+            ),
+            block("Display", "Sink", "4", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![
+            line("1", 1, "3", 1, Some("alpha")),
+            line("2", 1, "3", 2, Some("beta")),
+            line("3", 1, "4", 1, Some("bus")),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let targets = resolver.line_targets_for_line(&[], &system.lines[2]);
+
+    let alpha = targets
+        .iter()
+        .find(|target| target.path == "model/A")
+        .unwrap_or_else(|| panic!("no model/A target: {targets:?}"));
+    assert!(
+        alpha.signal_names.iter().any(|n| n == "alpha"),
+        "expected element name in {:?}",
+        alpha.signal_names
+    );
+    assert!(
+        alpha.signal_names.iter().any(|n| n == "bus"),
+        "expected bus line name in {:?}",
+        alpha.signal_names
+    );
+}
+
+#[test]
+fn signal_names_accumulate_through_mux() {
+    let system = System {
+        properties: props(&[("Name", "model")]),
+        blocks: vec![
+            block("Constant", "A", "1", vec![port("out", 1, None)], None, &[]),
+            block("Constant", "B", "2", vec![port("out", 1, None)], None, &[]),
+            block(
+                "Mux",
+                "Mux",
+                "3",
+                vec![
+                    port("in", 1, None),
+                    port("in", 2, None),
+                    port("out", 1, None),
+                ],
+                None,
+                &[],
+            ),
+            block("Display", "Sink", "4", vec![port("in", 1, None)], None, &[]),
+        ],
+        lines: vec![
+            line("1", 1, "3", 1, Some("alpha")),
+            line("2", 1, "3", 2, Some("beta")),
+            line("3", 1, "4", 1, Some("muxed")),
+        ],
+        annotations: Vec::new(),
+        chart: None,
+    };
+
+    let resolver = ConnectionTargetResolver::new(&system);
+    let targets = resolver.line_targets_for_line(&[], &system.lines[2]);
+
+    let alpha = targets
+        .iter()
+        .find(|target| target.path == "model/A")
+        .unwrap_or_else(|| panic!("no model/A target: {targets:?}"));
+    assert!(
+        alpha.signal_names.iter().any(|n| n == "alpha"),
+        "expected mux element name in {:?}",
+        alpha.signal_names
+    );
+    assert!(
+        alpha.signal_names.iter().any(|n| n == "muxed"),
+        "expected mux output line name in {:?}",
+        alpha.signal_names
+    );
 }

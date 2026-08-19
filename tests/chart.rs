@@ -131,3 +131,28 @@ end</P>
     let name_map = parser.get_system_to_chart_map();
     assert_eq!(name_map.get("Logic/MATLAB Function"), Some(&18u32));
 }
+
+#[test]
+fn matlab_function_blocks_are_captioned_with_their_function_name() {
+    use rustylink::model::SlxArchive;
+
+    let file = std::fs::File::open("simulink_test_models/Simulink_Blocks.slx")
+        .expect("open Simulink_Blocks.slx");
+    let archive = SlxArchive::from_reader(std::io::BufReader::new(file)).expect("read archive");
+    let mut system = archive.assembled_root_system().expect("assemble root");
+    let (charts, chart_map) = archive.parse_charts();
+    rustylink::parser::annotate_matlab_function_names(&mut system, &charts, &chart_map);
+
+    let name_of = |block_name: &str| {
+        system
+            .blocks
+            .iter()
+            .find(|b| b.name == block_name)
+            .and_then(|b| b.properties.get("MATLABFunctionName"))
+            .cloned()
+    };
+    // Simulink captions a MATLAB Function block with the function its code
+    // defines, not with the block's own name.
+    assert_eq!(name_of("MATLAB Function").as_deref(), Some("fcn"));
+    assert_eq!(name_of("MATLAB Function1").as_deref(), Some("test"));
+}

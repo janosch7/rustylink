@@ -1,4 +1,4 @@
-use rustylink::editor::block_catalog::{get_block_catalog, get_block_catalog_by_category};
+use rustylink::simulink_libraries::browser::{get_block_catalog, get_block_catalog_by_category};
 
 #[test]
 fn catalog_has_at_least_750_entries() {

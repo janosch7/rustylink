@@ -40,7 +40,159 @@ fn normalize_library_block_path(path: &str) -> Option<String> {
     Some(format!("{lib_norm}/{rest}"))
 }
 
+/// Fill a block body according to its [`BlockShape`], returning the background
+/// color actually painted (commented blocks use a fixed grey).  Shared by the
+/// editor and the viewer so both render identical block bodies — there is no
+/// per-block-type body-drawing code in either UI.
+pub fn fill_block_body(
+    painter: &egui::Painter,
+    rect: Rect,
+    shape: block_types::BlockShape,
+    bg: Color32,
+    commented: bool,
+) -> Color32 {
+    use block_types::BlockShape;
+    if commented {
+        let commented_bg = Color32::from_rgb(230, 230, 230);
+        painter.rect_filled(rect, 0.0, commented_bg);
+        return commented_bg;
+    }
+    match shape {
+        BlockShape::Triangle => {
+            // Gain-style: right-pointing triangle (left-top, right-center, left-bottom).
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.center().y),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            let mut tri = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            tri.fill = bg;
+            painter.add(egui::Shape::Path(tri));
+        }
+        BlockShape::Circle => {
+            let radius = rect.size().min_elem() / 2.0;
+            painter.circle_filled(rect.center(), radius, bg);
+        }
+        BlockShape::FilledBlack => {
+            painter.rect_filled(rect, 0.0, Color32::BLACK);
+        }
+        BlockShape::Goto => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+                egui::pos2(rect.left() - tab, rect.center().y),
+            ];
+            let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            path.fill = bg;
+            painter.add(egui::Shape::Path(path));
+        }
+        BlockShape::From => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right() + tab, rect.center().y),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            let mut path = egui::epaint::PathShape::closed_line(pts, Stroke::NONE);
+            path.fill = bg;
+            painter.add(egui::Shape::Path(path));
+        }
+        BlockShape::Rectangle => {
+            painter.rect_filled(rect, 6.0, bg);
+        }
+        BlockShape::Obround => {
+            // Fully rounded short ends (egui clamps the corner radius to half the
+            // shortest side, giving a stadium/obround).
+            painter.rect_filled(rect, rect.height() * 0.5, bg);
+        }
+        BlockShape::None => {
+            // The block's static renderer paints its own body; nothing here.
+        }
+    }
+    bg
+}
+
+/// Stroke a block body's outline according to its [`BlockShape`].  Shared by the
+/// editor and the viewer.
+pub fn stroke_block_body(
+    painter: &egui::Painter,
+    rect: Rect,
+    shape: block_types::BlockShape,
+    stroke: Stroke,
+) {
+    use block_types::BlockShape;
+    match shape {
+        BlockShape::Triangle => {
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.center().y),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::Circle => {
+            let radius = rect.size().min_elem() / 2.0;
+            painter.circle_stroke(rect.center(), radius, stroke);
+        }
+        BlockShape::FilledBlack => {}
+        BlockShape::Goto => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+                egui::pos2(rect.left() - tab, rect.center().y),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::From => {
+            let tab = rect.height() * 0.25;
+            let pts = vec![
+                egui::pos2(rect.left(), rect.top()),
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right() + tab, rect.center().y),
+                egui::pos2(rect.right(), rect.bottom()),
+                egui::pos2(rect.left(), rect.bottom()),
+            ];
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::closed_line(
+                pts, stroke,
+            )));
+        }
+        BlockShape::Rectangle => {
+            painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+        }
+        BlockShape::Obround => {
+            painter.rect_stroke(rect, rect.height() * 0.5, stroke, egui::StrokeKind::Inside);
+        }
+        BlockShape::None => {
+            // The block's static renderer paints its own outline; nothing here.
+        }
+    }
+}
+
 pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
+    let mut cfg = lookup_block_type_cfg(block);
+    // Port placement can depend on the block's own properties (a round Sum
+    // wraps its last input onto the bottom edge, the rectangular one does not).
+    let def = crate::simulink_libraries::resolve_definition(block);
+    if let Some(f) = def.port_overrides_fn {
+        let metadata = crate::simulink_libraries::metadata::extract_metadata(block, def);
+        cfg.port_position_overrides = f(block, &metadata).to_vec();
+    }
+    cfg
+}
+
+fn lookup_block_type_cfg(block: &Block) -> BlockTypeConfig {
     let map = block_types::get_block_type_config_map();
     let Ok(g) = map.read() else {
         return BlockTypeConfig::default();
@@ -58,10 +210,10 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
 
     if let Some(ref lib_path) = block.library_block_path {
         lib_candidates.push(lib_path.clone());
-        if let Some(n) = normalize_library_block_path(lib_path) {
-            if n != *lib_path {
-                lib_candidates.push(n);
-            }
+        if let Some(n) = normalize_library_block_path(lib_path)
+            && n != *lib_path
+        {
+            lib_candidates.push(n);
         }
     }
     // Always check SourceBlock as well (not only when library_block_path is absent),
@@ -70,10 +222,10 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
         if block.library_block_path.as_deref() != Some(source_block.as_str()) {
             lib_candidates.push(source_block.clone());
         }
-        if let Some(n) = normalize_library_block_path(source_block) {
-            if !lib_candidates.contains(&n) {
-                lib_candidates.push(n);
-            }
+        if let Some(n) = normalize_library_block_path(source_block)
+            && !lib_candidates.contains(&n)
+        {
+            lib_candidates.push(n);
         }
     }
 
@@ -106,18 +258,16 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
     // Because `register_virtual_keys` pre-registers all normalized forms, these
     // are plain O(1) hash lookups – no linear scan needed.
     for seg in &last_segments {
-        use crate::builtin_libraries::virtual_library::{
-            humanize_camel_case, normalize_block_name,
-        };
+        use crate::simulink_libraries::stubs::{humanize_camel_case, normalize_block_name};
         let seg_norm = normalize_block_name(seg);
         if let Some(cfg) = g.get(seg_norm.as_str()) {
             return cfg.clone();
         }
         let seg_human_norm = normalize_block_name(&humanize_camel_case(seg));
-        if seg_human_norm != seg_norm {
-            if let Some(cfg) = g.get(seg_human_norm.as_str()) {
-                return cfg.clone();
-            }
+        if seg_human_norm != seg_norm
+            && let Some(cfg) = g.get(seg_human_norm.as_str())
+        {
+            return cfg.clone();
         }
     }
 
@@ -127,10 +277,9 @@ pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
     // Simulink encodes a matrix-multiply.  Show the dedicated SVG for it.
     if block.block_type == "Product"
         && block.properties.get("Multiplication").map(|v| v.trim()) == Some("Matrix(*)")
+        && let Some(cfg) = g.get("matrix multiply")
     {
-        if let Some(cfg) = g.get("matrix multiply") {
-            return cfg.clone();
-        }
+        return cfg.clone();
     }
 
     // Phase 4 – generic block-type fallback (lowest priority).
@@ -195,6 +344,7 @@ pub(crate) fn port_label_display_name(
     };
 
     subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
         .or_else(explicit_port_name)
         .unwrap_or_else(fallback_name)
 }
@@ -234,10 +384,25 @@ fn subsystem_boundary_port_index(block: &Block) -> u32 {
         .unwrap_or(1)
 }
 
+/// Strip Simulink's default `In<N>` / `Out<N>` boundary-block naming so a
+/// subsystem shows the port *number* (what the Inport block's own icon draws),
+/// while user-chosen names such as `u` or `theta` are kept verbatim.
+fn simplify_boundary_name(name: &str) -> String {
+    for prefix in ["In", "Out"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.chars().all(|c| c.is_ascii_digit())
+        {
+            return rest.to_string();
+        }
+    }
+    name.to_string()
+}
+
 fn boundary_block_display_name(block: &Block) -> Option<String> {
     let name = block.name.trim();
     if !name.is_empty() {
-        return Some(name.to_string());
+        return Some(simplify_boundary_name(name));
     }
 
     block
@@ -470,6 +635,380 @@ pub fn render_center_glyph_maximized(
     );
 }
 
+/// Draw a small piece of typeset math (a horizontal fraction bar, a raised
+/// superscript, or an overbar) centred in `rect`.  Simulink draws these block
+/// icons as 2-D math that a single one-line glyph string can't reproduce, so we
+/// paint them here.  `spec` is a compact notation understood by this painter:
+///
+/// * `frac:NUM/DEN` – numerator over denominator with a horizontal bar
+///   (`frac:1/s`, `frac:(z-1)/z`, `frac:K(z-1)/Ts z`).
+/// * `sup:BASE^SUP` – `BASE` with a raised, smaller superscript
+///   (`sup:z^-2`, `sup:e^u`, `sup:u^2`).  Text after a space in `SUP` returns
+///   to the baseline, so `sup:A^H A` typesets `AᴴA`.
+/// * `over:BASE` – `BASE` with an overbar (conjugate, e.g. `over:u` → `ū`).
+/// * `lines:A|B` – stacked, centred lines at a common font size (e.g. the
+///   Descriptor State-Space icon `lines:Eẋ = Ax + Bu|y = Cx + Du`).
+///
+/// Anything else is drawn as a plain maximised glyph (same as a `Utf8` icon).
+pub fn draw_math_icon(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    spec: &str,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    let avail = compute_icon_available_rect(rect, font_scale, port_label_widths);
+    if avail.width() <= 1.0 || avail.height() <= 1.0 {
+        return;
+    }
+    if let Some(rest) = spec.strip_prefix("frac:") {
+        let (num, den) = rest.split_once('/').unwrap_or((rest, ""));
+        draw_fraction(painter, &avail, num.trim(), den.trim(), color);
+    } else if let Some(rest) = spec.strip_prefix("sup:") {
+        let (base, sup) = rest.split_once('^').unwrap_or((rest, ""));
+        let (sup, tail) = sup.split_once(' ').unwrap_or((sup, ""));
+        draw_superscript(painter, &avail, base, sup, tail, color);
+    } else if let Some(base) = spec.strip_prefix("over:") {
+        draw_overbar(painter, &avail, base, color);
+    } else if let Some(rest) = spec.strip_prefix("lines:") {
+        draw_stacked_lines(painter, &avail, rest, color);
+    } else {
+        render_center_glyph_maximized(painter, rect, font_scale, spec, color, port_label_widths);
+    }
+}
+
+/// `|`-separated lines stacked vertically and centred, all at one font size.
+fn draw_stacked_lines(painter: &egui::Painter, avail: &Rect, spec: &str, color: Color32) {
+    let lines: Vec<&str> = spec.split('|').map(str::trim).collect();
+    if lines.is_empty() {
+        return;
+    }
+    let n = lines.len() as f32;
+    let row = Vec2::new(avail.width() * 0.96, (avail.height() * 0.94) / n);
+    let font_px = lines
+        .iter()
+        .map(|l| fit_font_px(painter, l, row))
+        .fold(f32::INFINITY, f32::min)
+        .clamp(5.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let step = font_px * 1.16;
+    let top = avail.center().y - step * (n - 1.0) * 0.5;
+    for (i, line) in lines.iter().enumerate() {
+        painter.text(
+            Pos2::new(avail.center().x, top + step * i as f32),
+            Align2::CENTER_CENTER,
+            *line,
+            font.clone(),
+            color,
+        );
+    }
+}
+
+/// Draw a line-art block icon from a compact notation.
+///
+/// Simulink draws many icons (source waveforms, saturation/backlash curves,
+/// scope screens, verification plots) as vector line art rather than as a
+/// glyph.  `spec` is a `;`-separated list of drawing commands whose coordinates
+/// are normalised to `0.0..=1.0` inside the icon area, with `y` pointing
+/// **down** so the notation reads like screen space:
+///
+/// * `p X,Y X,Y …` – polyline through the listed points.
+/// * `a X,Y X,Y …` – same, but faint: Simulink's thin grey axis cross.
+/// * `b X0,Y0,X1,Y1` – translucent filled band (Simulink's grey limit bands).
+/// * `r X0,Y0,X1,Y1` – stroked rectangle.
+/// * `f X0,Y0,X1,Y1` – solid rectangle (Simulink's black bus bars).
+/// * `c CX,CY,R` – stroked circle (`R` is a fraction of the icon width).
+/// * `d CX,CY,R` – filled dot.
+/// * `o CX,CY,W,H` – stroked obround (the In/Out ports of a subsystem preview).
+/// * `t X,Y,H TEXT` – `TEXT` centred at `X,Y` with cap height `H` (a fraction
+///   of the icon height), for the letters Simulink sets inside its pictograms
+///   (`A ⇒ D`, the `U` of Is Triangular).
+///
+/// Unknown commands are skipped, so a malformed spec degrades to blank rather
+/// than panicking.
+pub fn draw_plot_icon(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    spec: &str,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    let avail = compute_icon_available_rect(rect, font_scale, port_label_widths);
+    if avail.width() <= 1.0 || avail.height() <= 1.0 {
+        return;
+    }
+    let at = |x: f32, y: f32| {
+        Pos2::new(
+            avail.left() + x * avail.width(),
+            avail.top() + y * avail.height(),
+        )
+    };
+    let width = (avail.width().min(avail.height()) * 0.055).clamp(0.8, 2.2);
+    let stroke = Stroke::new(width, color);
+    let faint = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 90);
+    let axis_stroke = Stroke::new((width * 0.7).max(0.7), faint);
+    let band = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 46);
+
+    for cmd in spec.split(';') {
+        let cmd = cmd.trim();
+        let Some((kind, args)) = cmd.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let nums: Vec<f32> = args
+            .split([' ', ','])
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse::<f32>().ok())
+            .collect();
+        match kind {
+            "p" | "a" => {
+                let pts: Vec<Pos2> = nums.chunks_exact(2).map(|c| at(c[0], c[1])).collect();
+                if pts.len() >= 2 {
+                    let s = if kind == "a" { axis_stroke } else { stroke };
+                    painter.add(egui::Shape::line(pts, s));
+                }
+            }
+            "b" | "r" | "f" if nums.len() >= 4 => {
+                let r = Rect::from_two_pos(at(nums[0], nums[1]), at(nums[2], nums[3]));
+                match kind {
+                    "b" => {
+                        painter.rect_filled(r, 0.0, band);
+                    }
+                    "f" => {
+                        painter.rect_filled(r, 0.0, color);
+                    }
+                    _ => {
+                        painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Inside);
+                    }
+                }
+            }
+            "o" if nums.len() >= 4 => {
+                let c = at(nums[0], nums[1]);
+                let half = Vec2::new(nums[2] * avail.width(), nums[3] * avail.height()) * 0.5;
+                let r = Rect::from_center_size(c, half * 2.0);
+                painter.rect_stroke(r, r.height() * 0.5, stroke, egui::StrokeKind::Inside);
+            }
+            "t" if nums.len() >= 3 => {
+                let Some((_, text)) = args.split_once(char::is_whitespace) else {
+                    continue;
+                };
+                painter.text(
+                    at(nums[0], nums[1]),
+                    Align2::CENTER_CENTER,
+                    text.trim(),
+                    egui::FontId::proportional((nums[2] * avail.height()).clamp(4.0, 40.0)),
+                    color,
+                );
+            }
+            "c" | "d" if nums.len() >= 3 => {
+                let c = at(nums[0], nums[1]);
+                let r = nums[2] * avail.width();
+                if kind == "c" {
+                    painter.circle_stroke(c, r, stroke);
+                } else {
+                    painter.circle_filled(c, r, color);
+                }
+            }
+            // Circular arc `cx,cy,r,from,to` (angles in turns, clockwise on
+            // screen); `sa` puts an arrow head on the end, `sb` on both ends.
+            // The radius is a fraction of the smaller side so the arc stays a
+            // circle in a non-square icon area.
+            "s" | "sa" | "sb" if nums.len() >= 5 => {
+                let c = at(nums[0], nums[1]);
+                let r = nums[2] * avail.width().min(avail.height());
+                let (a0, a1) = (
+                    nums[3] * std::f32::consts::TAU,
+                    nums[4] * std::f32::consts::TAU,
+                );
+                let steps = 48;
+                let point = |a: f32| Pos2::new(c.x + r * a.cos(), c.y + r * a.sin());
+                let pts: Vec<Pos2> = (0..=steps)
+                    .map(|i| point(a0 + (a1 - a0) * i as f32 / steps as f32))
+                    .collect();
+                painter.add(egui::Shape::line(pts, stroke));
+                let head = |a: f32, backwards: bool| {
+                    let tip = point(a);
+                    // Tangent of the arc at `a`, pointing along the travel
+                    // direction, and the inward normal.
+                    let dir = if (a1 > a0) != backwards { 1.0 } else { -1.0 };
+                    let t = Vec2::new(-a.sin(), a.cos()) * dir;
+                    let n = Vec2::new(a.cos(), a.sin());
+                    let len = (r * 0.28).clamp(2.0, 10.0);
+                    painter.add(egui::Shape::line(
+                        vec![
+                            tip - t * len + n * len * 0.5,
+                            tip,
+                            tip - t * len - n * len * 0.5,
+                        ],
+                        stroke,
+                    ));
+                };
+                if kind == "sa" || kind == "sb" {
+                    head(a1, false);
+                }
+                if kind == "sb" {
+                    head(a0, true);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Font size (points) at which `text` fits within `max` bounds.
+fn fit_font_px(painter: &egui::Painter, text: &str, max: Vec2) -> f32 {
+    if text.is_empty() {
+        return 100.0;
+    }
+    let ref_px = 100.0_f32;
+    let g = painter.layout_no_wrap(
+        text.to_string(),
+        egui::FontId::proportional(ref_px),
+        Color32::TRANSPARENT,
+    );
+    let s = g.size();
+    if s.x <= 1e-3 || s.y <= 1e-3 {
+        return ref_px;
+    }
+    ref_px * (max.x / s.x).min(max.y / s.y)
+}
+
+fn text_width(painter: &egui::Painter, text: &str, font_px: f32) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    painter
+        .layout_no_wrap(
+            text.to_string(),
+            egui::FontId::proportional(font_px),
+            Color32::TRANSPARENT,
+        )
+        .size()
+        .x
+}
+
+/// Numerator over a horizontal bar over denominator.
+fn draw_fraction(painter: &egui::Painter, avail: &Rect, num: &str, den: &str, color: Color32) {
+    let row_max = Vec2::new(avail.width() * 0.94, avail.height() * 0.44);
+    let font_px = fit_font_px(painter, num, row_max)
+        .min(fit_font_px(painter, den, row_max))
+        .clamp(6.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let cx = avail.center().x;
+    let cy = avail.center().y;
+    let gap = font_px * 0.14;
+    painter.text(
+        Pos2::new(cx, cy - gap),
+        Align2::CENTER_BOTTOM,
+        num,
+        font.clone(),
+        color,
+    );
+    painter.text(
+        Pos2::new(cx, cy + gap),
+        Align2::CENTER_TOP,
+        den,
+        font,
+        color,
+    );
+    let bar_w = text_width(painter, num, font_px).max(text_width(painter, den, font_px)) * 1.08;
+    let stroke = Stroke::new((font_px * 0.07).clamp(1.0, 3.0), color);
+    painter.line_segment(
+        [
+            Pos2::new(cx - bar_w * 0.5, cy),
+            Pos2::new(cx + bar_w * 0.5, cy),
+        ],
+        stroke,
+    );
+}
+
+/// `base` with a smaller superscript raised above the baseline.
+fn draw_superscript(
+    painter: &egui::Painter,
+    avail: &Rect,
+    base: &str,
+    sup: &str,
+    tail: &str,
+    color: Color32,
+) {
+    if sup.is_empty() {
+        let px = fit_font_px(painter, base, avail.size() * 0.9).clamp(6.0, 40.0);
+        painter.text(
+            avail.center(),
+            Align2::CENTER_CENTER,
+            base,
+            egui::FontId::proportional(px),
+            color,
+        );
+        return;
+    }
+    // Size so base (full) + superscript (0.62×, raised) fit the available box.
+    let sup_ratio = 0.62_f32;
+    let rise = 0.42_f32; // fraction of base height the superscript rises
+    let ref_px = 100.0_f32;
+    let bw = text_width(painter, base, ref_px);
+    let sw = text_width(painter, sup, ref_px * sup_ratio);
+    let tw = text_width(painter, tail, ref_px);
+    let total_w = bw + sw + tw;
+    let total_h = ref_px * (1.0 + rise);
+    let font_px = if total_w <= 1e-3 {
+        ref_px
+    } else {
+        (ref_px * ((avail.width() * 0.94) / total_w).min((avail.height() * 0.94) / total_h))
+            .clamp(6.0, 40.0)
+    };
+    let base_font = egui::FontId::proportional(font_px);
+    let sup_font = egui::FontId::proportional(font_px * sup_ratio);
+    let base_w = text_width(painter, base, font_px);
+    let sup_w = text_width(painter, sup, font_px * sup_ratio);
+    let run_w = base_w + sup_w + text_width(painter, tail, font_px);
+    let left = avail.center().x - run_w * 0.5;
+    let cy = avail.center().y;
+    painter.text(
+        Pos2::new(left, cy),
+        Align2::LEFT_CENTER,
+        base,
+        base_font.clone(),
+        color,
+    );
+    painter.text(
+        Pos2::new(left + base_w, cy - font_px * rise * 0.5),
+        Align2::LEFT_CENTER,
+        sup,
+        sup_font,
+        color,
+    );
+    if !tail.is_empty() {
+        painter.text(
+            Pos2::new(left + base_w + sup_w, cy),
+            Align2::LEFT_CENTER,
+            tail,
+            base_font,
+            color,
+        );
+    }
+}
+
+/// `base` with a horizontal overbar (Simulink's conjugate icon `ū`).
+fn draw_overbar(painter: &egui::Painter, avail: &Rect, base: &str, color: Color32) {
+    let font_px = fit_font_px(painter, base, avail.size() * Vec2::new(0.8, 0.78)).clamp(6.0, 40.0);
+    let font = egui::FontId::proportional(font_px);
+    let cx = avail.center().x;
+    let cy = avail.center().y + font_px * 0.08;
+    painter.text(Pos2::new(cx, cy), Align2::CENTER_CENTER, base, font, color);
+    let w = text_width(painter, base, font_px) * 1.05;
+    let bar_y = cy - font_px * 0.52;
+    let stroke = Stroke::new((font_px * 0.07).clamp(1.0, 3.0), color);
+    painter.line_segment(
+        [
+            Pos2::new(cx - w * 0.5, bar_y),
+            Pos2::new(cx + w * 0.5, bar_y),
+        ],
+        stroke,
+    );
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct SvgCacheKey {
     path: &'static str,
@@ -483,14 +1022,14 @@ struct SvgCachedTexture {
     px_size: [usize; 2],
 }
 
-pub fn embedded_egui_sans_fontdb() -> Option<Arc<resvg::usvg::fontdb::Database>> {
-    static FONTDB: OnceLock<Option<Arc<resvg::usvg::fontdb::Database>>> = OnceLock::new();
+pub fn embedded_egui_sans_fontdb() -> Option<Arc<usvg::fontdb::Database>> {
+    static FONTDB: OnceLock<Option<Arc<usvg::fontdb::Database>>> = OnceLock::new();
     FONTDB
         .get_or_init(|| {
             let font_defs = egui::FontDefinitions::default();
             let ubuntu = font_defs.font_data.get("Ubuntu-Light")?;
 
-            let mut db = resvg::usvg::fontdb::Database::new();
+            let mut db = usvg::fontdb::Database::new();
             db.load_font_data(ubuntu.as_ref().font.as_ref().to_vec());
 
             // Ensure CSS generic `sans-serif` resolves to the embedded font.
@@ -523,8 +1062,7 @@ fn svg_dest_size_points(avail_points: Vec2, px_size: [usize; 2], pixels_per_poin
 
     let scale = (avail_points.x / w_points)
         .min(avail_points.y / h_points)
-        .min(1.0)
-        .max(0.0);
+        .clamp(0.0, 1.0);
     Vec2::new(w_points * scale, h_points * scale)
 }
 
@@ -553,7 +1091,7 @@ fn get_or_create_svg_texture(
     }
 
     let bytes = icon_assets::get(path)?;
-    let mut options = resvg::usvg::Options::default();
+    let mut options = usvg::Options::default();
     // usvg's font database is empty by default; populate it from egui's embedded fonts.
     // This avoids relying on system-installed fonts.
     if let Some(db) = embedded_egui_sans_fontdb() {
@@ -595,87 +1133,159 @@ static ICON_WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn warn_missing_icon(block_type: &str, block_path: &str) {
     let warned = ICON_WARNED.get_or_init(|| Mutex::new(HashSet::new()));
-    if let Ok(mut set) = warned.lock() {
-        if set.insert(block_type.to_string()) {
-            eprintln!(
-                "\x1b[33m[rustylink] WARNING: {} at {} does not have a corresponding virtual library block\x1b[0m",
-                block_type, block_path
+    if let Ok(mut set) = warned.lock()
+        && set.insert(block_type.to_string())
+    {
+        eprintln!(
+            "\x1b[33m[rustylink] WARNING: {} at {} does not have a corresponding virtual library block\x1b[0m",
+            block_type, block_path
+        );
+    }
+}
+
+/// Draw a single [`IconSpec`] centered in `rect`.
+///
+/// Shared by the config-map icon path (`render_block_icon`) and the
+/// definition-driven icon path so the catalog definition's `icon` and the
+/// legacy registry render identically.  The rendered glyph is maximized to fill
+/// the available center area while leaving a margin to the block border and
+/// avoiding overlap with optional inside-block port labels.
+pub fn draw_icon_spec(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    icon: &block_types::IconSpec,
+    color: Color32,
+    port_label_widths: Option<PortLabelMaxWidths>,
+) {
+    match icon {
+        block_types::IconSpec::Utf8(glyph) => {
+            render_center_glyph_maximized(
+                painter,
+                rect,
+                font_scale,
+                glyph,
+                color,
+                port_label_widths,
             );
+        }
+        block_types::IconSpec::Math(spec) => {
+            draw_math_icon(painter, rect, font_scale, spec, color, port_label_widths);
+        }
+        block_types::IconSpec::Plot(spec) => {
+            draw_plot_icon(painter, rect, font_scale, spec, color, port_label_widths);
+        }
+        block_types::IconSpec::Phosphor(name) => {
+            let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
+            let avail_points = avail_rect.size();
+            if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
+                return;
+            }
+            let font_id = egui::FontId::proportional(avail_points.y * 0.7);
+            painter.text(
+                avail_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                name,
+                font_id,
+                color,
+            );
+        }
+        block_types::IconSpec::Svg(path) => {
+            let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
+            let avail_points = avail_rect.size();
+            if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
+                return;
+            }
+
+            let ctx = painter.ctx();
+            let pixels_per_point = ctx.pixels_per_point();
+            let request_px = [
+                (avail_points.x * pixels_per_point).round().max(1.0) as usize,
+                (avail_points.y * pixels_per_point).round().max(1.0) as usize,
+            ];
+
+            let Some(svg) = get_or_create_svg_texture(ctx, path, request_px) else {
+                return;
+            };
+
+            let dest_size = svg_dest_size_points(avail_points, svg.px_size, pixels_per_point);
+            if dest_size.x <= 1.0 || dest_size.y <= 1.0 {
+                return;
+            }
+
+            let dest_rect = Rect::from_center_size(avail_rect.center(), dest_size);
+            let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+            painter.image(svg.texture.id(), dest_rect, uv, Color32::WHITE);
         }
     }
 }
 
-/// Render an icon in the center of the block according to its type.
-///
-/// The rendered glyph is maximized to fill the available center area while:
-/// - leaving at least 10% margin to the block border on all sides
-/// - avoiding overlap with optional inside-block port labels (left/right)
+/// Draw a single-glyph [`IconSpec`] (Utf8 / Phosphor) rotated 90° clockwise,
+/// centered in `rect`.  Used only by the far-zoom dashboard fallback for the
+/// Toggle/Rocker switches, which Simulink draws vertically.  Non-glyph specs
+/// (Svg / Math) fall back to the unrotated [`draw_icon_spec`].
+pub fn draw_icon_spec_rotated_quarter(
+    painter: &egui::Painter,
+    rect: &Rect,
+    icon: &block_types::IconSpec,
+    color: Color32,
+) {
+    let glyph: &str = match icon {
+        block_types::IconSpec::Utf8(g) => g,
+        block_types::IconSpec::Phosphor(n) => n,
+        _ => {
+            draw_icon_spec(painter, rect, 1.0, icon, color, None);
+            return;
+        }
+    };
+    let avail = compute_icon_available_rect(rect, 1.0, None);
+    // The glyph is rotated, so its unrotated height must fit the available
+    // width (and vice versa) — size against the smaller dimension.
+    let target = avail.size().min_elem();
+    if target <= 1.0 {
+        return;
+    }
+    let font_id = egui::FontId::proportional(target * 0.7);
+    let galley = painter.layout_no_wrap(glyph.to_owned(), font_id, color);
+    let angle = std::f32::consts::FRAC_PI_2;
+    let rot = egui::emath::Rot2::from_angle(angle);
+    // TextShape rotates the galley around its `pos` (top-left); offset so the
+    // galley's visual center lands on the available rect's center.
+    let pos = avail.center() - rot * (galley.size() * 0.5);
+    let mut shape = egui::epaint::TextShape::new(pos, galley, color);
+    shape.angle = angle;
+    painter.add(shape);
+}
+
+/// Contrast color for a glyph icon drawn on this block's background.
+pub fn block_icon_color(block: &Block) -> Color32 {
+    let cfg = get_block_type_cfg(block);
+    super::ui::colors::contrast_color(super::ui::colors::block_base_color(block, &cfg))
+}
+
 pub fn render_block_icon(
     painter: &egui::Painter,
     block: &Block,
     rect: &Rect,
     font_scale: f32,
+    icon_color: Color32,
     port_label_widths: Option<PortLabelMaxWidths>,
 ) {
-    let dark_icon = Color32::from_rgb(40, 40, 40); // dark color for icons
     // Always prefer library-specific identifiers (library path / SourceBlock)
     // over generic `block_type` mappings.
     let cfg = get_block_type_cfg(block);
+    // Glyph icons use the caller-provided contrast color (matching the actual
+    // block fill); SVGs keep their own colors.
+    let dark_icon = icon_color;
     if let Some(icon) = cfg.icon {
-        match icon {
-            block_types::IconSpec::Utf8(glyph) => {
-                render_center_glyph_maximized(
-                    painter,
-                    rect,
-                    font_scale,
-                    glyph,
-                    dark_icon,
-                    port_label_widths,
-                );
-            }
-            block_types::IconSpec::Phosphor(name) => {
-                let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
-                let avail_points = avail_rect.size();
-                if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
-                    return;
-                }
-                let font_id = egui::FontId::proportional(avail_points.y * 0.7);
-                painter.text(
-                    avail_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    name,
-                    font_id,
-                    dark_icon,
-                );
-            }
-            block_types::IconSpec::Svg(path) => {
-                let avail_rect = compute_icon_available_rect(rect, font_scale, port_label_widths);
-                let avail_points = avail_rect.size();
-                if avail_points.x <= 1.0 || avail_points.y <= 1.0 {
-                    return;
-                }
-
-                let ctx = painter.ctx();
-                let pixels_per_point = ctx.pixels_per_point();
-                let request_px = [
-                    (avail_points.x * pixels_per_point).round().max(1.0) as usize,
-                    (avail_points.y * pixels_per_point).round().max(1.0) as usize,
-                ];
-
-                let Some(svg) = get_or_create_svg_texture(ctx, path, request_px) else {
-                    return;
-                };
-
-                let dest_size = svg_dest_size_points(avail_points, svg.px_size, pixels_per_point);
-                if dest_size.x <= 1.0 || dest_size.y <= 1.0 {
-                    return;
-                }
-
-                let dest_rect = Rect::from_center_size(avail_rect.center(), dest_size);
-                let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
-                painter.image(svg.texture.id(), dest_rect, uv, Color32::WHITE);
-            }
-        }
+        draw_icon_spec(
+            painter,
+            rect,
+            font_scale,
+            &icon,
+            dark_icon,
+            port_label_widths,
+        );
     } else {
         // No icon for this block.  Only warn for truly unknown blocks.
         // Known virtual-library blocks that simply lack a dedicated SVG
@@ -919,39 +1529,6 @@ pub fn render_manual_switch(
     }
 }
 
-/// Function type for custom block-interior renderers.
-///
-/// A renderer receives the egui painter, the block data, the block's screen
-/// rectangle, and the current font scale factor.
-pub type InteriorRendererFn = fn(&egui::Painter, &Block, &Rect, f32, f32);
-
-fn interior_renderer_registry()
--> &'static std::collections::HashMap<&'static str, InteriorRendererFn> {
-    static REG: OnceLock<std::collections::HashMap<&'static str, InteriorRendererFn>> =
-        OnceLock::new();
-    REG.get_or_init(|| {
-        let mut m: std::collections::HashMap<&'static str, InteriorRendererFn> =
-            std::collections::HashMap::new();
-        m.insert("Sum", render_sum_block);
-        m.insert("Goto", render_goto_from_block);
-        m.insert("From", render_goto_from_block);
-        // Register dashboard / UI block renderers for all egui builds so
-        // non-dashboard mode still shows the same visuals, only without the
-        // interactive/editable behavior.
-        for &(block_type, renderer) in super::dashboard_widgets::DASHBOARD_RENDERERS {
-            m.insert(block_type, renderer);
-        }
-        m
-    })
-}
-
-/// Look up a custom interior renderer for the given block type, if any.
-///
-/// Returns `None` for block types that use the standard icon / label rendering.
-pub fn get_interior_renderer(block_type: &str) -> Option<InteriorRendererFn> {
-    interior_renderer_registry().get(block_type).copied()
-}
-
 /// Draw the interior labels (+/-) for a Sum block.
 ///
 /// The surrounding circle fill and stroke are drawn in the main ui loop's
@@ -963,58 +1540,392 @@ pub fn get_interior_renderer(block_type: &str) -> Option<InteriorRendererFn> {
 /// The `Inputs` property format used by Simulink is e.g. `|++`: the first
 /// character is an ignored spacer, the subsequent characters are the per-port
 /// operators in order ('+' or '-').
-pub fn render_sum_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, _name_font_factor: f32) {
-    let operators: Vec<char> = block
-        .properties
-        .get("Inputs")
-        .map(|s| s.chars().skip(1).collect())
-        .unwrap_or_default();
-    let left_op = operators.first().copied().unwrap_or('+');
-    let bottom_op = operators.get(1).copied().unwrap_or('+');
+pub fn render_sum_block(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    operators: &[char],
+    round: bool,
+    colors: BodyColors,
+) {
+    let stroke = Stroke::new((1.6 * font_scale).clamp(1.0, 3.0), colors.border);
+    if round {
+        let radius = rect.size().min_elem() / 2.0;
+        painter.circle(rect.center(), radius, colors.fill, stroke);
+    } else {
+        painter.rect_filled(*rect, 4.0, colors.fill);
+        painter.rect_stroke(*rect, 4.0, stroke, egui::StrokeKind::Inside);
+    }
 
-    let font_size = (rect.height() * 0.32).clamp(8.0, 22.0) * font_scale;
-    let color = Color32::from_rgb(32, 32, 32);
-    let font_id = egui::FontId::monospace(font_size);
+    let font_size = (rect.height() * 0.34).clamp(8.0, 22.0) * font_scale;
+    let font_id = egui::FontId::proportional(font_size);
+    let text = colors.text;
 
-    // Left input operator – left quarter of the circle, vertically centred
-    let left_pos = Pos2::new(rect.left() + rect.width() * 0.22, rect.center().y);
-    painter.text(
-        left_pos,
-        egui::Align2::CENTER_CENTER,
-        left_op.to_string(),
-        font_id.clone(),
-        color,
-    );
-
-    // Bottom input operator – horizontally centred, bottom quarter of the circle
-    let bottom_pos = Pos2::new(rect.center().x, rect.bottom() - rect.height() * 0.22);
-    painter.text(
-        bottom_pos,
-        egui::Align2::CENTER_CENTER,
-        bottom_op.to_string(),
-        font_id,
-        color,
-    );
+    if round {
+        // Classic round Sum: the last operator sits at the bottom (matching the
+        // bottom-placed last input port), the rest stack down the left edge.
+        let ops: &[char] = if operators.is_empty() {
+            &['+', '+']
+        } else {
+            operators
+        };
+        let side = ops.len() - 1;
+        for (i, op) in ops[..side].iter().enumerate() {
+            let f = (i as f32 + 1.0) / (side as f32 + 1.0);
+            painter.text(
+                Pos2::new(
+                    rect.left() + rect.width() * 0.28,
+                    rect.top() + (0.18 + f * 0.44) * rect.height(),
+                ),
+                Align2::CENTER_CENTER,
+                sign_str(*op),
+                font_id.clone(),
+                text,
+            );
+        }
+        painter.text(
+            Pos2::new(
+                rect.center().x + rect.width() * 0.04,
+                rect.bottom() - rect.height() * 0.26,
+            ),
+            Align2::CENTER_CENTER,
+            sign_str(ops[side]),
+            font_id,
+            text,
+        );
+    } else {
+        // Rectangular Add: stack the per-input signs down the left edge.
+        let ops: &[char] = if operators.is_empty() {
+            &['+', '+']
+        } else {
+            operators
+        };
+        let n = ops.len();
+        for (i, op) in ops.iter().enumerate() {
+            let f = (i as f32 + 1.0) / (n as f32 + 1.0);
+            painter.text(
+                Pos2::new(
+                    rect.left() + rect.width() * 0.24,
+                    rect.top() + f * rect.height(),
+                ),
+                Align2::CENTER_CENTER,
+                sign_str(*op),
+                font_id.clone(),
+                text,
+            );
+        }
+    }
 }
 
-/// Render Goto/From blocks with their GotoTag label instead of port labels
-pub fn render_goto_from_block(painter: &egui::Painter, block: &Block, rect: &Rect, font_scale: f32, name_font_factor: f32) {
-    let label = block
+/// Resolved body colors (fill / outline / interior text) passed to the
+/// self-painting metadata-aware renderers (Sum, Logic, Product …).
+#[derive(Clone, Copy)]
+pub struct BodyColors {
+    pub fill: Color32,
+    pub border: Color32,
+    pub text: Color32,
+}
+
+/// Map a Sum/Product operator char to a display glyph (proper minus / division
+/// signs instead of the ASCII forms).
+fn sign_str(op: char) -> &'static str {
+    match op {
+        '-' => "\u{2212}", // −
+        '/' => "\u{00F7}", // ÷
+        '*' => "\u{00D7}", // ×
+        _ => "+",
+    }
+}
+
+/// Parse a Simulink `Inputs` string into per-port operator chars.
+///
+/// Accepts numeric forms (`"2"` → two `+`), sign strings (`"+-"`, `"|++"` –
+/// the `|` spacer and other layout chars are ignored) for Sum, and `*`/`/`
+/// forms for Product.
+pub fn parse_input_operators(inputs: &str, default: char) -> Vec<char> {
+    let s = inputs.trim();
+    if s.is_empty() {
+        return vec![default, default];
+    }
+    if let Ok(n) = s.parse::<usize>() {
+        return vec![default; n.max(1)];
+    }
+    let ops: Vec<char> = s
+        .chars()
+        .filter(|c| matches!(c, '+' | '-' | '*' | '/'))
+        .collect();
+    if ops.is_empty() {
+        vec![default, default]
+    } else {
+        ops
+    }
+}
+
+/// Draw a Product/Divide block interior (the shared passes draw the body).
+///
+/// When every input multiplies, a single centred `×` is shown (Simulink's
+/// element-wise product icon).  When any input divides, the per-port `×`/`÷`
+/// signs are stacked down the left edge.  Matrix multiplication adds brackets.
+pub fn render_product_block(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    operators: &[char],
+    matrix: bool,
+    text: Color32,
+) {
+    let has_div = operators.contains(&'/');
+    if !has_div {
+        // A single multiply port collapses the input vector: Simulink shows the
+        // product-of-elements symbol `∏`, drawn as large as the block allows,
+        // rather than the element-wise `×`.  It is drawn rather than typeset so
+        // the bar overhangs both legs the way Simulink's icon does.
+        if matches!(operators, [c] if *c == '*') && !matrix {
+            draw_plot_icon(
+                painter,
+                rect,
+                font_scale,
+                "p 0.08,0.16 0.92,0.16; p 0.26,0.16 0.26,0.90; p 0.74,0.16 0.74,0.90",
+                text,
+                None,
+            );
+            return;
+        }
+        let font_size = (rect.height() * 0.5).clamp(9.0, 30.0) * font_scale;
+        let font_id = egui::FontId::proportional(font_size);
+        let glyph = if matrix {
+            "[\u{00D7}]"
+        } else {
+            "\u{00D7}" // ×
+        };
+        painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font_id, text);
+        return;
+    }
+    let font_size = (rect.height() * 0.34).clamp(8.0, 22.0) * font_scale;
+    let font_id = egui::FontId::proportional(font_size);
+    let n = operators.len().max(1);
+    for (i, op) in operators.iter().enumerate() {
+        let f = (i as f32 + 1.0) / (n as f32 + 1.0);
+        painter.text(
+            Pos2::new(
+                rect.left() + rect.width() * 0.30,
+                rect.top() + f * rect.height(),
+            ),
+            Align2::CENTER_CENTER,
+            sign_str(*op),
+            font_id.clone(),
+            text,
+        );
+    }
+}
+
+/// Draw a Logic (Logical Operator) block.
+///
+/// `icon_shape` selects between the rectangular text box (`"rectangular"`,
+/// Simulink's default) and the distinctive IEEE gate symbol (`"distinctive"`).
+/// `operator` selects the gate (AND/OR/NOT/NAND/NOR/XOR/NXOR).  The block owns
+/// its whole body (shape [`crate::simulink_libraries::types::SimulinkShape::None`]).
+pub fn render_logic_block(
+    painter: &egui::Painter,
+    rect: &Rect,
+    font_scale: f32,
+    operator: &str,
+    icon_shape: &str,
+    colors: BodyColors,
+) {
+    let stroke = Stroke::new((1.6 * font_scale).clamp(1.0, 3.0), colors.border);
+    let op = operator.trim().to_uppercase();
+
+    if !icon_shape.eq_ignore_ascii_case("distinctive") {
+        painter.rect_filled(*rect, 4.0, colors.fill);
+        painter.rect_stroke(*rect, 4.0, stroke, egui::StrokeKind::Inside);
+        let label = if op.is_empty() { "AND".to_string() } else { op };
+        let font_size = (rect.height() * 0.30).clamp(7.0, 20.0) * font_scale;
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(font_size),
+            colors.text,
+        );
+        return;
+    }
+
+    let (base, negated) = match op.as_str() {
+        "NAND" => (GateBase::And, true),
+        "NOR" => (GateBase::Or, true),
+        "NXOR" | "XNOR" => (GateBase::Xor, true),
+        "XOR" => (GateBase::Xor, false),
+        "OR" => (GateBase::Or, false),
+        "NOT" => (GateBase::Not, true),
+        _ => (GateBase::And, false),
+    };
+
+    let bubble_r = (rect.height() * 0.10).clamp(2.0, 6.0);
+    let body = if negated {
+        Rect::from_min_max(
+            rect.min,
+            Pos2::new(rect.right() - 2.0 * bubble_r, rect.bottom()),
+        )
+    } else {
+        *rect
+    };
+
+    let (points, extra_arc) = match base {
+        GateBase::And => (and_gate_path(&body), None),
+        GateBase::Or => (or_gate_path(&body, false), None),
+        GateBase::Xor => (or_gate_path(&body, false), Some(xor_back_arc(&body))),
+        GateBase::Not => (not_gate_path(&body), None),
+    };
+
+    painter.add(egui::Shape::Path(egui::epaint::PathShape {
+        points,
+        closed: true,
+        fill: colors.fill,
+        stroke: stroke.into(),
+    }));
+    if let Some(arc) = extra_arc {
+        painter.add(egui::Shape::line(arc, stroke));
+    }
+    if negated {
+        let c = Pos2::new(body.right() + bubble_r, body.center().y);
+        painter.circle(c, bubble_r, colors.fill, stroke);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GateBase {
+    And,
+    Or,
+    Xor,
+    Not,
+}
+
+fn quad_bezier(p0: Pos2, ctrl: Pos2, p1: Pos2, n: usize) -> Vec<Pos2> {
+    (0..=n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let u = 1.0 - t;
+            Pos2::new(
+                u * u * p0.x + 2.0 * u * t * ctrl.x + t * t * p1.x,
+                u * u * p0.y + 2.0 * u * t * ctrl.y + t * t * p1.y,
+            )
+        })
+        .collect()
+}
+
+/// D-shaped AND gate outline (flat left/top/bottom, semicircular right).
+fn and_gate_path(r: &Rect) -> Vec<Pos2> {
+    let (l, rt, t, b, cy, h) = (
+        r.left(),
+        r.right(),
+        r.top(),
+        r.bottom(),
+        r.center().y,
+        r.height(),
+    );
+    let rad = h * 0.5;
+    let flat_x = (rt - rad).max(l + r.width() * 0.15);
+    let center = Pos2::new(flat_x, cy);
+    let mut pts = vec![Pos2::new(l, t), Pos2::new(flat_x, t)];
+    let n = 16;
+    for i in 0..=n {
+        let th = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * (i as f32 / n as f32);
+        pts.push(Pos2::new(
+            center.x + rad * th.cos(),
+            center.y + rad * th.sin(),
+        ));
+    }
+    pts.push(Pos2::new(l, b));
+    pts
+}
+
+/// Curved OR gate outline (pointed right, concave left back edge).
+fn or_gate_path(r: &Rect, _xor: bool) -> Vec<Pos2> {
+    let (l, rt, t, b, cy, w) = (
+        r.left(),
+        r.right(),
+        r.top(),
+        r.bottom(),
+        r.center().y,
+        r.width(),
+    );
+    let tip = Pos2::new(rt, cy);
+    let mut pts = Vec::new();
+    // Top edge: top-left → tip.
+    pts.extend(quad_bezier(
+        Pos2::new(l, t),
+        Pos2::new(l + w * 0.60, t),
+        tip,
+        14,
+    ));
+    // Bottom edge: tip → bottom-left.
+    pts.extend(quad_bezier(
+        tip,
+        Pos2::new(l + w * 0.60, b),
+        Pos2::new(l, b),
+        14,
+    ));
+    // Back (left) concave edge: bottom-left → top-left, bulging right.
+    pts.extend(quad_bezier(
+        Pos2::new(l, b),
+        Pos2::new(l + w * 0.22, cy),
+        Pos2::new(l, t),
+        12,
+    ));
+    pts
+}
+
+/// The extra concave back stroke drawn to the left of an XOR gate.
+fn xor_back_arc(r: &Rect) -> Vec<Pos2> {
+    let (l, t, b, cy, w) = (r.left(), r.top(), r.bottom(), r.center().y, r.width());
+    let x = l - w * 0.12;
+    quad_bezier(
+        Pos2::new(x, t),
+        Pos2::new(x + w * 0.22, cy),
+        Pos2::new(x, b),
+        12,
+    )
+}
+
+/// Right-pointing triangle for the NOT (buffer) gate; the inversion bubble is
+/// drawn separately by the caller.
+fn not_gate_path(r: &Rect) -> Vec<Pos2> {
+    vec![
+        Pos2::new(r.left(), r.top()),
+        Pos2::new(r.right(), r.center().y),
+        Pos2::new(r.left(), r.bottom()),
+    ]
+}
+
+/// Render Goto/From blocks with their GotoTag label instead of port labels.
+///
+/// Simulink brackets the tag (`[A]`) inside the tag-shaped body.
+pub fn render_goto_from_block(
+    painter: &egui::Painter,
+    block: &Block,
+    rect: &Rect,
+    font_scale: f32,
+    name_font_factor: f32,
+    color: Color32,
+) {
+    let tag = block
         .properties
         .get("GotoTag")
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or("A");
+    let label = format!("[{tag}]");
 
-    let font_size = (rect.height() * 0.6).clamp(10.0, 24.0) * font_scale * name_font_factor;
-    let color = Color32::from_rgb(32, 32, 32);
-    let font_id = egui::FontId::proportional(font_size);
+    let mut font_size = (rect.height() * 0.6).clamp(10.0, 24.0) * font_scale * name_font_factor;
+    let fitted = fit_font_px(painter, &label, rect.size() * Vec2::new(0.72, 0.7));
+    font_size = font_size.min(fitted);
 
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        font_id,
+        egui::FontId::proportional(font_size),
         color,
     );
 }

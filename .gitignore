@@ -8,5 +8,6 @@ simulink
 .vscode
 *.log
 .venv/
-Cargo.lock
-src/egui_app/ui/update.rs
+perf.data
+perf.data.old
+simulink_test_models/slprj/

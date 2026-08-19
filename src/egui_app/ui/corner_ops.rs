@@ -116,14 +116,14 @@ pub fn auto_adjust_branches_on_block_move(
     dy: i32,
 ) {
     for branch in branches.iter_mut() {
-        if let Some(dst) = &branch.dst {
-            if dst.sid == moved_sid {
-                if let Some(last) = branch.points.last_mut() {
-                    last.x += dx;
-                    last.y += dy;
-                } else {
-                    branch.points.push(Point { x: dx, y: dy });
-                }
+        if let Some(dst) = &branch.dst
+            && dst.sid == moved_sid
+        {
+            if let Some(last) = branch.points.last_mut() {
+                last.x += dx;
+                last.y += dy;
+            } else {
+                branch.points.push(Point { x: dx, y: dy });
             }
         }
         auto_adjust_branches_on_block_move(&mut branch.branches, moved_sid, dx, dy);
@@ -140,7 +140,7 @@ pub fn auto_adjust_branches_on_block_move(
 /// This operates on the *relative offsets* (the `Point` values), not
 /// absolute screen positions.
 #[allow(dead_code)]
-pub fn enforce_orthogonal(points: &mut Vec<Point>) {
+pub fn enforce_orthogonal(points: &mut [Point]) {
     for point in points.iter_mut() {
         if point.x != 0 && point.y != 0 {
             // Diagonal offset — split into horizontal-only.
@@ -159,4 +159,3 @@ pub fn enforce_orthogonal(points: &mut Vec<Point>) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-

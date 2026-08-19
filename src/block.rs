@@ -169,10 +169,10 @@ pub fn parse_mask_parameter_node(node: Node) -> MaskParameter {
             "Value" => value = child.text().map(|s| s.to_string()),
             "TypeOptions" => {
                 for to in child.children().filter(|c| c.is_element()) {
-                    if to.has_tag_name("Option") {
-                        if let Some(t) = to.text() {
-                            type_options.push(t.to_string());
-                        }
+                    if to.has_tag_name("Option")
+                        && let Some(t) = to.text()
+                    {
+                        type_options.push(t.to_string());
                     }
                 }
             }
@@ -573,17 +573,25 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                 }
             }
             "Array" => {
-                if let Some(prop_name) = child.attribute("PropName") {
-                    if let Some(value) = parse_array_property_value(child) {
-                        properties.insert(prop_name.to_string(), value);
-                        child_order.push(BlockChildKind::P(prop_name.to_string()));
-                    }
+                if let Some(prop_name) = child.attribute("PropName")
+                    && let Some(value) = parse_array_property_value(child)
+                {
+                    properties.insert(prop_name.to_string(), value);
+                    child_order.push(BlockChildKind::P(prop_name.to_string()));
                 }
             }
             "PortCounts" => {
-                let ins = child.attribute("in").and_then(|s| s.parse::<u32>().ok());
-                let outs = child.attribute("out").and_then(|s| s.parse::<u32>().ok());
-                port_counts = Some(PortCounts { ins, outs });
+                let count = |name: &str| {
+                    child
+                        .attribute(name)
+                        .and_then(|s: &str| s.parse::<u32>().ok())
+                };
+                port_counts = Some(PortCounts {
+                    ins: count("in"),
+                    outs: count("out"),
+                    enable: count("enable"),
+                    trigger: count("trigger"),
+                });
                 child_order.push(BlockChildKind::PortCounts);
             }
             "PortProperties" => {
@@ -804,34 +812,34 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
     //
     // Here we fill in the library-defined defaults whenever the block has no
     // port information of its own.
-    if blk.port_counts.is_none() && blk.ports.is_empty() {
-        if let Some((ins, outs)) =
-            crate::builtin_libraries::matrix_library::port_counts_if_known(&blk.block_type)
-        {
-            if ins > 0 || outs > 0 {
-                blk.port_counts = Some(crate::model::PortCounts {
-                    ins: Some(ins),
-                    outs: Some(outs),
-                });
-                for i in 1..=ins {
-                    let mut p = crate::model::Port {
-                        port_type: "in".to_string(),
-                        index: Some(i),
-                        properties: indexmap::IndexMap::new(),
-                    };
-                    p.properties.insert("Name".to_string(), String::new());
-                    blk.ports.push(p);
-                }
-                for i in 1..=outs {
-                    let mut p = crate::model::Port {
-                        port_type: "out".to_string(),
-                        index: Some(i),
-                        properties: indexmap::IndexMap::new(),
-                    };
-                    p.properties.insert("Name".to_string(), String::new());
-                    blk.ports.push(p);
-                }
-            }
+    if blk.port_counts.is_none()
+        && blk.ports.is_empty()
+        && let Some((ins, outs)) =
+            crate::simulink_libraries::stubs::matrix_port_counts_if_known(&blk.block_type)
+        && (ins > 0 || outs > 0)
+    {
+        blk.port_counts = Some(crate::model::PortCounts {
+            ins: Some(ins),
+            outs: Some(outs),
+            ..Default::default()
+        });
+        for i in 1..=ins {
+            let mut p = crate::model::Port {
+                port_type: "in".to_string(),
+                index: Some(i),
+                properties: indexmap::IndexMap::new(),
+            };
+            p.properties.insert("Name".to_string(), String::new());
+            blk.ports.push(p);
+        }
+        for i in 1..=outs {
+            let mut p = crate::model::Port {
+                port_type: "out".to_string(),
+                index: Some(i),
+                properties: indexmap::IndexMap::new(),
+            };
+            p.properties.insert("Name".to_string(), String::new());
+            blk.ports.push(p);
         }
     }
 
@@ -845,7 +853,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
     // BindingPersistence metadata rather than signal lines).
     if blk.port_counts.is_none()
         && blk.ports.is_empty()
-        && crate::builtin_libraries::simulink_dashboard::is_dashboard_block_type(&blk.block_type)
+        && crate::simulink_libraries::stubs::is_dashboard_block_type(&blk.block_type)
     {
         let (ins, outs) = if blk.block_type == "Display" {
             (1u32, 0u32)
@@ -855,6 +863,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
         blk.port_counts = Some(crate::model::PortCounts {
             ins: Some(ins),
             outs: Some(outs),
+            ..Default::default()
         });
         for i in 1..=ins {
             let mut p = crate::model::Port {
@@ -921,4 +930,3 @@ pub fn parse_system_shallow(node: Node, base_dir: &Utf8Path) -> Result<System> {
         chart: None,
     })
 }
-

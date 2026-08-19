@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-pub use crate::builtin_libraries::virtual_library::BlockShape;
+pub use crate::simulink_libraries::types::SimulinkShape as BlockShape;
 use once_cell::sync::OnceCell;
 
 /// Simple RGB color independent of egui types.
@@ -21,6 +21,14 @@ pub enum IconSpec {
     Utf8(&'static str),
     Svg(&'static str),
     Phosphor(&'static str),
+    /// Typeset math (fraction bar / superscript / overbar); see
+    /// [`crate::egui_app::render::draw_math_icon`].
+    Math(&'static str),
+    /// Line-art drawn from a compact polyline notation; see
+    /// [`crate::egui_app::render::draw_plot_icon`].  Simulink draws many block
+    /// icons (waveforms, saturation curves, scope screens) as vector line art
+    /// rather than glyphs.
+    Plot(&'static str),
 }
 
 /// Configuration for a specific block type.
@@ -54,8 +62,7 @@ pub struct BlockTypeConfig {
     /// When non-empty, these override the default evenly-distributed port
     /// layout for the specified ports.  Ports not listed here use the
     /// standard positioning.
-    pub port_position_overrides:
-        Vec<crate::builtin_libraries::virtual_library::PortPositionOverride>,
+    pub port_position_overrides: Vec<crate::simulink_libraries::types::PortPositionOverride>,
     /// Custom names for input ports
     pub input_port_names: Vec<String>,
     /// Custom names for output ports
@@ -81,341 +88,13 @@ impl Default for BlockTypeConfig {
     }
 }
 
-/// Register icon/config entries for one virtual-block name into the map.
-///
-/// Generates all useful key variants:
-/// - raw name and its whitespace-normalized lowercase form
-/// - CamelCase-humanized name and its normalized form
-/// - All of the above prefixed with `{lib_name}/`
-///
-/// Duplicate keys are silently skipped.
-fn register_virtual_keys(
-    m: &mut HashMap<String, BlockTypeConfig>,
-    lib_name: &str,
-    raw_name: &str,
-    cfg: BlockTypeConfig,
-) {
-    use crate::builtin_libraries::virtual_library::{humanize_camel_case, normalize_block_name};
-    let human = humanize_camel_case(raw_name);
-    let norm_raw = normalize_block_name(raw_name);
-    let norm_human = normalize_block_name(&human);
-    let mut keys: Vec<String> = vec![
-        raw_name.to_string(),
-        norm_raw.clone(),
-        human.clone(),
-        norm_human.clone(),
-        format!("{lib_name}/{raw_name}"),
-        format!("{lib_name}/{norm_raw}"),
-        format!("{lib_name}/{human}"),
-        format!("{lib_name}/{norm_human}"),
-    ];
-
-    // De-duplicate while preserving insertion order.
-    let mut seen = std::collections::HashSet::new();
-    keys.retain(|k| seen.insert(k.clone()));
-
-    for k in keys {
-        // When the new entry has no icon, preserve an existing icon if one was
-        // previously registered (e.g. dashboard blocks with UTF-8 glyph icons
-        // that are later overwritten by virtual-library entries with icon=None).
-        if cfg.icon.is_none() {
-            if let Some(existing) = m.get(&k) {
-                if existing.icon.is_some() {
-                    let mut merged = cfg.clone();
-                    merged.icon = existing.icon;
-                    m.insert(k, merged);
-                    continue;
-                }
-            }
-        }
-        m.insert(k, cfg.clone());
-    }
-}
-
+/// Build the default registry by seeding it from the unified Simulink block
+/// definition catalog (the single source of truth).  Every catalog definition
+/// — hand-written core/dashboard libraries plus the bridged built-in virtual
+/// libraries — contributes its `BlockTypeConfig` under all the key variants the
+/// multi-phase lookup in `get_block_type_cfg` expects.
 fn default_registry() -> HashMap<String, BlockTypeConfig> {
-    let mut m = HashMap::new();
-
-    // Mirror the hardcoded icons previously used in egui_app.rs
-    m.insert(
-        "Product".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("×")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Constant".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("C")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Scope".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("〰")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "ManualSwitch".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("🕂")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "MATLAB Function".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("🖹")),
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "SubSystem".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("")), // This is a box icon but VScode doesnt render it
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Inport".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⬅")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Outport".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("➡")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Concatenate".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("☰")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "CFunction".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("📁")),
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Terminator".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⏹")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            ..Default::default()
-        },
-    );
-    // ── Dashboard / UI blocks ──────────────────────────────────────────
-    m.insert(
-        "Display".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("📟")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            known: true,
-            default_ins: 1,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "DisplayBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("📟")),
-            show_input_port_labels: false,
-            show_output_port_labels: false,
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "Checkbox".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("☑")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "ComboBox".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("▾")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "EditField".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("✎")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "PushButtonBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⏻")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "RadioButtonGroup".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◉")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "SliderBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⎯●")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "SliderSwitchBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⇅")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "ToggleSwitchBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⏼")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "RockerSwitchBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("⏻")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "RotarySwitchBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◎")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "KnobBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◎")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "CircularGaugeBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◔")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "SemiCircularGaugeBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◑")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "LinearGaugeBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("▮")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "QuarterGaugeBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("◕")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "LampBlock".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("💡")),
-            known: true,
-            ..Default::default()
-        },
-    );
-    m.insert(
-        "DashboardScope".to_string(),
-        BlockTypeConfig {
-            icon: Some(IconSpec::Utf8("〰")),
-            known: true,
-            ..Default::default()
-        },
-    );
-
-    // Register icons advertised by built-in virtual libraries.
-    for lib in crate::builtin_libraries::VIRTUAL_LIBRARIES {
-        for b in (lib.get_blocks)() {
-            // Register canonical name and any aliases.
-            let mut names: Vec<&'static str> = Vec::with_capacity(1 + b.aliases.len());
-            names.push(b.name);
-            names.extend_from_slice(b.aliases);
-
-            for &n in &names {
-                // Always register, even when there is no dedicated SVG icon,
-                // so that `known = true` prevents spurious terminal warnings.
-                let cfg = BlockTypeConfig {
-                    icon: b.icon.map(IconSpec::Svg),
-                    known: true,
-                    shape: b.shape,
-                    default_ins: b.ins,
-                    default_outs: b.outs,
-                    port_position_overrides: b.port_position_overrides.to_vec(),
-                    input_port_names: b.input_port_names.iter().map(|s| s.to_string()).collect(),
-                    output_port_names: b.output_port_names.iter().map(|s| s.to_string()).collect(),
-                    ..Default::default()
-                };
-                register_virtual_keys(&mut m, lib.name, n, cfg);
-            }
-        }
-    }
-
-    m
+    crate::simulink_libraries::config::block_type_config_entries()
 }
 
 static REGISTRY: OnceCell<RwLock<HashMap<String, BlockTypeConfig>>> = OnceCell::new();
@@ -450,11 +129,3 @@ where
         f(entry);
     }
 }
-
-/// Register icon configurations for all currently-registered user virtual
-/// libraries.
-///
-/// Currently a no-op: `OwnedVirtualBlock` carries no icon path, so all
-/// user-library blocks fall through to the `"?"` warning path in
-/// `render_block_icon`.  The function is kept for API compatibility.
-pub fn register_user_library_block_types() {}

@@ -179,12 +179,11 @@ fn main() -> Result<()> {
                 if !known_tags.contains(&tag) {
                     unknown_tags.insert(tag.to_string());
                 }
-                if tag == "Block" {
-                    if let Some(bt) = node.attribute("BlockType") {
-                        if !known_block_types.contains(&bt) {
-                            unknown_block_types.insert(bt.to_string());
-                        }
-                    }
+                if tag == "Block"
+                    && let Some(bt) = node.attribute("BlockType")
+                    && !known_block_types.contains(&bt)
+                {
+                    unknown_block_types.insert(bt.to_string());
                 }
             }
             Ok(())

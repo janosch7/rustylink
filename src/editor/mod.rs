@@ -15,13 +15,11 @@
 //! - **ID management**: Automatic SID assignment and reassignment
 //! - **Undo/Redo**: Full undo/redo stack for all editing operations
 
-pub mod block_catalog;
 pub mod operations;
 pub mod selection;
 pub mod state;
 pub mod ui;
 
-pub use block_catalog::{BlockCatalogCategory, BlockCatalogEntry, get_block_catalog};
 pub use operations::{
     EditorCommand, EditorHistory, add_block, add_line, assign_sids, branch_line, comment_blocks,
     create_subsystem_from_selection, delete_blocks, delete_lines, mirror_blocks, move_block,

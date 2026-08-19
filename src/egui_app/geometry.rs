@@ -36,6 +36,19 @@ pub fn parse_rect_str(pos: &str) -> Option<Rect> {
     }
 }
 
+/// Visual size of a port chevron (the small arrow drawn at an unconnected
+/// port), in screen points: `(height, width, stroke_width)`.
+///
+/// Shared by the editor and viewer so both draw identically and so the block
+/// layout can reserve matching horizontal space.
+pub fn port_chevron_size(font_scale: f32) -> (f32, f32, f32) {
+    let scale = font_scale.max(0.2);
+    let h = (8.0 * scale).max(3.0);
+    let w = (6.0 * scale).max(2.0);
+    let stroke_w = (1.25 * scale).max(0.75);
+    (h, w, stroke_w)
+}
+
 /// Compute a port anchor position on a block's rectangle.
 /// Ports are distributed vertically.
 pub fn port_anchor_pos(r: Rect, side: PortSide, port_index: u32, num_ports: Option<u32>) -> Pos2 {
@@ -95,7 +108,7 @@ pub fn port_indicator_positions_with_overrides(
     in_count: u32,
     out_count: u32,
     mirrored: bool,
-    overrides: &[crate::builtin_libraries::virtual_library::PortPositionOverride],
+    overrides: &[crate::simulink_libraries::types::PortPositionOverride],
 ) -> (Vec<Pos2>, Vec<Pos2>) {
     let (in_side, out_side) = if mirrored {
         (PortSide::Out, PortSide::In)
@@ -105,7 +118,7 @@ pub fn port_indicator_positions_with_overrides(
 
     let mut ins = Vec::new();
     for i in 1..=in_count {
-        if let Some(ovr) = overrides.iter().find(|o| o.is_input && o.port_index == i) {
+        if let Some(ovr) = overrides.iter().find(|o| o.matches(true, i, in_count)) {
             ins.push(placement_pos(r, ovr.placement, ovr.fraction));
         } else {
             ins.push(port_anchor_pos(r, in_side, i, Some(in_count.max(1))));
@@ -113,7 +126,7 @@ pub fn port_indicator_positions_with_overrides(
     }
     let mut outs = Vec::new();
     for i in 1..=out_count {
-        if let Some(ovr) = overrides.iter().find(|o| !o.is_input && o.port_index == i) {
+        if let Some(ovr) = overrides.iter().find(|o| o.matches(false, i, out_count)) {
             outs.push(placement_pos(r, ovr.placement, ovr.fraction));
         } else {
             outs.push(port_anchor_pos(r, out_side, i, Some(out_count.max(1))));
@@ -125,10 +138,10 @@ pub fn port_indicator_positions_with_overrides(
 /// Convert a [`PortPlacement`] + fraction to a concrete position on a block rect.
 fn placement_pos(
     r: Rect,
-    placement: crate::builtin_libraries::virtual_library::PortPlacement,
+    placement: crate::simulink_libraries::types::PortPlacement,
     fraction: f32,
 ) -> Pos2 {
-    use crate::builtin_libraries::virtual_library::PortPlacement;
+    use crate::simulink_libraries::types::PortPlacement;
     let f = fraction.clamp(0.0, 1.0);
     match placement {
         PortPlacement::Left => Pos2::new(r.left(), r.top() + f * r.height()),
@@ -148,10 +161,10 @@ fn placement_pos(
 /// `is_left_side` flag used for the default layout.  For Top/Bottom
 /// overrides the value is always `true` (the chevron faces inward).
 pub fn port_override_is_left_side(
-    placement: crate::builtin_libraries::virtual_library::PortPlacement,
+    placement: crate::simulink_libraries::types::PortPlacement,
     _mirrored: bool,
 ) -> bool {
-    use crate::builtin_libraries::virtual_library::PortPlacement;
+    use crate::simulink_libraries::types::PortPlacement;
     match placement {
         PortPlacement::Left => true,
         PortPlacement::Right => false,

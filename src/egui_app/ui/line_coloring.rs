@@ -122,7 +122,7 @@ pub fn assign_line_colors(adjacency: &[Vec<usize>], background_luminance: f32) -
             } else {
                 used.iter()
                     .map(|&u| circular_dist(h, u))
-                    .fold(1.0, |a, d| f32::min(a, d))
+                    .fold(1.0, f32::min)
             };
             if score > best_score || (score == best_score && h < best_h) {
                 best_score = score;
@@ -152,4 +152,3 @@ pub fn assign_line_colors(adjacency: &[Vec<usize>], background_luminance: f32) -
         })
         .collect()
 }
-

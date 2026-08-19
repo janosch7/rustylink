@@ -204,8 +204,8 @@ pub fn place_label(
         let mut best_score = f32::INFINITY;
         let max_perp_mult = 5;
         for k in 0..=max_perp_mult {
-            let off_x = base_off_x * (1 + k as i32) as f32;
-            let off_y = base_off_y * (1 + k as i32) as f32;
+            let off_x = base_off_x * (1 + k) as f32;
+            let off_y = base_off_y * (1 + k) as f32;
             let max_span = (max_t - min_t).abs();
             let mut m = 0usize;
             loop {
