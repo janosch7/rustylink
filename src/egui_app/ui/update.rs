@@ -1137,13 +1137,13 @@ pub(crate) fn update_internal(
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
-                                #[cfg(feature = "dashboard")]
-                                {
+                            #[cfg(feature = "dashboard")]
                             app.queue_dashboard_control(
                                 (*b).clone(),
                                 DashboardControlValue::Bool(enabled),
                             );
-                                }
+                            #[cfg(not(feature = "dashboard"))]
+                            let _ = enabled;
                             any_block_clicked = true;
                         }
                     } else {
@@ -3770,7 +3770,7 @@ fn print_line_based_connections(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dashboard"))]
 mod tests {
     use super::{
         dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,

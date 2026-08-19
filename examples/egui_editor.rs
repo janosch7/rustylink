@@ -69,6 +69,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     } else {
         let root_dir = Utf8PathBuf::from(".");
@@ -89,6 +90,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     };
 

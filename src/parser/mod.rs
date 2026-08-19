@@ -17,6 +17,7 @@ pub mod library;
 pub mod source;
 
 // Re-export key types at the parser module level for backward compatibility.
+pub use chart::annotate_matlab_function_names;
 pub use graphical_interface::*;
 pub use helpers::{parse_endpoint, parse_points, resolve_system_reference};
 pub use library::*;

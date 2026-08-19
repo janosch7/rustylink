@@ -373,19 +373,19 @@ pub const ENABLE_PORT: &str = "\u{1}enable";
 /// reset port.
 const LEVEL_PULSE: &str = "p 0.05,0.95 0.30,0.95 0.30,0.15 0.70,0.15 0.70,0.95 0.95,0.95";
 
-/// The rising-edge trigger pictogram: a step whose vertical edge carries the
-/// arrow head.  Also used for the trigger port of a triggered subsystem.
+/// The rising-edge trigger pictogram: a step with the arrow head halfway up
+/// its vertical edge.  Also used for the trigger port of a triggered subsystem.
 pub const RISING_EDGE: &str =
-    "p 0.05,0.90 0.45,0.90 0.45,0.15 0.90,0.15; p 0.31,0.38 0.45,0.15 0.59,0.38";
+    "p 0.05,0.90 0.45,0.90 0.45,0.15 0.90,0.15; p 0.32,0.72 0.45,0.48 0.58,0.72";
 
 /// The falling-edge counterpart of [`RISING_EDGE`].
 pub const FALLING_EDGE: &str =
-    "p 0.05,0.15 0.45,0.15 0.45,0.90 0.90,0.90; p 0.31,0.67 0.45,0.90 0.59,0.67";
+    "p 0.05,0.15 0.45,0.15 0.45,0.90 0.90,0.90; p 0.32,0.33 0.45,0.57 0.58,0.33";
 
 /// A pulse whose rising and falling edges both carry an arrow head.
 pub const EITHER_EDGE: &str = concat!(
     "p 0.05,0.90 0.30,0.90 0.30,0.15 0.70,0.15 0.70,0.90 0.95,0.90;",
-    "p 0.19,0.36 0.30,0.15 0.41,0.36; p 0.59,0.69 0.70,0.90 0.81,0.69"
+    "p 0.19,0.70 0.30,0.48 0.41,0.70; p 0.59,0.35 0.70,0.57 0.81,0.35"
 );
 
 /// The pictogram Simulink prints beside a reset port, per trigger edge: a step
@@ -574,8 +574,9 @@ pub fn static_subsystem(
         spec.push_str(match event.kind {
             // Circular arrow.
             EventKind::Reset => "sa 0.18,0.34,0.13,0.80,1.70;",
-            // Bar fully inside the ring.
-            EventKind::Terminate => "c 0.18,0.34 0.13; p 0.18,0.26 0.18,0.42;",
+            // Bar fully inside the ring.  The ring is a closed arc so it keeps
+            // the radius of the other lifecycle pictograms in a wide block.
+            EventKind::Terminate => "s 0.18,0.34,0.13,0.00,1.00; p 0.18,0.26 0.18,0.42;",
             // Power symbol: the bar breaks through the gap at the top of the ring.
             EventKind::Initialize => "s 0.18,0.34,0.13,0.80,1.70; p 0.18,0.16 0.18,0.34;",
             // Both at once: the power symbol drawn with the reset arrow head.
