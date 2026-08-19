@@ -17,6 +17,11 @@
 
 use crate::model::{Block, BlockChildKind, Port, PortCounts, System};
 
+/// Property under which the name of a MATLAB Function block's function is
+/// recorded while the model is loaded (it lives in the Stateflow chart, out of
+/// reach of the renderers).
+pub const MATLAB_FUNCTION_NAME_PROPERTY: &str = "MATLABFunctionName";
+
 /// A structural description of a virtual-library block (ports only – icons,
 /// shapes and labels live in the `egui` catalog definitions).
 #[derive(Clone, Copy, Debug)]

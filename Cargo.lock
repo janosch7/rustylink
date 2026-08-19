@@ -4393,7 +4393,7 @@ dependencies = [
 
 [[package]]
 name = "rustylink"
-version = "2.1.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",

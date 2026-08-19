@@ -216,7 +216,7 @@ pub fn annotate_matlab_function_names(
                 .filter(|name| !name.trim().is_empty());
             if let Some(name) = name {
                 block.properties.insert(
-                    crate::simulink_libraries::labels::MATLAB_FUNCTION_NAME_PROPERTY.to_string(),
+                    crate::simulink_libraries::stubs::MATLAB_FUNCTION_NAME_PROPERTY.to_string(),
                     name,
                 );
             }

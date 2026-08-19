@@ -116,7 +116,9 @@ pub fn bit_set(_block: &Block, meta: &BlockMetadata) -> Option<String> {
 /// Property under which the name of a MATLAB Function block's function is
 /// recorded while the model is loaded (it lives in the Stateflow chart, out of
 /// reach of the renderers).
-pub const MATLAB_FUNCTION_NAME_PROPERTY: &str = "MATLABFunctionName";
+///
+/// Defined in [`super::stubs`] so the core (non-`egui`) parser can write it.
+pub use super::stubs::MATLAB_FUNCTION_NAME_PROPERTY;
 
 /// MATLAB Function label: the name of the function the block runs, e.g. `test`.
 pub fn matlab_function_name(_block: &Block, meta: &BlockMetadata) -> Option<String> {
