@@ -124,7 +124,7 @@ fn widget_frame(painter: &egui::Painter, rect: Rect, rounding: f32) {
     painter.rect_stroke(
         rect,
         rounding,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
         egui::StrokeKind::Inside,
     );
 }
@@ -172,13 +172,28 @@ fn paint_dashboard_widget_icon(
     rect: &Rect,
     palette: WidgetPalette,
 ) {
-    // No block-type branching: draw the block's catalog icon (the single source
-    // of truth for its small-size representation).  When the definition carries
-    // no icon, fall back to a neutral field box.
+    // Draw the block's catalog icon (the single source of truth for its
+    // small-size representation).  When the definition carries no icon, fall
+    // back to a neutral field box.
     let def = crate::simulink_libraries::resolve_definition(block);
     if let Some(icon) = def.icon {
         let spec = crate::simulink_libraries::config::icon_to_spec(icon);
-        crate::egui_app::render::draw_icon_spec(painter, rect, 1.0, &spec, palette.text, None);
+        // Simulink draws the Toggle and Rocker switches vertically; rotate their
+        // minimized fallback glyph 90°.  The Slider Switch shares the same glyph
+        // but stays upright.
+        if matches!(
+            block.block_type.as_str(),
+            "ToggleSwitchBlock" | "RockerSwitchBlock"
+        ) {
+            crate::egui_app::render::draw_icon_spec_rotated_quarter(
+                painter,
+                rect,
+                &spec,
+                palette.text,
+            );
+        } else {
+            crate::egui_app::render::draw_icon_spec(painter, rect, 1.0, &spec, palette.text, None);
+        }
         return;
     }
     let inner = inner_rect(rect, 0.70);
@@ -189,7 +204,7 @@ fn paint_dashboard_widget_icon(
     painter.rect_stroke(
         body,
         3.0,
-        Stroke::new(1.1, palette.border),
+        Stroke::new(1.1_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 }
@@ -240,14 +255,18 @@ fn paint_slider_visual(
     painter.rect_stroke(
         track,
         track_h * 0.5,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
     let handle_x = egui::lerp(track.left()..=track.right(), fraction.clamp(0.0, 1.0));
     let handle_center = Pos2::new(handle_x, track.center().y);
     painter.circle_filled(handle_center, handle_r, Color32::WHITE);
-    painter.circle_stroke(handle_center, handle_r, Stroke::new(1.2, palette.border));
+    painter.circle_stroke(
+        handle_center,
+        handle_r,
+        Stroke::new(1.2_f32, palette.border),
+    );
 
     let tick_top = track.bottom() + 2.0;
     let tick_bottom = tick_top + safe_clamp_f32(inner.height() * 0.10, 2.0, 6.0);
@@ -261,7 +280,7 @@ fn paint_slider_visual(
         };
         painter.line_segment(
             [Pos2::new(x, tick_top), Pos2::new(x, tick_top + tick_len)],
-            Stroke::new(1.0, palette.border),
+            Stroke::new(1.0_f32, palette.border),
         );
     }
 
@@ -317,7 +336,7 @@ fn paint_rocker_switch_visual(
     painter.rect_stroke(
         housing,
         w * 0.4,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
@@ -343,7 +362,7 @@ fn paint_rocker_switch_visual(
     painter.rect_stroke(
         rocker,
         3.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
@@ -405,7 +424,7 @@ fn paint_switch_visual(
     painter.rect_stroke(
         track,
         rounding,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
@@ -430,7 +449,7 @@ fn paint_switch_visual(
         Pos2::new(x, track.center().y)
     };
     painter.circle_filled(thumb_center, thumb_r, Color32::WHITE);
-    painter.circle_stroke(thumb_center, thumb_r, Stroke::new(1.0, palette.border));
+    painter.circle_stroke(thumb_center, thumb_r, Stroke::new(1.0_f32, palette.border));
 
     if vertical && show_labels {
         painter.text(
@@ -732,7 +751,7 @@ pub fn render_push_button(
     painter.rect_stroke(
         inner,
         4.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
     let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.45);
@@ -805,7 +824,11 @@ pub fn render_radio_button(
             break; // Don't overflow the rect
         }
         let cx = inner.left() + radio_r + 4.0;
-        painter.circle_stroke(Pos2::new(cx, y), radio_r, Stroke::new(1.0, palette.border));
+        painter.circle_stroke(
+            Pos2::new(cx, y),
+            radio_r,
+            Stroke::new(1.0_f32, palette.border),
+        );
         if i == 0 {
             painter.circle_filled(Pos2::new(cx, y), radio_r * 0.55, palette.accent);
         }
@@ -848,7 +871,7 @@ pub fn render_combo_box(
     painter.rect_stroke(
         field,
         3.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
@@ -901,7 +924,7 @@ pub fn render_checkbox(
     painter.rect_stroke(
         check_rect,
         2.0,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
         egui::StrokeKind::Inside,
     );
 
@@ -963,7 +986,7 @@ pub fn render_edit_field(
     painter.rect_stroke(
         field,
         3.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
 
@@ -976,7 +999,7 @@ pub fn render_edit_field(
             Pos2::new(cursor_x, cursor_top),
             Pos2::new(cursor_x, cursor_bot),
         ],
-        Stroke::new(1.0, palette.text),
+        Stroke::new(1.0_f32, palette.text),
     );
 
     if block
@@ -1051,7 +1074,7 @@ pub fn render_knob(
 
     // Knob body (outer ring)
     painter.circle_filled(Pos2::new(cx, cy), radius, Color32::from_rgb(220, 220, 225));
-    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5_f32, BORDER));
     // Inner circle
     painter.circle_filled(
         Pos2::new(cx, cy),
@@ -1076,7 +1099,7 @@ pub fn render_knob(
             cx + tick_r_inner * angle.cos(),
             cy - tick_r_inner * angle.sin(),
         );
-        painter.line_segment([inner_p, outer], Stroke::new(1.0, BORDER));
+        painter.line_segment([inner_p, outer], Stroke::new(1.0_f32, BORDER));
     }
 
     // Needle indicator pointing at ~180° position (left = 0)
@@ -1087,7 +1110,7 @@ pub fn render_knob(
     );
     painter.line_segment(
         [Pos2::new(cx, cy), needle_end],
-        Stroke::new(2.0, ACCENT_DARK),
+        Stroke::new(2.0_f32, ACCENT_DARK),
     );
 
     // Scale labels
@@ -1155,7 +1178,7 @@ pub fn render_rotary_switch(
 
     // Body
     painter.circle_filled(Pos2::new(cx, cy), radius, Color32::from_rgb(210, 215, 220));
-    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5_f32, BORDER));
 
     // Position marks
     let labels = option_labels(block);
@@ -1171,7 +1194,7 @@ pub fn render_rotary_switch(
             cy - (mark_r - 3.0) * angle.sin(),
         );
         let col = if i == 0 { ACCENT_DARK } else { BORDER };
-        painter.line_segment([mark_start, mark_end], Stroke::new(1.5, col));
+        painter.line_segment([mark_start, mark_end], Stroke::new(1.5_f32, col));
         painter.text(
             Pos2::new(cx + label_r * angle.cos(), cy - label_r * angle.sin()),
             Align2::CENTER_CENTER,
@@ -1189,7 +1212,7 @@ pub fn render_rotary_switch(
     );
     painter.line_segment(
         [Pos2::new(cx, cy), pointer_end],
-        Stroke::new(2.5, ACCENT_DARK),
+        Stroke::new(2.5_f32, ACCENT_DARK),
     );
     painter.circle_filled(Pos2::new(cx, cy), radius * 0.15, ACCENT_DARK);
 }
@@ -1218,7 +1241,7 @@ pub fn render_circular_gauge(
     let radius = (inner.width().min(inner.height()) * 0.40).max(10.0);
 
     // Arc background
-    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(2.0, BORDER));
+    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(2.0_f32, BORDER));
 
     // Scale ticks around the 270° arc (from 225° counter-clockwise to -45°)
     let start_angle = 5.0 * PI / 4.0;
@@ -1234,7 +1257,7 @@ pub fn render_circular_gauge(
         let p2 = Pos2::new(cx + r_out * angle.cos(), cy - r_out * angle.sin());
         painter.line_segment(
             [p1, p2],
-            Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+            Stroke::new(if is_major { 1.5_f32 } else { 1.0_f32 }, TEXT_DARK),
         );
 
         // Scale numbers for major ticks
@@ -1260,7 +1283,7 @@ pub fn render_circular_gauge(
     );
     painter.line_segment(
         [Pos2::new(cx, cy), needle_end],
-        Stroke::new(2.0, NEEDLE_RED),
+        Stroke::new(2.0_f32, NEEDLE_RED),
     );
     painter.circle_filled(Pos2::new(cx, cy), radius * 0.08, NEEDLE_RED);
 }
@@ -1302,7 +1325,7 @@ pub fn render_semi_circular_gauge(
         let p2 = Pos2::new(cx + r_out * angle.cos(), cy - r_out * angle.sin());
         painter.line_segment(
             [p1, p2],
-            Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+            Stroke::new(if is_major { 1.5_f32 } else { 1.0_f32 }, TEXT_DARK),
         );
 
         if is_major {
@@ -1321,7 +1344,7 @@ pub fn render_semi_circular_gauge(
     // Base line
     painter.line_segment(
         [Pos2::new(cx - radius, cy), Pos2::new(cx + radius, cy)],
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
     );
 
     // Needle
@@ -1333,7 +1356,7 @@ pub fn render_semi_circular_gauge(
     );
     painter.line_segment(
         [Pos2::new(cx, cy), needle_end],
-        Stroke::new(2.0, NEEDLE_RED),
+        Stroke::new(2.0_f32, NEEDLE_RED),
     );
     painter.circle_filled(Pos2::new(cx, cy), radius * 0.08, NEEDLE_RED);
 }
@@ -1373,7 +1396,7 @@ pub fn render_quarter_gauge(
         let r_in = radius - 3.5;
         let p1 = Pos2::new(cx + r_in * angle.cos(), cy - r_in * angle.sin());
         let p2 = Pos2::new(cx + r_out * angle.cos(), cy - r_out * angle.sin());
-        painter.line_segment([p1, p2], Stroke::new(1.5, TEXT_DARK));
+        painter.line_segment([p1, p2], Stroke::new(1.5_f32, TEXT_DARK));
 
         let val = min + (max - min) * t as f64;
         let lr = radius + fsz * 0.8;
@@ -1395,7 +1418,7 @@ pub fn render_quarter_gauge(
     );
     painter.line_segment(
         [Pos2::new(cx, cy), needle_end],
-        Stroke::new(2.0, NEEDLE_RED),
+        Stroke::new(2.0_f32, NEEDLE_RED),
     );
     painter.circle_filled(Pos2::new(cx, cy), radius * 0.06, NEEDLE_RED);
 }
@@ -1427,7 +1450,12 @@ pub fn render_linear_gauge(
         Pos2::new(inner.right(), cy + bar_h / 2.0),
     );
     painter.rect_filled(bar, 2.0, Color32::from_rgb(220, 220, 225));
-    painter.rect_stroke(bar, 2.0, Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        bar,
+        2.0,
+        Stroke::new(1.0_f32, BORDER),
+        egui::StrokeKind::Inside,
+    );
 
     // Scale ticks below bar
     let n_ticks = 11;
@@ -1440,7 +1468,7 @@ pub fn render_linear_gauge(
                 Pos2::new(x, bar.bottom() + 1.0),
                 Pos2::new(x, bar.bottom() + 1.0 + tick_len),
             ],
-            Stroke::new(1.0, TEXT_DARK),
+            Stroke::new(1.0_f32, TEXT_DARK),
         );
     }
 
@@ -1510,7 +1538,7 @@ pub fn render_dashboard_scope(
         let y = inner.top() + t * inner.height();
         painter.line_segment(
             [Pos2::new(inner.left(), y), Pos2::new(inner.right(), y)],
-            Stroke::new(0.5, SCOPE_GRID),
+            Stroke::new(0.5_f32, SCOPE_GRID),
         );
     }
     for i in 1..n_v {
@@ -1518,7 +1546,7 @@ pub fn render_dashboard_scope(
         let x = inner.left() + t * inner.width();
         painter.line_segment(
             [Pos2::new(x, inner.top()), Pos2::new(x, inner.bottom())],
-            Stroke::new(0.5, SCOPE_GRID),
+            Stroke::new(0.5_f32, SCOPE_GRID),
         );
     }
 
@@ -1528,14 +1556,14 @@ pub fn render_dashboard_scope(
             Pos2::new(inner.left(), inner.bottom()),
             Pos2::new(inner.right(), inner.bottom()),
         ],
-        Stroke::new(1.0, TEXT_DARK),
+        Stroke::new(1.0_f32, TEXT_DARK),
     );
     painter.line_segment(
         [
             Pos2::new(inner.left(), inner.top()),
             Pos2::new(inner.left(), inner.bottom()),
         ],
-        Stroke::new(1.0, TEXT_DARK),
+        Stroke::new(1.0_f32, TEXT_DARK),
     );
 
     // Y-axis labels
@@ -1565,7 +1593,7 @@ pub fn render_dashboard_scope(
         points.push(Pos2::new(x, y));
     }
     for seg in points.windows(2) {
-        painter.line_segment([seg[0], seg[1]], Stroke::new(1.5, SCOPE_LINE));
+        painter.line_segment([seg[0], seg[1]], Stroke::new(1.5_f32, SCOPE_LINE));
     }
 
     // X-axis labels
@@ -1614,7 +1642,7 @@ pub fn render_display_block(
     painter.rect_stroke(
         field,
         3.0,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
         egui::StrokeKind::Inside,
     );
 
@@ -1653,7 +1681,7 @@ pub fn render_lamp(
         radius,
         lamp_color_for_value(block, configured_dashboard_value(block)),
     );
-    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+    painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5_f32, BORDER));
 
     // Highlight (light reflection)
     let highlight_r = radius * 0.3;
@@ -2031,7 +2059,7 @@ fn render_edit_field_control_widget(
             child_ui.painter().rect_stroke(
                 response.rect,
                 3.0,
-                Stroke::new(1.0, palette.border),
+                Stroke::new(1.0_f32, palette.border),
                 egui::StrokeKind::Inside,
             );
             if response.lost_focus() && child_ui.input(|input| input.key_pressed(egui::Key::Enter))
@@ -2386,7 +2414,7 @@ pub fn live_push_button(
     painter.rect_stroke(
         inner,
         4.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
     let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.45);
@@ -2447,7 +2475,11 @@ pub fn live_radio_button_group(
             break; // Don't overflow
         }
         let cx = inner.left() + radio_r + 4.0;
-        painter.circle_stroke(Pos2::new(cx, y), radio_r, Stroke::new(1.0, palette.border));
+        painter.circle_stroke(
+            Pos2::new(cx, y),
+            radio_r,
+            Stroke::new(1.0_f32, palette.border),
+        );
         if index == selected {
             painter.circle_filled(Pos2::new(cx, y), radio_r * 0.55, palette.accent);
         }
@@ -2483,7 +2515,7 @@ pub fn live_combo_box(
     painter.rect_stroke(
         field,
         3.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
     let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.35);
@@ -2532,7 +2564,7 @@ pub fn live_checkbox(
     painter.rect_stroke(
         check_rect,
         2.0,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(1.0_f32, palette.border),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -2548,14 +2580,14 @@ pub fn live_checkbox(
         let right = cx + box_sz * 0.30;
         painter.line_segment(
             [Pos2::new(left, cy), Pos2::new(mid, cy + box_sz * 0.22)],
-            Stroke::new(1.5, palette.accent_dark),
+            Stroke::new(1.5_f32, palette.accent_dark),
         );
         painter.line_segment(
             [
                 Pos2::new(mid, cy + box_sz * 0.22),
                 Pos2::new(right, cy - box_sz * 0.25),
             ],
-            Stroke::new(1.5, palette.accent_dark),
+            Stroke::new(1.5_f32, palette.accent_dark),
         );
     }
 }
@@ -2594,7 +2626,12 @@ pub fn live_slider_or_linear_gauge(
             Pos2::new(inner.right(), cy + bar_h / 2.0),
         );
         painter.rect_filled(bar, 2.0, Color32::from_rgb(220, 220, 225));
-        painter.rect_stroke(bar, 2.0, Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            bar,
+            2.0,
+            Stroke::new(1.0_f32, BORDER),
+            egui::StrokeKind::Inside,
+        );
         let n_ticks = 11;
         for index in 0..n_ticks {
             let tick_t = index as f32 / (n_ticks - 1) as f32;
@@ -2605,7 +2642,7 @@ pub fn live_slider_or_linear_gauge(
                     Pos2::new(x, bar.bottom() + 1.0),
                     Pos2::new(x, bar.bottom() + 1.0 + tick_len),
                 ],
-                Stroke::new(1.0, TEXT_DARK),
+                Stroke::new(1.0_f32, TEXT_DARK),
             );
         }
         let label_y = bar.bottom() + 7.0;
@@ -2690,7 +2727,7 @@ pub fn live_field_or_display(
     painter.rect_stroke(
         field,
         3.0,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
         egui::StrokeKind::Inside,
     );
     let fsz = font_for_rect(rect, font_scale).min(inner.height() * 0.42);
@@ -2749,7 +2786,7 @@ pub fn live_radial_gauge(
             (inner.width().min(inner.height()) * 0.35).max(8.0),
             5.0 * PI / 4.0,
             -PI / 4.0,
-            2.5,
+            2.5_f32,
             ACCENT_DARK,
         ),
         "CircularGaugeBlock" => (
@@ -2758,7 +2795,7 @@ pub fn live_radial_gauge(
             (inner.width().min(inner.height()) * 0.40).max(10.0),
             5.0 * PI / 4.0,
             -PI / 4.0,
-            2.0,
+            2.0_f32,
             NEEDLE_RED,
         ),
         "SemiCircularGaugeBlock" => (
@@ -2767,7 +2804,7 @@ pub fn live_radial_gauge(
             (inner.width() * 0.40).min(inner.height() * 0.7).max(10.0),
             PI,
             0.0,
-            2.0,
+            2.0_f32,
             NEEDLE_RED,
         ),
         _ => (
@@ -2776,7 +2813,7 @@ pub fn live_radial_gauge(
             (inner.width() * 0.7).min(inner.height() * 0.7).max(10.0),
             PI / 2.0,
             0.0,
-            2.0,
+            2.0_f32,
             NEEDLE_RED,
         ),
     };
@@ -2786,7 +2823,7 @@ pub fn live_radial_gauge(
     match block.block_type.as_str() {
         "KnobBlock" => {
             painter.circle_filled(Pos2::new(cx, cy), radius, Color32::from_rgb(220, 220, 225));
-            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5_f32, BORDER));
             painter.circle_filled(
                 Pos2::new(cx, cy),
                 radius * 0.7,
@@ -2806,7 +2843,7 @@ pub fn live_radial_gauge(
                     cx + tick_r_inner * tick_angle.cos(),
                     cy - tick_r_inner * tick_angle.sin(),
                 );
-                painter.line_segment([inner_p, outer], Stroke::new(1.0, BORDER));
+                painter.line_segment([inner_p, outer], Stroke::new(1.0_f32, BORDER));
             }
             let label_r = tick_r_outer + fsz;
             painter.text(
@@ -2832,7 +2869,7 @@ pub fn live_radial_gauge(
         }
         "RotarySwitchBlock" => {
             painter.circle_filled(Pos2::new(cx, cy), radius, Color32::from_rgb(210, 215, 220));
-            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5, BORDER));
+            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(1.5_f32, BORDER));
             let labels = option_labels(block);
             let selected = discrete_live_index(live_value, labels.len());
             let mark_r = radius + 4.0;
@@ -2851,7 +2888,7 @@ pub fn live_radial_gauge(
                 } else {
                     BORDER
                 };
-                painter.line_segment([mark_start, mark_end], Stroke::new(1.5, mark_color));
+                painter.line_segment([mark_start, mark_end], Stroke::new(1.5_f32, mark_color));
                 painter.text(
                     Pos2::new(cx + label_r * angle.cos(), cy - label_r * angle.sin()),
                     Align2::CENTER_CENTER,
@@ -2862,7 +2899,7 @@ pub fn live_radial_gauge(
             }
         }
         "CircularGaugeBlock" => {
-            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(2.0, BORDER));
+            painter.circle_stroke(Pos2::new(cx, cy), radius, Stroke::new(2.0_f32, BORDER));
             let n_ticks = 11;
             for index in 0..n_ticks {
                 let tick_t = index as f32 / (n_ticks - 1) as f32;
@@ -2876,7 +2913,7 @@ pub fn live_radial_gauge(
                 );
                 painter.line_segment(
                     [p1, p2],
-                    Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+                    Stroke::new(if is_major { 1.5_f32 } else { 1.0_f32 }, TEXT_DARK),
                 );
                 if is_major {
                     let val = scale_min + (scale_max - scale_min) * tick_t as f64;
@@ -2908,7 +2945,7 @@ pub fn live_radial_gauge(
                 );
                 painter.line_segment(
                     [p1, p2],
-                    Stroke::new(if is_major { 1.5 } else { 1.0 }, TEXT_DARK),
+                    Stroke::new(if is_major { 1.5_f32 } else { 1.0_f32 }, TEXT_DARK),
                 );
                 if is_major {
                     let val = scale_min + (scale_max - scale_min) * tick_t as f64;
@@ -2927,7 +2964,7 @@ pub fn live_radial_gauge(
             }
             painter.line_segment(
                 [Pos2::new(cx - radius, cy), Pos2::new(cx + radius, cy)],
-                Stroke::new(1.0, BORDER),
+                Stroke::new(1.0_f32, BORDER),
             );
         }
         "QuarterGaugeBlock" => {
@@ -2943,7 +2980,7 @@ pub fn live_radial_gauge(
                     cx + radius * tick_angle.cos(),
                     cy - radius * tick_angle.sin(),
                 );
-                painter.line_segment([p1, p2], Stroke::new(1.5, TEXT_DARK));
+                painter.line_segment([p1, p2], Stroke::new(1.5_f32, TEXT_DARK));
                 let label_r = radius + fsz * 0.8;
                 let val = scale_min + (scale_max - scale_min) * tick_t as f64;
                 painter.text(
@@ -3000,7 +3037,7 @@ pub fn live_lamp(
     let center = inner.center();
     let color = lamp_color_for_value(block, Some(live_value));
     painter.circle_filled(center, radius, color);
-    painter.circle_stroke(center, radius, Stroke::new(1.5, BORDER));
+    painter.circle_stroke(center, radius, Stroke::new(1.5_f32, BORDER));
 }
 
 fn format_dashboard_scalar_with_options(

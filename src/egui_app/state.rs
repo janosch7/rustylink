@@ -162,6 +162,8 @@ fn load_source_model(
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        let mut system = system;
+        crate::parser::annotate_matlab_function_names(&mut system, &charts, &chart_map);
         return Ok((system, charts, chart_map));
     }
 
@@ -180,6 +182,8 @@ fn load_source_model(
     for (name, cid) in parser.get_system_to_chart_map().iter() {
         chart_map.entry(name.clone()).or_insert(*cid);
     }
+    let mut system = system;
+    crate::parser::annotate_matlab_function_names(&mut system, &charts, &chart_map);
     Ok((system, charts, chart_map))
 }
 
@@ -209,7 +213,7 @@ pub struct SignalDialog {
 #[derive(Clone)]
 pub struct BlockDialog {
     pub title: String,
-    pub block: Block,
+    pub block: Arc<Block>,
     pub open: bool,
 }
 
@@ -245,12 +249,14 @@ pub struct BlockContextMenuItem {
     pub on_click: Arc<dyn Fn(&Block) + Send + Sync>,
 }
 
-/// Snapshot of all entities within the currently displayed subsystem.
-#[derive(Clone)]
-pub struct SubsystemEntities {
-    pub blocks: Vec<Block>,
-    pub lines: Vec<Line>,
-    pub annotations: Vec<Annotation>,
+/// Borrowed view of all entities within the currently displayed subsystem.
+///
+/// This holds references into the model tree, avoiding expensive per-frame
+/// clones of all blocks, lines, and annotations.
+pub struct SubsystemEntities<'a> {
+    pub blocks: &'a [Block],
+    pub lines: &'a [Line],
+    pub annotations: Vec<&'a Annotation>,
 }
 
 /// State for a scope popout window.
@@ -340,15 +346,27 @@ pub struct ComputedViewCache {
     /// Cached connection target graph reused across paint passes until invalidated.
     pub connection_target_resolver:
         Option<Arc<crate::connection_targets::ConnectionTargetResolver>>,
+    /// Cached shallow-cloned blocks for the current subsystem view.
+    /// Avoids re-cloning all blocks every frame when the path/model hasn't changed.
+    pub cached_owned_blocks: Vec<crate::model::Block>,
+    /// Cached cloned lines for the current subsystem view.
+    pub cached_sys_lines: Vec<crate::model::Line>,
+    /// Cached annotations (system + block-level) for the current subsystem view.
+    pub cached_sys_annotations: Vec<crate::model::Annotation>,
+    /// Cached subsystem block lookup map (SID → full block with subsystem).
+    pub cached_subsystem_block_lookup: HashMap<String, crate::model::Block>,
     /// Topology signature the cached resolver was built from.  The resolver
     /// depends only on model topology (not geometry) and spans the whole tree,
     /// so it is reused across subsystem navigation and layout-only edits and is
     /// rebuilt only when this signature changes.
     cached_resolver_sig: Option<u64>,
+    /// Generation at which the topology signature was last computed.
+    /// Avoids re-hashing the entire tree every frame when the model is unchanged.
+    cached_sig_gen: u64,
     /// The subsystem path for which this cache was computed.
-    cached_path: Vec<String>,
+    pub cached_path: Vec<String>,
     /// Model generation at which the cache was computed.
-    cached_gen: u64,
+    pub cached_gen: u64,
 }
 
 impl Default for ComputedViewCache {
@@ -361,6 +379,11 @@ impl Default for ComputedViewCache {
             connected_ports: std::collections::HashSet::new(),
             connection_target_resolver: None,
             cached_resolver_sig: None,
+            cached_sig_gen: 0,
+            cached_owned_blocks: Vec::new(),
+            cached_sys_lines: Vec::new(),
+            cached_sys_annotations: Vec::new(),
+            cached_subsystem_block_lookup: HashMap::new(),
             cached_path: Vec::new(),
             cached_gen: 0,
         }
@@ -396,12 +419,17 @@ impl ComputedViewCache {
         &mut self,
         root: &System,
     ) -> Arc<crate::connection_targets::ConnectionTargetResolver> {
-        let sig = crate::connection_targets::model_topology_signature(root);
-        if self.connection_target_resolver.is_none() || self.cached_resolver_sig != Some(sig) {
-            self.connection_target_resolver = Some(Arc::new(
-                crate::connection_targets::ConnectionTargetResolver::new(root),
-            ));
-            self.cached_resolver_sig = Some(sig);
+        // Only re-hash the topology when the model generation has changed.
+        // This avoids walking the entire system tree every frame.
+        if self.connection_target_resolver.is_none() || self.cached_sig_gen != self.generation {
+            let sig = crate::connection_targets::model_topology_signature(root);
+            self.cached_sig_gen = self.generation;
+            if self.connection_target_resolver.is_none() || self.cached_resolver_sig != Some(sig) {
+                self.connection_target_resolver = Some(Arc::new(
+                    crate::connection_targets::ConnectionTargetResolver::new(root),
+                ));
+                self.cached_resolver_sig = Some(sig);
+            }
         }
         self.connection_target_resolver
             .clone()
@@ -445,7 +473,8 @@ pub struct SubsystemApp {
     pub library_search_paths: Vec<Utf8PathBuf>,
     /// Registered listeners to be notified whenever the displayed subsystem changes.
     #[allow(clippy::type_complexity)]
-    subsystem_change_listeners: Vec<Arc<dyn Fn(&[String], &SubsystemEntities) + Send + Sync>>, // private to encourage using the API
+    subsystem_change_listeners:
+        Vec<Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>>, // private to encourage using the API
     /// Optional click handler to override default action when clicking a block.
     /// Return true from the handler to indicate the click was handled and suppress the default behavior.
     #[allow(clippy::type_complexity)]
@@ -455,6 +484,14 @@ pub struct SubsystemApp {
     ///
     /// Per-block override: `Block::show_name = Some(true/false)`.
     pub show_block_names_default: bool,
+
+    /// "Less colorful" rendering mode.
+    ///
+    /// When enabled, every block body is drawn with a neutral light-gray fill
+    /// (bordered so it stays visible in light themes) and signal lines are drawn
+    /// in neutral gray, regardless of block-type/signal coloring.  Area
+    /// annotations keep their model-defined colors.
+    pub monochrome: bool,
 
     /// Block-name font size as a factor of the port chevron height.
     ///
@@ -605,6 +642,7 @@ impl SubsystemApp {
             subsystem_change_listeners: Vec::new(),
             block_click_handler: None,
             show_block_names_default: true,
+            monochrome: false,
             block_name_font_factor: 0.4,
             block_name_extend_factor: 3.0,
             block_value_font_factor: 0.8,
@@ -654,19 +692,21 @@ impl SubsystemApp {
         app
     }
 
-    /// Return a snapshot of entities (blocks, lines, annotations) in the current subsystem.
-    pub fn current_entities(&self) -> Option<SubsystemEntities> {
-        self.current_system().map(|sys| SubsystemEntities {
-            blocks: sys.blocks.clone(),
-            lines: sys.lines.clone(),
-            annotations: {
-                // Combine system-level and block-attached annotations into a single list
-                let mut anns = sys.annotations.clone();
-                for b in &sys.blocks {
-                    anns.extend(b.annotations.clone());
-                }
-                anns
-            },
+    /// Return a borrowed view of entities (blocks, lines, annotations) in the current subsystem.
+    ///
+    /// This returns references into the model tree, avoiding expensive per-frame
+    /// clones of all blocks, lines, and annotations.
+    pub fn current_entities(&self) -> Option<SubsystemEntities<'_>> {
+        let sys = self.current_system()?;
+        let annotations = sys
+            .annotations
+            .iter()
+            .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+            .collect();
+        Some(SubsystemEntities {
+            blocks: &sys.blocks,
+            lines: &sys.lines,
+            annotations,
         })
     }
 
@@ -674,7 +714,7 @@ impl SubsystemApp {
     /// The callback receives the new path (relative to root) and an entity snapshot.
     pub fn add_subsystem_change_listener<F>(&mut self, f: F)
     where
-        F: Fn(&[String], &SubsystemEntities) + Send + Sync + 'static,
+        F: for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync + 'static,
     {
         self.subsystem_change_listeners.push(Arc::new(f));
     }
@@ -748,7 +788,7 @@ impl SubsystemApp {
         self.block_click_handler = None;
     }
 
-    pub fn egui_id(&self, key: impl std::hash::Hash) -> egui::Id {
+    pub fn egui_id(&self, key: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
         egui::Id::new(("rustylink_viewer", self.instance_id, key))
     }
 
@@ -978,19 +1018,13 @@ impl SubsystemApp {
             return;
         }
 
-        if let Some(state) = self.default_navigation_view_states.get(&key) {
-            let (zoom, pan, view_bounds) = state.to_runtime();
-            self.zoom = zoom;
-            self.pan = pan;
-            self.view_bounds = view_bounds;
-            self.reset_view = false;
-            return;
-        }
-
+        // First visit: trigger fit-to-view reset.  Authored states
+        // (ZoomFactor/Location from the model) are not applied automatically;
+        // use `apply_authored_navigation_view_state_for_current_path` for that.
         self.pan = Vec2::ZERO;
         self.view_bounds = None;
         self.zoom = self.default_zoom_by_path.get(&key).copied().unwrap_or(1.0);
-        self.reset_view = false;
+        self.reset_view = true;
     }
 
     pub fn remember_current_navigation_view_state(&mut self) {
@@ -1110,6 +1144,7 @@ impl SubsystemApp {
     /// If the block is a non-chart subsystem, open it and return true.
     pub fn open_block_if_subsystem(&mut self, b: &Block) -> bool {
         if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            && !b.is_matlab_function
             && let Some(sub) = &b.subsystem
             && sub.chart.is_none()
         {
@@ -1147,7 +1182,7 @@ impl SubsystemApp {
 
 impl eframe::App for SubsystemApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             super::ui::update_with_info(self, ui);
         });
     }

@@ -325,7 +325,8 @@ impl SlxArchive {
 
         let mut assembled = root;
         let base = camino::Utf8Path::new("simulink/systems");
-        Self::link_system_refs_recursive(&mut assembled, base, &systems_by_path);
+        let mut cache: std::collections::HashMap<String, System> = std::collections::HashMap::new();
+        Self::link_system_refs_recursive(&mut assembled, base, &systems_by_path, &mut cache);
 
         Ok(assembled)
     }
@@ -335,20 +336,24 @@ impl SlxArchive {
         system: &mut System,
         current_base: &camino::Utf8Path,
         lookup: &BTreeMap<&str, &System>,
+        cache: &mut std::collections::HashMap<String, System>,
     ) {
         for blk in &mut system.blocks {
             if let Some(ref ref_name) = blk.system_ref {
                 let ref_path =
                     crate::parser::helpers::resolve_system_reference(ref_name, current_base);
-                if let Some(sub) = lookup.get(ref_path.as_str()) {
+                let ref_path_str = ref_path.as_str().to_string();
+                if let Some(cached) = cache.get(&ref_path_str) {
+                    blk.subsystem = Some(Box::new(cached.clone()));
+                } else if let Some(sub) = lookup.get(ref_path.as_str()) {
                     let mut sub_cloned = (*sub).clone();
                     let sub_base = ref_path.parent().unwrap_or(current_base);
-                    Self::link_system_refs_recursive(&mut sub_cloned, sub_base, lookup);
+                    Self::link_system_refs_recursive(&mut sub_cloned, sub_base, lookup, cache);
+                    cache.insert(ref_path_str, sub_cloned.clone());
                     blk.subsystem = Some(Box::new(sub_cloned));
                 }
-            }
-            if let Some(ref mut sub) = blk.subsystem {
-                Self::link_system_refs_recursive(sub, current_base, lookup);
+            } else if let Some(ref mut sub) = blk.subsystem {
+                Self::link_system_refs_recursive(sub, current_base, lookup, cache);
             }
         }
     }

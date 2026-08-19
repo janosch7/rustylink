@@ -763,6 +763,7 @@ pub fn create_default_block(
         Some(PortCounts {
             ins: if inputs > 0 { Some(inputs) } else { None },
             outs: if outputs > 0 { Some(outputs) } else { None },
+            ..Default::default()
         })
     } else {
         None

@@ -23,36 +23,32 @@ fn port_labels_do_not_fall_back_to_propagated_signals() {
 
 #[test]
 fn fixed_port_labels_ignore_port_name_overrides() {
+    // AlgebraicConstraint names its ports `f(z)` and `z` in the catalog; a
+    // per-port `Name` in the model must not override that.
     let mut block = rustylink::editor::operations::create_default_block(
-        "ComplexToRealImag",
-        "ComplexToRealImag",
+        "AlgebraicConstraint",
+        "AlgebraicConstraint",
         0,
         0,
         1,
-        2,
+        1,
     );
     block.ports = vec![
         rustylink::model::Port {
             port_type: "in".to_string(),
             index: Some(1),
-            properties: Default::default(),
+            properties: IndexMap::from_iter([("Name".to_string(), "OtherSignal".to_string())]),
         },
         rustylink::model::Port {
             port_type: "out".to_string(),
             index: Some(1),
             properties: IndexMap::from_iter([("Name".to_string(), "VisibleSignal".to_string())]),
         },
-        rustylink::model::Port {
-            port_type: "out".to_string(),
-            index: Some(2),
-            properties: IndexMap::from_iter([("Name".to_string(), "OtherSignal".to_string())]),
-        },
     ];
 
     let cfg = get_block_type_cfg(&block);
-    assert_eq!(port_label_display_name(&block, 1, true, &cfg), "Re+Im");
-    assert_eq!(port_label_display_name(&block, 1, false, &cfg), "Re");
-    assert_eq!(port_label_display_name(&block, 2, false, &cfg), "Im");
+    assert_eq!(port_label_display_name(&block, 1, true, &cfg), "f(z)");
+    assert_eq!(port_label_display_name(&block, 1, false, &cfg), "z");
 }
 
 #[test]

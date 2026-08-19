@@ -581,9 +581,17 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
                 }
             }
             "PortCounts" => {
-                let ins = child.attribute("in").and_then(|s| s.parse::<u32>().ok());
-                let outs = child.attribute("out").and_then(|s| s.parse::<u32>().ok());
-                port_counts = Some(PortCounts { ins, outs });
+                let count = |name: &str| {
+                    child
+                        .attribute(name)
+                        .and_then(|s: &str| s.parse::<u32>().ok())
+                };
+                port_counts = Some(PortCounts {
+                    ins: count("in"),
+                    outs: count("out"),
+                    enable: count("enable"),
+                    trigger: count("trigger"),
+                });
                 child_order.push(BlockChildKind::PortCounts);
             }
             "PortProperties" => {
@@ -813,6 +821,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
         blk.port_counts = Some(crate::model::PortCounts {
             ins: Some(ins),
             outs: Some(outs),
+            ..Default::default()
         });
         for i in 1..=ins {
             let mut p = crate::model::Port {
@@ -854,6 +863,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
         blk.port_counts = Some(crate::model::PortCounts {
             ins: Some(ins),
             outs: Some(outs),
+            ..Default::default()
         });
         for i in 1..=ins {
             let mut p = crate::model::Port {

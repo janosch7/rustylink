@@ -17,6 +17,7 @@ pub mod library;
 pub mod source;
 
 // Re-export key types at the parser module level for backward compatibility.
+pub use chart::annotate_matlab_function_names;
 pub use graphical_interface::*;
 pub use helpers::{parse_endpoint, parse_points, resolve_system_reference};
 pub use library::*;
@@ -440,8 +441,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                     self.link_system_refs(&mut sub_cloned, sub_base_dir);
                     blk.subsystem = Some(Box::new(sub_cloned));
                 }
-            }
-            if let Some(ref mut sub) = blk.subsystem {
+            } else if let Some(ref mut sub) = blk.subsystem {
                 self.link_system_refs(sub, current_base);
             }
         }

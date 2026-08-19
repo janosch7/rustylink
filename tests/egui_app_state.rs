@@ -114,6 +114,7 @@ fn resolver_reused_until_topology_changes() {
     root.blocks[0]
         .properties
         .insert("Position".to_string(), "[1, 2, 3, 4]".to_string());
+    cache.invalidate();
     let after_move = cache.ensure_resolver(&root);
     assert!(
         Arc::ptr_eq(&first, &after_move),
@@ -122,6 +123,7 @@ fn resolver_reused_until_topology_changes() {
 
     // A topology edit (adding a block) must rebuild the resolver.
     root.blocks.push(test_block("Extra", Some("2")));
+    cache.invalidate();
     let after_topology = cache.ensure_resolver(&root);
     assert!(
         !Arc::ptr_eq(&first, &after_topology),

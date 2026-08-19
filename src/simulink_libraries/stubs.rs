@@ -260,6 +260,7 @@ pub fn create_stub_block(name: &str, ins: u32, outs: u32) -> Block {
         Some(PortCounts {
             ins: Some(ins),
             outs: Some(outs),
+            ..Default::default()
         })
     } else {
         None

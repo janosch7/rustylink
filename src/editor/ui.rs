@@ -15,11 +15,17 @@
 #![cfg(feature = "egui")]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use egui_phosphor_icons::icons::{
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_UP, ARROWS_CLOCKWISE, ARROWS_LEFT_RIGHT,
+    CIRCLE, CLIPBOARD, FILE_TEXT, TRASH,
+};
 
 use crate::model::EndpointRef;
 
+use crate::egui_app::navigation::resolve_subsystem_by_vec;
 use crate::egui_app::{
     BlockDialog, SignalDialog, endpoint_pos_maybe_mirrored, get_block_type_cfg,
     highlight_query_job, parse_block_rect, parse_rect_str, show_zoom_controls,
@@ -33,7 +39,10 @@ use super::state::{DragMode, EditorState};
 // Color utilities — re-exported from canonical `egui_app::ui::colors`
 // ────────────────────────────────────────────────────────────────────────────
 
-use crate::egui_app::colors::{block_base_color, contrast_color};
+use crate::egui_app::colors::{
+    area_annotation_border, area_annotation_fill, block_fill_color, block_has_model_color,
+    contrast_color, monochrome_block_border, monochrome_line_color,
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -62,9 +71,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let path_snapshot = state.app.path.clone();
 
     // Top panel: breadcrumbs + search + edit toolbar
-    egui::Panel::top(state.app.egui_id("editor_top")).show_inside(ui, |ui| {
+    egui::Panel::top(state.app.egui_id("editor_top")).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let up_label = egui::RichText::new("⬆ Up");
+            let up_label = egui::RichText::new(format!("{} Up", ARROW_UP.as_str()));
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
             if up.clicked() {
                 let mut p = path_snapshot.clone();
@@ -89,18 +98,27 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // Toolbar row
         ui.horizontal(|ui| {
             // Undo / redo
-            let undo_btn = ui.add_enabled(state.history.can_undo(), egui::Button::new("↶ Undo"));
+            let undo_btn = ui.add_enabled(
+                state.history.can_undo(),
+                egui::Button::new(format!("{} Undo", ARROW_COUNTER_CLOCKWISE.as_str())),
+            );
             if undo_btn.clicked() {
                 state.undo();
             }
-            let redo_btn = ui.add_enabled(state.history.can_redo(), egui::Button::new("↷ Redo"));
+            let redo_btn = ui.add_enabled(
+                state.history.can_redo(),
+                egui::Button::new(format!("{} Redo", ARROW_CLOCKWISE.as_str())),
+            );
             if redo_btn.clicked() {
                 state.redo();
             }
             ui.separator();
 
             let has_selection = !state.selection.is_empty();
-            let del_btn = ui.add_enabled(has_selection, egui::Button::new("🗑 Delete"));
+            let del_btn = ui.add_enabled(
+                has_selection,
+                egui::Button::new(format!("{} Delete", TRASH.as_str())),
+            );
             if del_btn.clicked() {
                 state.delete_selection();
             }
@@ -113,14 +131,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             }
             let rotate_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("🔄 Rotate"),
+                egui::Button::new(format!("{} Rotate", ARROWS_CLOCKWISE.as_str())),
             );
             if rotate_btn.clicked() {
                 state.rotate_selection();
             }
             let mirror_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("↔ Mirror"),
+                egui::Button::new(format!("{} Mirror", ARROWS_LEFT_RIGHT.as_str())),
             );
             if mirror_btn.clicked() {
                 state.mirror_selection();
@@ -129,13 +147,15 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             let copy_btn = ui.add_enabled(
                 !state.selection.selected_blocks.is_empty(),
-                egui::Button::new("📋 Copy"),
+                egui::Button::new(format!("{} Copy", CLIPBOARD.as_str())),
             );
             if copy_btn.clicked() {
                 state.copy_selection();
             }
-            let paste_btn =
-                ui.add_enabled(state.clipboard.has_content(), egui::Button::new("📃 Paste"));
+            let paste_btn = ui.add_enabled(
+                state.clipboard.has_content(),
+                egui::Button::new(format!("{} Paste", FILE_TEXT.as_str())),
+            );
             if paste_btn.clicked() {
                 state.paste();
             }
@@ -169,7 +189,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             // Modified indicator
             if state.dirty {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.colored_label(Color32::from_rgb(255, 200, 80), "● Modified");
+                    ui.colored_label(
+                        Color32::from_rgb(255, 200, 80),
+                        format!("{} Modified", CIRCLE.as_str()),
+                    );
                 });
             }
 
@@ -215,37 +238,52 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         }
     });
 
-    // Resolve current system
-    let entities_opt = state.app.current_entities();
-    if entities_opt.is_none() {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.colored_label(Color32::RED, "Invalid path — nothing to render");
-        });
-        return;
-    }
-    let entities = entities_opt.unwrap();
-    let system_name: String = state
-        .app
-        .current_system()
-        .and_then(|s| s.properties.get("Name").cloned())
-        .or_else(|| path_snapshot.last().cloned())
-        .unwrap_or_else(|| "<root>".to_string());
-
-    // Enrich blocks with SystemName
-    let mut enriched_blocks: Vec<crate::model::Block> = Vec::with_capacity(entities.blocks.len());
-    for b in &entities.blocks {
-        let mut bc = b.clone();
-        bc.properties
-            .entry("SystemName".to_string())
-            .or_insert(system_name.clone());
-        enriched_blocks.push(bc);
-    }
-    let blocks: Vec<(&crate::model::Block, Rect)> = enriched_blocks
+    // Resolve current system (borrowed from state.app.root — only borrows root, not all of state)
+    let sys = match resolve_subsystem_by_vec(&state.app.root, &state.app.path) {
+        Some(s) => s,
+        None => {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.colored_label(Color32::RED, "Invalid path — nothing to render");
+            });
+            return;
+        }
+    };
+    // Shallow-clone blocks (skip subsystem trees) to avoid borrow conflicts
+    // with &mut state in the closure below, while minimizing clone cost.
+    let owned_blocks: Vec<crate::model::Block> = sys
+        .blocks
+        .iter()
+        .filter(|b| parse_block_rect(b).is_some())
+        .map(|b| {
+            let mut c = b.clone();
+            c.subsystem = None;
+            c
+        })
+        .collect();
+    // Keep original blocks (with subsystem intact) for subsystem blocks so
+    // that is_subsystem_block() checks in context menus and double-click work.
+    let subsystem_block_lookup: HashMap<String, crate::model::Block> = sys
+        .blocks
+        .iter()
+        .filter(|b| parse_block_rect(b).is_some())
+        .filter(|b| {
+            (b.block_type == "SubSystem" || b.block_type == "Reference")
+                && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none())
+        })
+        .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
+        .collect();
+    let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
         .iter()
         .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
         .collect();
-    let annotations: Vec<(&crate::model::Annotation, Rect)> = entities
+    // Clone annotations for use inside the closure
+    let sys_annotations: Vec<crate::model::Annotation> = sys
         .annotations
+        .iter()
+        .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+        .cloned()
+        .collect();
+    let annotations: Vec<(&crate::model::Annotation, Rect)> = sys_annotations
         .iter()
         .filter_map(|a| {
             a.position
@@ -254,9 +292,11 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 .map(|pos| (a, pos))
         })
         .collect();
+    // Clone lines for use inside the closure (avoids borrowing state.app.root across closure)
+    let sys_lines: Vec<crate::model::Line> = sys.lines.clone();
 
     if blocks.is_empty() && annotations.is_empty() {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.colored_label(
                 Color32::YELLOW,
                 "No blocks with positions to render. Press 'A' to add blocks.",
@@ -288,13 +328,18 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
     let base_scale = sx.min(sy).max(0.1);
 
     if state.app.reset_view {
+        // Fit every block into the viewport and centre the fitted content so
+        // all blocks are visible in the screen rect (not anchored to a corner).
         state.app.zoom = 1.0;
-        state.app.pan = Vec2::ZERO;
+        let extra_x = (avail_size.x - 2.0 * margin - bb.width() * base_scale).max(0.0);
+        let extra_y = (avail_size.y - 2.0 * margin - bb.height() * base_scale).max(0.0);
+        state.app.pan = Vec2::new(extra_x * 0.5, extra_y * 0.5);
         state.app.reset_view = false;
+        ui.ctx().request_repaint();
     }
 
     // Central panel rendering
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         let avail = ui.available_rect_before_wrap();
 
         // Canvas interaction
@@ -348,6 +393,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         // and icons scale exactly with the on-screen block size.
         let font_scale: f32 = (base_scale * zoom / 2.0).max(0.01);
 
+        let dark_mode = ui.visuals().dark_mode;
+        let monochrome = state.app.monochrome;
+
         // Draw grid
         if state.show_grid {
             draw_grid(
@@ -372,6 +420,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             Pos2::new(avail.left() + margin, avail.top() + margin),
             avail.center(),
             &mut state.app.reset_view,
+            &mut state.app.monochrome,
         );
 
         // Build SID maps
@@ -386,6 +435,23 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         } else {
             None
         };
+
+        // Draw area annotations (colored regions) behind the blocks.  Areas
+        // keep their model-defined colors even in "less colorful" mode.
+        for (a, r_model) in &annotations {
+            if let Some(fill) = area_annotation_fill(a) {
+                let r_screen = Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
+                ui.painter().rect_filled(r_screen, 2.0, fill);
+                if let Some(border) = area_annotation_border(a) {
+                    ui.painter().rect_stroke(
+                        r_screen,
+                        2.0,
+                        Stroke::new(1.0_f32, border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        }
 
         // Draw blocks
         for (block_idx, (b, r)) in blocks.iter().enumerate() {
@@ -443,7 +509,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 sid_screen_map.insert(sid.clone(), r_screen);
             }
             let cfg = get_block_type_cfg(b);
-            let bg = block_base_color(b, &cfg);
+            let bg = block_fill_color(b, &cfg, monochrome, dark_mode);
 
             let is_selected = state.selection.is_block_selected(block_idx);
 
@@ -458,6 +524,12 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 b.commented,
             );
             let fg = contrast_color(body_bg);
+            let border_color = if monochrome && !block_has_model_color(b) {
+                monochrome_block_border(dark_mode)
+            } else {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+            };
             let params = crate::simulink_libraries::render::InteriorParams {
                 live_mode: false,
                 font_scale,
@@ -468,6 +540,8 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 port_y: None,
                 port_label_widths: None,
                 text_color: fg,
+                fill_color: body_bg,
+                border_color,
             };
             crate::simulink_libraries::render::render_block_interior(
                 ui.painter(),
@@ -478,15 +552,11 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Body outline (shape-aware, shared with the viewer).
             if !b.commented {
-                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
                 crate::egui_app::render::stroke_block_body(
                     ui.painter(),
                     r_screen,
                     cfg.shape,
-                    Stroke::new(
-                        1.5,
-                        Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
-                    ),
+                    Stroke::new(1.5_f32, border_color),
                 );
             }
 
@@ -495,7 +565,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 ui.painter().rect_stroke(
                     r_screen.expand(2.0),
                     6.0,
-                    Stroke::new(2.5, Color32::from_rgb(0, 120, 255)),
+                    Stroke::new(2.5_f32, Color32::from_rgb(0, 120, 255)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -526,7 +596,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Context menu
             resp.context_menu(|ui| {
-                block_context_menu(state, ui, block_idx, b);
+                block_context_menu(state, ui, block_idx, b, &subsystem_block_lookup);
             });
 
             // Click/drag handling
@@ -553,7 +623,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             }
             if resp.double_clicked() {
                 // Open subsystem or code editor
-                handle_block_double_click(state, block_idx, b);
+                handle_block_double_click(state, block_idx, b, &subsystem_block_lookup);
             }
         }
 
@@ -765,7 +835,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 reg_branch(sub, port_counts);
             }
         }
-        for line in &entities.lines {
+        for line in &sys_lines {
             if let Some(src) = &line.src {
                 reg_ep(src, &mut port_counts);
             }
@@ -778,9 +848,9 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         }
 
         // Color lines with graph coloring
-        let line_colors = compute_line_colors(&entities.lines, &port_counts);
+        let line_colors = compute_line_colors(&sys_lines, &port_counts);
 
-        for (li, line) in entities.lines.iter().enumerate() {
+        for (li, line) in sys_lines.iter().enumerate() {
             let Some(src) = line.src.as_ref() else {
                 continue;
             };
@@ -811,9 +881,13 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 screen_pts.push(to_screen(dst_pt));
             }
 
-            let color = line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors.get(li).copied().unwrap_or(Color32::LIGHT_GREEN)
+            };
             let is_selected = state.selection.is_line_selected(li);
-            let stroke_width = if is_selected { 3.5 } else { 2.0 };
+            let stroke_width = if is_selected { 3.5_f32 } else { 2.0_f32 };
             let stroke = Stroke::new(stroke_width, color);
 
             // Draw segments
@@ -848,7 +922,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 for seg in screen_pts.windows(2) {
                     ui.painter().line_segment(
                         [seg[0], seg[1]],
-                        Stroke::new(5.0, Color32::from_rgba_unmultiplied(0, 120, 255, 60)),
+                        Stroke::new(5.0_f32, Color32::from_rgba_unmultiplied(0, 120, 255, 60)),
                     );
                 }
 
@@ -1012,10 +1086,14 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 state.app.block_name_font_factor,
             );
 
+            // Block-name labels sit on the canvas (not on the block body), so
+            // they must contrast with the canvas background — otherwise a dark
+            // glyph (chosen for a light block fill) is invisible in dark mode.
+            let _ = bg;
             let fg = if b.commented {
                 Color32::GRAY
             } else {
-                contrast_color(bg)
+                contrast_color(ui.visuals().panel_fill)
             };
 
             let left = r_screen.left() - left_extra;
@@ -1222,7 +1300,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             if let Some(start) = start_screen {
                 let end = to_screen(Pos2::new(current_x, current_y));
                 let conn_color = Color32::from_rgb(80, 200, 80);
-                let conn_stroke = Stroke::new(2.5, conn_color);
+                let conn_stroke = Stroke::new(2.5_f32, conn_color);
 
                 // Draw orthogonal routing preview
                 let mid_x = (start.x + end.x) / 2.0;
@@ -1248,7 +1326,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                         ui.painter().circle_stroke(
                             snap_screen,
                             8.0,
-                            Stroke::new(2.0, Color32::from_rgb(50, 255, 50)),
+                            Stroke::new(2.0_f32, Color32::from_rgb(50, 255, 50)),
                         );
                         ui.painter().circle_filled(
                             snap_screen,
@@ -1277,7 +1355,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             ui.painter().rect_stroke(
                 sel_rect,
                 0.0,
-                Stroke::new(1.0, Color32::from_rgb(0, 120, 255)),
+                Stroke::new(1.0_f32, Color32::from_rgb(0, 120, 255)),
                 egui::StrokeKind::Outside,
             );
         }
@@ -1453,6 +1531,7 @@ fn block_context_menu(
     ui: &mut egui::Ui,
     block_idx: usize,
     block: &crate::model::Block,
+    subsystem_block_lookup: &HashMap<String, crate::model::Block>,
 ) {
     if ui.button("Delete").clicked() {
         state.selection.select_block(block_idx);
@@ -1488,8 +1567,18 @@ fn block_context_menu(
         }
         ui.separator();
     }
-    if is_subsystem_block(block) && ui.button("Open Subsystem").clicked() {
-        state.app.open_block_if_subsystem(block);
+    let is_subsystem = block
+        .sid
+        .as_ref()
+        .is_some_and(|sid| subsystem_block_lookup.contains_key(sid));
+    if is_subsystem && ui.button("Open Subsystem").clicked() {
+        let full_block: crate::model::Block = block
+            .sid
+            .as_ref()
+            .and_then(|sid| subsystem_block_lookup.get(sid))
+            .cloned()
+            .unwrap_or_else(|| block.clone());
+        state.app.open_block_if_subsystem(&full_block);
         state.selection.clear();
         ui.close();
     }
@@ -1509,7 +1598,7 @@ fn block_context_menu(
         // Show block info
         state.app.block_view = Some(BlockDialog {
             title: format!("Block: {}", block.name),
-            block: block.clone(),
+            block: Arc::new(block.clone()),
             open: true,
         });
         ui.close();
@@ -1805,11 +1894,22 @@ fn handle_block_double_click(
     state: &mut EditorState,
     block_idx: usize,
     block: &crate::model::Block,
+    subsystem_block_lookup: &HashMap<String, crate::model::Block>,
 ) {
     if is_code_block(block) {
         open_code_editor(state, block_idx, block);
-    } else if is_subsystem_block(block) {
-        state.app.open_block_if_subsystem(block);
+    } else if block
+        .sid
+        .as_ref()
+        .is_some_and(|sid| subsystem_block_lookup.contains_key(sid))
+    {
+        let full_block: crate::model::Block = block
+            .sid
+            .as_ref()
+            .and_then(|sid| subsystem_block_lookup.get(sid))
+            .cloned()
+            .unwrap_or_else(|| block.clone());
+        state.app.open_block_if_subsystem(&full_block);
         state.selection.clear();
     }
 }
@@ -1908,7 +2008,7 @@ fn draw_grid(
     let end_y = (br.y / grid).ceil() as i32 * grid_size;
 
     let grid_color = Color32::from_rgba_unmultiplied(100, 100, 100, 30);
-    let grid_stroke = Stroke::new(0.5, grid_color);
+    let grid_stroke = Stroke::new(0.5_f32, grid_color);
 
     let mut x = start_x;
     while x <= end_x {
@@ -2195,7 +2295,7 @@ fn draw_resize_handles(
         ui.painter().rect_stroke(
             Rect::from_center_size(*pos, Vec2::splat(handle_size)),
             0.0,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
 
