@@ -1,6 +1,9 @@
-use super::colors::{block_base_color, contrast_color};
+use super::colors::{
+    area_annotation_border, area_annotation_fill, block_fill_color, block_has_model_color,
+    contrast_color, monochrome_block_border, monochrome_line_color,
+};
 use super::corner_ops;
-use super::helpers::{is_block_subsystem, record_interaction};
+use super::helpers::record_interaction;
 use super::line_coloring;
 use super::signal_routing;
 use super::types::{ClickAction, UpdateResponse};
@@ -19,9 +22,28 @@ use crate::egui_app::state::{
     LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
 };
 use crate::egui_app::text::highlight_query_job;
-use crate::egui_app::{get_block_type_cfg, port_label_display_name};
+use crate::egui_app::{get_block_type_cfg, port_label_defined_name, port_label_display_name};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use egui_phosphor_icons::icons::{ARROW_UP, FOLDER_OPEN};
 use std::collections::{BTreeSet, HashMap};
+
+/// Shallow clone of a block that prunes the expensive subsystem tree.
+///
+/// Rendering a subsystem needs its *direct* children – Simulink previews a
+/// subsystem from the boundary ports and conditional-execution port blocks it
+/// contains – but never the nested systems below them, which are what make a
+/// deep clone expensive.
+fn shallow_clone_block(b: &crate::model::Block) -> crate::model::Block {
+    let mut clone = b.clone();
+    if let Some(system) = clone.subsystem.as_deref_mut() {
+        system.lines.clear();
+        system.annotations.clear();
+        for child in &mut system.blocks {
+            child.subsystem = None;
+        }
+    }
+    clone
+}
 
 pub(crate) fn format_live_scalar_csv(value: f64) -> String {
     let mut text = format!("{value:.6}");
@@ -333,7 +355,7 @@ fn draw_line_testpoint_marker(painter: &egui::Painter, center: Pos2, color: Colo
     painter.rect_stroke(
         marker_rect,
         4.0,
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -370,10 +392,10 @@ fn branch_hits_sid(branch: &crate::model::Branch, sid: &str) -> bool {
 #[cfg(feature = "dashboard")]
 fn first_input_signal_name(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) -> Option<String> {
     let sid = block.sid.as_deref()?;
-    entities.lines.iter().find_map(|line| {
+    lines.iter().find_map(|line| {
         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
         let branched = line
             .branches
@@ -388,10 +410,7 @@ fn first_input_signal_name(
 }
 
 #[cfg(feature = "dashboard")]
-fn scope_title_for_block(
-    block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
-) -> String {
+fn scope_title_for_block(block: &crate::model::Block, lines: &[crate::model::Line]) -> String {
     if let Some(crate::model::DashboardBinding::SignalSpec { signal_name, .. }) =
         block.dashboard_binding.as_ref()
         && !signal_name.trim().is_empty()
@@ -399,14 +418,14 @@ fn scope_title_for_block(
         return signal_name.clone();
     }
 
-    first_input_signal_name(block, entities).unwrap_or_else(|| block.name.clone())
+    first_input_signal_name(block, lines).unwrap_or_else(|| block.name.clone())
 }
 
 #[cfg(feature = "dashboard")]
 fn update_scope_live_sample(
     app: &mut SubsystemApp,
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    lines: &[crate::model::Line],
 ) {
     if !matches!(block.block_type.as_str(), "Scope" | "DashboardScope") {
         return;
@@ -417,7 +436,7 @@ fn update_scope_live_sample(
     };
 
     let scope_key = app.scope_key_for_block(block);
-    let scope_title = scope_title_for_block(block, entities);
+    let scope_title = scope_title_for_block(block, lines);
     let mut scopes = app.scope_instances.lock().unwrap();
     let scope = scopes.entry(scope_key.clone()).or_insert_with(|| {
         crate::egui_app::scope_widget::MiniScope::new((
@@ -473,9 +492,9 @@ pub(crate) fn update_internal(
     let mut clear_search = false;
     let path_snapshot = app.path.clone();
 
-    egui::Panel::top(app.egui_id("top_panel")).show_inside(ui, |ui| {
+    egui::Panel::top(app.egui_id("top_panel")).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let up_label = egui::RichText::new("⬆ Up");
+            let up_label = egui::RichText::new(format!("{} Up", ARROW_UP.as_str()));
             let up = ui.add_enabled(!path_snapshot.is_empty(), egui::Button::new(up_label));
             if up.clicked() {
                 let mut p = path_snapshot.clone();
@@ -530,8 +549,14 @@ pub(crate) fn update_internal(
                 app.move_mode_enabled = !app.move_mode_enabled;
             }
             if app.move_mode_enabled {
-                let undo_btn = egui::Button::new("Undo");
-                let redo_btn = egui::Button::new("Redo");
+                let undo_btn = egui::Button::new(format!(
+                    "{} Undo",
+                    egui_phosphor_icons::icons::ARROW_COUNTER_CLOCKWISE.as_str()
+                ));
+                let redo_btn = egui::Button::new(format!(
+                    "{} Redo",
+                    egui_phosphor_icons::icons::ARROW_CLOCKWISE.as_str()
+                ));
                 if ui
                     .add_enabled(app.viewer_history.can_undo(), undo_btn)
                     .clicked()
@@ -635,6 +660,33 @@ pub(crate) fn update_internal(
                 }
             }
 
+            ui.separator();
+            // Open the folder containing the source model in the OS file explorer
+            if ui
+                .add_enabled(
+                    app.source_model_path.is_some(),
+                    egui::Button::new(format!("{} Open folder", FOLDER_OPEN.as_str())),
+                )
+                .on_hover_text("Open the folder containing this model in the file explorer")
+                .clicked()
+                && let Some(model_path) = app.source_model_path.as_ref()
+            {
+                let dir = model_path.parent().unwrap_or(model_path.as_path());
+                #[cfg(target_os = "linux")]
+                let cmd = "xdg-open";
+                #[cfg(target_os = "macos")]
+                let cmd = "open";
+                #[cfg(target_os = "windows")]
+                let cmd = "explorer";
+                if let Err(err) = std::process::Command::new(cmd).arg(dir.as_str()).spawn() {
+                    app.show_notification(format!("Failed to open folder: {err}"), 5000);
+                }
+            }
+
+            // "Less color" and "Dark" toggles live in the floating zoom-controls
+            // overlay (shared by editor and viewer), so they are not duplicated
+            // here.
+
             // Render transient in-GUI notification (right-aligned in the top bar)
             if let Some((msg, expiry)) = &app.transient_notification {
                 if std::time::Instant::now() > *expiry {
@@ -669,15 +721,8 @@ pub(crate) fn update_internal(
         }
     });
 
-    // Owned snapshot for use inside the UI closure to avoid immutable borrows of `app`
-    let entities_opt = app.current_entities();
-    let system_valid = entities_opt.is_some();
-    // Snapshot the current system name (prefer system properties, fall back to last path segment or <root>)
-    let system_name_snapshot: String = app
-        .current_system()
-        .and_then(|s| s.properties.get("Name").cloned())
-        .or_else(|| path_snapshot.last().cloned())
-        .unwrap_or_else(|| "<root>".to_string());
+    // Check if current system is valid (zero-cost, no cloning)
+    let system_valid = app.current_system().is_some();
 
     let mut staged_zoom = app.zoom;
     let mut staged_pan = app.pan;
@@ -691,7 +736,7 @@ pub(crate) fn update_internal(
     let block_menu_items_snapshot = app.block_menu_items.clone();
     let signal_menu_items_snapshot = app.signal_menu_items.clone();
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         if !system_valid {
             // Provide detailed diagnostics to help the user resolve missing subsystems / libraries.
             let requested = if app.path.is_empty() {
@@ -766,9 +811,6 @@ pub(crate) fn update_internal(
             ui.label("Hints: use -L <dir> to add library search paths, or open the library .slx directly.");
             return;
         }
-        // Use entities snapshot for this frame
-        let entities = entities_opt.as_ref().unwrap();
-
         // ── Keyboard shortcuts for undo/redo ──
         if app.move_mode_enabled {
             let undo_requested = ui.input(|i| {
@@ -795,43 +837,64 @@ pub(crate) fn update_internal(
                 app.view_cache.invalidate();
             }
         }
-        // Compute blocks with positions from snapshot. Also inject SystemName
-        // into a temporary, enriched block clone so later code can read it from properties.
-        let system_name = system_name_snapshot.clone();
-        let mut enriched_blocks: Vec<crate::model::Block> =
-            Vec::with_capacity(entities.blocks.len());
-        for b in &entities.blocks {
-            let mut bc = b.clone();
-            // Do not overwrite if already present
-            bc.properties
-                .entry("SystemName".to_string())
-                .or_insert(system_name.clone());
-            enriched_blocks.push(bc);
+        // Get system reference AFTER undo/redo (which may mutate app.root)
+        let sys = match resolve_subsystem_by_vec(&app.root, &app.path) {
+            Some(s) => s,
+            None => return,
+        };
+        // Use cached cloned data when the path and generation haven't changed,
+        // avoiding expensive per-frame cloning of all blocks, lines, and annotations.
+        // We use std::mem::take to move data out of the cache (zero-clone) and
+        // restore it after the closure. If we return early, the cache is
+        // invalidated and will be rebuilt next frame.
+        let cache_gen = app.view_cache.generation;
+        let cache_valid = app.view_cache.is_valid(&app.path, cache_gen)
+            && !app.view_cache.cached_owned_blocks.is_empty();
+        if !cache_valid {
+            app.view_cache.cached_sys_lines = sys.lines.clone();
+            app.view_cache.cached_sys_annotations = sys.annotations.iter()
+                .chain(sys.blocks.iter().flat_map(|b| b.annotations.iter()))
+                .cloned()
+                .collect();
+            app.view_cache.cached_owned_blocks = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .map(shallow_clone_block)
+                .collect();
+            app.view_cache.cached_subsystem_block_lookup = sys.blocks.iter()
+                .filter(|b| parse_block_rect(b).is_some())
+                .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
+                    && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+                .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
+                .collect();
         }
-        let blocks: Vec<(&crate::model::Block, Rect)> = enriched_blocks
+        // Move data out of cache to avoid cloning — will be restored after closure.
+        let sys_lines: Vec<crate::model::Line> = std::mem::take(&mut app.view_cache.cached_sys_lines);
+        let sys_annotations: Vec<crate::model::Annotation> = std::mem::take(&mut app.view_cache.cached_sys_annotations);
+        let owned_blocks: Vec<crate::model::Block> = std::mem::take(&mut app.view_cache.cached_owned_blocks);
+        let subsystem_block_lookup: HashMap<String, crate::model::Block> = std::mem::take(&mut app.view_cache.cached_subsystem_block_lookup);
+        let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
             .iter()
             .filter_map(|b| parse_block_rect(b).map(|r| (b, r)))
             .collect::<Vec<_>>();
-        let annotations: Vec<(&crate::model::Annotation, Rect)> = entities_opt
-            .as_ref()
-            .map(|entities| {
-                entities
-                    .annotations
-                    .iter()
-                    .filter_map(|a| {
-                        a.position
-                            .as_deref()
-                            .and_then(parse_rect_str)
-                            .map(|pos| (a, pos))
-                    })
-                    .collect()
+        let annotations: Vec<(&crate::model::Annotation, Rect)> = sys_annotations
+            .iter()
+            .filter_map(|a| {
+                a.position
+                    .as_deref()
+                    .and_then(parse_rect_str)
+                    .map(|pos| (a, pos))
             })
-            .unwrap_or_default();
+            .collect();
         if blocks.is_empty() && annotations.is_empty() {
             ui.colored_label(
                 Color32::YELLOW,
                 "No blocks or annotations with positions to render",
             );
+            // Restore cache data before early return.
+            app.view_cache.cached_sys_lines = sys_lines;
+            app.view_cache.cached_sys_annotations = sys_annotations;
+            app.view_cache.cached_owned_blocks = owned_blocks;
+            app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
             return;
         }
         let mut content_bb = blocks.first()
@@ -845,7 +908,7 @@ pub(crate) fn update_internal(
             content_bb = content_bb.union(*r);
         }
 
-        let bb = match staged_view_bounds {
+        let mut bb = match staged_view_bounds {
             Some(bounds) if !staged_reset => bounds,
             _ => {
                 let fitted = content_bb.expand(20.0);
@@ -863,13 +926,7 @@ pub(crate) fn update_internal(
         let height = (bb.height()).max(1.0);
         let sx = (avail_size.x - 2.0 * margin) / width;
         let sy = (avail_size.y - 2.0 * margin) / height;
-        let base_scale = sx.min(sy).max(0.1);
-
-        if staged_reset {
-            staged_zoom = 1.0;
-            staged_pan = Vec2::ZERO;
-            staged_reset = false;
-        }
+        let mut base_scale = sx.min(sy).max(0.1);
 
         let canvas_sense = if app.move_mode_enabled {
             Sense::click()
@@ -910,13 +967,27 @@ pub(crate) fn update_internal(
             Pos2::new(avail.left() + margin, avail.top() + margin),
             avail.center(),
             &mut staged_reset,
+            &mut app.monochrome,
         );
 
-        if staged_reset && app.apply_authored_navigation_view_state_for_current_path() {
-            staged_zoom = app.zoom;
-            staged_pan = app.pan;
-            staged_view_bounds = app.view_bounds;
+        // Reset always fits every block into the viewport, recomputing the
+        // fit from the fresh content bounds in the same frame the button is
+        // pressed (no stale authored view, no multi-frame delay).
+        if staged_reset {
+            let fitted = content_bb.expand(20.0);
+            staged_view_bounds = Some(fitted);
+            bb = fitted;
+            let w = bb.width().max(1.0);
+            let h = bb.height().max(1.0);
+            let sx = (avail_size.x - 2.0 * margin) / w;
+            let sy = (avail_size.y - 2.0 * margin) / h;
+            base_scale = sx.min(sy).max(0.1);
+            staged_zoom = 1.0;
+            let extra_x = (avail_size.x - 2.0 * margin - bb.width() * base_scale).max(0.0);
+            let extra_y = (avail_size.y - 2.0 * margin - bb.height() * base_scale).max(0.0);
+            staged_pan = Vec2::new(extra_x * 0.5, extra_y * 0.5);
             staged_reset = false;
+            ui.ctx().request_repaint();
         }
 
         let to_screen = |p: Pos2| -> Pos2 {
@@ -926,9 +997,38 @@ pub(crate) fn update_internal(
             Pos2::new(x, y)
         };
 
-        // In-canvas font scaling: baseline is 400% zoom -> scale = zoom / 4.0
-        // User requested double font size, so we use / 2.0 instead of / 4.0
-        let font_scale: f32 = (staged_zoom / 2.0).max(0.01);
+        // In-canvas text/icon scaling is coupled to the model's measurement
+        // unit: `base_scale * staged_zoom` is the screen-pixels-per-model-unit
+        // scale (identical to the one used for block geometry), so names and
+        // icons grow and shrink exactly with the on-screen block size. Smaller
+        // models (fewer blocks, each drawn larger) therefore get proportionally
+        // larger text than big, space-filling models. The `*_font_factor`
+        // values remain the size relative to the blocks.
+        let font_scale: f32 = (base_scale * staged_zoom / 2.0).max(0.01);
+
+        let monochrome = app.monochrome;
+        let dark_mode = ui.visuals().dark_mode;
+
+        // Draw area annotations (colored regions) behind the blocks.  Areas keep
+        // their model-defined colors even in "less colorful" mode.
+        for (a, r_model) in &annotations {
+            if let Some(fill) = area_annotation_fill(a) {
+                let r_screen =
+                    Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
+                if !r_screen.intersects(viewport_rect) {
+                    continue;
+                }
+                ui.painter().rect_filled(r_screen, 2.0, fill);
+                if let Some(border) = area_annotation_border(a) {
+                    ui.painter().rect_stroke(
+                        r_screen,
+                        2.0,
+                        Stroke::new(1.0_f32, border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        }
 
         // Draw blocks and setup interaction maps
         let mut sid_map: HashMap<String, Rect> = HashMap::new();
@@ -986,7 +1086,7 @@ pub(crate) fn update_internal(
             };
             let resp = ui.allocate_rect(r_screen, block_sense);
             let cfg = get_block_type_cfg(b);
-            let bg = block_base_color(b, &cfg);
+            let bg = block_fill_color(b, &cfg, monochrome, dark_mode);
 
             if app.move_mode_enabled && resp.drag_started()
                 && let Some(sid) = &b.sid {
@@ -1037,13 +1137,13 @@ pub(crate) fn update_internal(
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
-                                #[cfg(feature = "dashboard")]
-                                {
+                            #[cfg(feature = "dashboard")]
                             app.queue_dashboard_control(
                                 (*b).clone(),
                                 DashboardControlValue::Bool(enabled),
                             );
-                                }
+                            #[cfg(not(feature = "dashboard"))]
+                            let _ = enabled;
                             any_block_clicked = true;
                         }
                     } else {
@@ -1053,14 +1153,14 @@ pub(crate) fn update_internal(
                             &b.block_type,
                         ) || matches!(b.block_type.as_str(), "Scope" | "Display")
                         {
-                            print_dashboard_connected_signals(b, entities);
+                            print_dashboard_connected_signals(b, &sys_lines);
                         }
                         // Open a scope popout window when a Scope/DashboardScope is clicked.
                         #[cfg(feature = "dashboard")]
                         if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
                             let key = app.scope_key_for_block(b);
                             app.scope_popout = Some(crate::egui_app::state::ScopePopout {
-                                title: scope_title_for_block(b, entities),
+                                title: scope_title_for_block(b, &sys_lines),
                                 scope_key: key,
                                 open: true,
                             });
@@ -1137,11 +1237,15 @@ pub(crate) fn update_internal(
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
+                        let block_for_response = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .unwrap_or_else(|| (*b).clone());
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Block {
                                 action: ClickAction::Secondary,
-                                block: (*b).clone(),
+                                block: block_for_response,
                                 handled: false,
                             },
                         );
@@ -1177,9 +1281,13 @@ pub(crate) fn update_internal(
                             deferred_constant_edits.push((sid.clone(), r_screen));
                             handled = true;
                         }
-                    if !handled && is_block_subsystem(b) {
-                        // Normal subsystem open
-                        block_to_open_subsystem = Some((*b).clone());
+                    if !handled && b.sid.as_ref().is_some_and(|sid| subsystem_block_lookup.contains_key(sid)) {
+                        // Normal subsystem open — use original block with subsystem intact
+                        block_to_open_subsystem = b.sid.as_ref()
+                            .and_then(|sid| subsystem_block_lookup.get(sid))
+                            .cloned()
+                            .or_else(|| Some((*b).clone()));
+                        handled = true;
                     } else if !handled && b.block_type == "Reference" && b.subsystem.is_none() {
                         // Inform user when a Reference block can't be opened because the
                         // referenced library/subsystem was not resolved.
@@ -1201,11 +1309,15 @@ pub(crate) fn update_internal(
                         app.show_notification(msg, 5000);
                     }
                 }
+                let block_for_response = b.sid.as_ref()
+                    .and_then(|sid| subsystem_block_lookup.get(sid))
+                    .cloned()
+                    .unwrap_or_else(|| (*b).clone());
                 record_interaction(
                     &mut interaction,
                     UpdateResponse::Block {
                         action,
-                        block: (*b).clone(),
+                        block: block_for_response,
                         handled,
                     },
                 );
@@ -1270,10 +1382,15 @@ pub(crate) fn update_internal(
             block_views.push((b, r_screen, resp.clicked(), effective_bg));
         }
 
-        // Draw annotations (convert HTML-rich content to plain text) without background
+        // Draw annotations (convert HTML-rich content to plain text).  Area
+        // annotations (whose colored background is drawn behind the blocks) get
+        // a text color that contrasts with their fill.
         for (a, r_model) in &annotations {
             let r_screen = Rect::from_min_max(to_screen(r_model.min), to_screen(r_model.max));
             let _resp = ui.allocate_rect(r_screen, Sense::hover());
+            let text_color = area_annotation_fill(a)
+                .map(contrast_color)
+                .unwrap_or(Color32::WHITE);
             let raw = a.text.clone().unwrap_or_default();
             let parsed =
                 crate::egui_app::text::annotation_to_rich_text(&raw, a.interpreter.as_deref());
@@ -1283,7 +1400,7 @@ pub(crate) fn update_internal(
             let galley = ui.painter().layout_job(job.clone());
             let paint_pos = r_screen.left_top();
             if galley.size().x <= r_screen.width() {
-                ui.painter().galley(paint_pos, galley, Color32::WHITE);
+                ui.painter().galley(paint_pos, galley, text_color);
             } else {
                 job.wrap.max_width = r_screen.width();
                 let job_for_wrap = job.clone();
@@ -1291,7 +1408,7 @@ pub(crate) fn update_internal(
                     let wrapped = child_ui.painter().layout_job(job_for_wrap);
                     child_ui
                         .painter()
-                        .galley(paint_pos, wrapped, Color32::WHITE);
+                        .galley(paint_pos, wrapped, text_color);
                 });
             }
             // no special tooltip; text is directly visible inside the rectangle
@@ -1312,24 +1429,24 @@ pub(crate) fn update_internal(
         // Use cached line colors and port info when possible; recompute on model change.
         let cache_gen = app.view_cache.generation;
         if !app.view_cache.is_valid(&app.path, cache_gen) {
-            let line_adjacency = line_coloring::compute_line_adjacency(&entities.lines);
+            let line_adjacency = line_coloring::compute_line_adjacency(&sys_lines);
             let bg_lum = line_coloring::rel_luminance(Color32::from_gray(245));
             app.view_cache.line_colors = line_coloring::assign_line_colors(&line_adjacency, bg_lum);
 
-            let block_refs: Vec<&crate::model::Block> = blocks.iter().map(|(b, _)| *b).collect();
             let (pc, cp) = signal_routing::compute_port_info(
-                &entities.lines,
-                &block_refs.iter().cloned().cloned().collect::<Vec<_>>(),
+                &sys_lines,
+                &owned_blocks,
             );
             app.view_cache.port_counts = pc;
             app.view_cache.connected_ports = cp;
             app.view_cache.mark_valid(&app.path, cache_gen);
         }
-        let line_colors = app.view_cache.line_colors.clone();
-        let port_counts = app.view_cache.port_counts.clone();
-        let connected_ports = app.view_cache.connected_ports.clone();
+        // Move cached computed values out to avoid per-frame cloning.
+        let line_colors = std::mem::take(&mut app.view_cache.line_colors);
+        let port_counts = std::mem::take(&mut app.view_cache.port_counts);
+        let connected_ports = std::mem::take(&mut app.view_cache.connected_ports);
 
-        let line_stroke_default = Stroke::new(2.0, Color32::LIGHT_GREEN);
+        let line_stroke_default = Stroke::new(2.0_f32, Color32::LIGHT_GREEN);
 
         // Build lines in screen space and interactive hit rects
         #[allow(clippy::type_complexity)]
@@ -1350,7 +1467,7 @@ pub(crate) fn update_internal(
                 sid_mirrored.insert(sid.clone(), b.block_mirror.unwrap_or(false));
             }
         }
-        for (li, line) in entities.lines.iter().enumerate() {
+        for (li, line) in sys_lines.iter().enumerate() {
             let Some(src) = line.src.as_ref() else {
                 continue;
             };
@@ -1384,8 +1501,7 @@ pub(crate) fn update_internal(
                     let num_dst = port_counts
                         .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
                         .copied();
-                    let mirrored_dst = entities
-                        .blocks
+                    let mirrored_dst = owned_blocks
                         .iter()
                         .find(|b| b.sid.as_ref() == Some(&dst.sid))
                         .and_then(|b| b.block_mirror)
@@ -1653,14 +1769,18 @@ pub(crate) fn update_internal(
         }
 
         for (line, screen_pts, main_anchor, hover_resp, li, segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
-            let show_testpoint_marker = line_has_testpoint(&line_targets);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
+            let show_testpoint_marker = line_has_testpoint(line_targets);
             let stroke = Stroke::new(
-                line_stroke_width(&line_targets, app.selected_line_indices.contains(li)),
+                line_stroke_width(line_targets, app.selected_line_indices.contains(li)),
                 color,
             );
             let has_in_dst = line.dst.as_ref().is_some_and(|dst| dst.port_type == "in");
@@ -1843,7 +1963,7 @@ pub(crate) fn update_internal(
                     ui.painter().rect_stroke(
                         handle_rect.shrink(2.0),
                         1.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                         egui::StrokeKind::Outside,
                     );
                     if resp.drag_started() {
@@ -1929,7 +2049,7 @@ pub(crate) fn update_internal(
                     ui.painter().circle_stroke(
                         handle_rect.center(),
                         4.0,
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                     );
                     if resp.drag_started() {
                         app.viewer_drag_state = ViewerDragState::BranchPointDrag {
@@ -2243,12 +2363,16 @@ pub(crate) fn update_internal(
         };
 
         for (line, screen_pts, main_anchor, _resp, li, _segments_all) in &line_views {
-            let line_targets = connection_target_resolver.line_targets_for_line(&app.path, line);
-            let color = line_colors
-                .get(*li)
-                .copied()
-                .unwrap_or(line_stroke_default.color);
-            draw_line_labels(line, &line_targets, screen_pts, *main_anchor, color, *li);
+            let line_targets = connection_target_resolver.line_targets_for_line_ref(&app.path, line);
+            let color = if monochrome {
+                monochrome_line_color(dark_mode)
+            } else {
+                line_colors
+                    .get(*li)
+                    .copied()
+                    .unwrap_or(line_stroke_default.color)
+            };
+            draw_line_labels(line, line_targets, screen_pts, *main_anchor, color, *li);
         }
 
         // Clickable labels
@@ -2295,7 +2419,7 @@ pub(crate) fn update_internal(
                         app.selected_block_sids.clear();
                     }
                 } else {
-                    let line = &entities.lines[*li];
+                    let line = &sys_lines[*li];
                     record_interaction(
                         &mut interaction,
                         UpdateResponse::Signal {
@@ -2350,7 +2474,7 @@ pub(crate) fn update_internal(
             if enable_context_menus {
                 resp.context_menu(|ui| {
                     if ui.button("Info").clicked() {
-                        let line = &entities.lines[*li];
+                        let line = &sys_lines[*li];
                         record_interaction(
                             &mut interaction,
                             UpdateResponse::Signal {
@@ -2362,7 +2486,7 @@ pub(crate) fn update_internal(
                         );
                         ui.close();
                     }
-                    let line_ref = &entities.lines[*li];
+                    let line_ref = &sys_lines[*li];
                     for item in &signal_menu_items_snapshot {
                         if (item.filter)(line_ref)
                             && ui.button(&item.label).clicked() {
@@ -2371,6 +2495,58 @@ pub(crate) fn update_internal(
                             }
                     }
                 });
+            }
+        }
+
+        // Simulink prints a port's label whether or not a signal is attached,
+        // so ask for one on every port the model/catalog actually names – the
+        // requests above only cover wired-up ports.
+        {
+            let wired: std::collections::HashSet<(String, u32, bool)> = port_label_requests
+                .iter()
+                .map(|(sid, index, is_input, _)| (sid.clone(), *index, *is_input))
+                .collect();
+            for (b, _) in &blocks {
+                let Some(sid) = b.sid.as_ref() else { continue };
+                let Some(brect) = sid_screen_map.get(sid).copied() else {
+                    continue;
+                };
+                let cfg = get_block_type_cfg(b);
+                let in_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.ins)
+                    .unwrap_or(cfg.default_ins);
+                let out_count = b
+                    .port_counts
+                    .as_ref()
+                    .and_then(|p| p.outs)
+                    .unwrap_or(cfg.default_outs);
+                if in_count == 0 && out_count == 0 {
+                    continue;
+                }
+                let (ins, outs) = crate::egui_app::geometry::port_indicator_positions_with_overrides(
+                    brect,
+                    in_count,
+                    out_count,
+                    b.block_mirror.unwrap_or(false),
+                    &cfg.port_position_overrides,
+                );
+                let mut request = |index: usize, is_input: bool, y: f32| {
+                    let index = index as u32 + 1;
+                    if wired.contains(&(sid.clone(), index, is_input)) {
+                        return;
+                    }
+                    if port_label_defined_name(b, index, is_input, &cfg).is_some() {
+                        port_label_requests.push((sid.clone(), index, is_input, y));
+                    }
+                };
+                for (i, p) in ins.iter().enumerate() {
+                    request(i, true, p.y);
+                }
+                for (i, p) in outs.iter().enumerate() {
+                    request(i, false, p.y);
+                }
             }
         }
 
@@ -2454,11 +2630,15 @@ pub(crate) fn update_internal(
         // Finish blocks (border, icon/value, labels) and click handling
         for (b, r_screen, _clicked, bg) in &block_views {
             let cfg = get_block_type_cfg(b);
-            let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
-            let stroke = Stroke::new(
-                2.0,
-                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2),
-            );
+            // Neutral border only for blocks whose fill was actually grayed
+            // (i.e. no model-authored color); model-colored blocks keep theirs.
+            let border_color = if monochrome && !block_has_model_color(b) {
+                monochrome_block_border(dark_mode)
+            } else {
+                let border_rgb = cfg.border.unwrap_or(crate::block_types::Rgb(180, 180, 200));
+                Color32::from_rgb(border_rgb.0, border_rgb.1, border_rgb.2)
+            };
+            let stroke = Stroke::new(2.0_f32, border_color);
             crate::egui_app::render::stroke_block_body(&painter, *r_screen, cfg.shape, stroke);
 
             fn paint_port_chevron_placed(
@@ -2554,7 +2734,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(true, port_idx, in_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))
@@ -2576,7 +2756,7 @@ pub(crate) fn update_internal(
                     }
                     let ovr_placement = overrides
                         .iter()
-                        .find(|o| !o.is_input && o.port_index == port_idx)
+                        .find(|o| o.matches(false, port_idx, out_count))
                         .map(|o| o.placement);
                     let left_side = ovr_placement
                         .map(|pl| crate::egui_app::geometry::port_override_is_left_side(pl, mirrored))
@@ -2591,13 +2771,31 @@ pub(crate) fn update_internal(
                     );
                 }
             }
+            // Enable/trigger ports enter through the block's top edge.
+            let control_count = b
+                .port_counts
+                .as_ref()
+                .map(|p| p.control_count())
+                .unwrap_or(0);
+            for i in 0..control_count {
+                let x = r_screen.left()
+                    + (i as f32 + 1.0) / (control_count as f32 + 1.0) * r_screen.width();
+                paint_port_chevron_placed(
+                    &painter,
+                    egui::pos2(x, r_screen.top()),
+                    true,
+                    Some(crate::simulink_libraries::types::PortPlacement::Top),
+                    font_scale,
+                    Color32::from_rgb(60, 60, 200),
+                );
+            }
             let fg = contrast_color(*bg);
             #[cfg(feature = "dashboard")]
-            update_scope_live_sample(app, b, entities);
+            update_scope_live_sample(app, b, &sys_lines);
             let display_signal_label = if b.block_type == "Display" {
                 let sid = b.sid.as_deref();
                 sid.and_then(|sid| {
-                    entities.lines.iter().find_map(|line| {
+                    sys_lines.iter().find_map(|line| {
                         let direct = line.dst.as_ref().is_some_and(|dst| dst.sid == sid);
                         let branched = line.branches.iter().any(|br| branch_hits_sid(br, sid));
                         if direct || branched {
@@ -2753,7 +2951,7 @@ pub(crate) fn update_internal(
                         let key = app.scope_key_for_block(b);
                         deferred_scope_rects.push((
                             key,
-                            scope_title_for_block(b, entities),
+                            scope_title_for_block(b, &sys_lines),
                             scope_rect,
                         ));
                     } else {
@@ -2795,6 +2993,8 @@ pub(crate) fn update_internal(
                             port_y: coords_ref,
                             port_label_widths: icon_port_label_widths,
                             text_color: fg,
+                            fill_color: *bg,
+                            border_color,
                         };
                         live_fn(app, ui, b, r_screen, &ctx)
                     } else {
@@ -2814,6 +3014,8 @@ pub(crate) fn update_internal(
                         port_y: coords_ref,
                         port_label_widths: icon_port_label_widths,
                         text_color: fg,
+                        fill_color: *bg,
+                        border_color,
                     };
                     crate::simulink_libraries::render::render_block_interior(
                         &painter, b, r_screen, &params,
@@ -3100,6 +3302,14 @@ pub(crate) fn update_internal(
                 );
             }
         }
+        // Restore cache data moved out before the closure (zero-clone round-trip).
+        app.view_cache.cached_sys_lines = sys_lines;
+        app.view_cache.cached_sys_annotations = sys_annotations;
+        app.view_cache.cached_owned_blocks = owned_blocks;
+        app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
+        app.view_cache.line_colors = line_colors;
+        app.view_cache.port_counts = port_counts;
+        app.view_cache.connected_ports = connected_ports;
     });
 
     // After the UI closure, call open_block_if_subsystem if needed
@@ -3148,7 +3358,7 @@ fn draw_viewer_resize_handles(
         ui.painter().rect_stroke(
             handle_rect.shrink(2.0),
             1.0,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
         if resp.drag_started() {
@@ -3239,7 +3449,7 @@ pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
     }
     painter.rect_filled(inner, 2.0, Color32::from_rgb(30, 30, 30));
     let color = Color32::from_rgb(50, 200, 50);
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let n = 40;
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
@@ -3266,10 +3476,7 @@ pub(crate) fn paint_scope_glyph(painter: &egui::Painter, rect: &Rect) {
 /// For blocks that use traditional signal lines instead of BindingPersistence
 /// (e.g., `Display`, `Scope`), this function falls back to scanning the
 /// current subsystem's lines for connections to/from this block.
-fn print_dashboard_connected_signals(
-    block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
-) {
+fn print_dashboard_connected_signals(block: &crate::model::Block, lines: &[crate::model::Line]) {
     println!(
         "  [Dashboard UI] Block '{}' (type: {})",
         block.name, block.block_type
@@ -3312,7 +3519,7 @@ fn print_dashboard_connected_signals(
                 print_dashboard_binding_debug(block);
             }
             // Fall back to line-based connection scanning
-            print_line_based_connections(block, entities);
+            print_line_based_connections(block, &[], lines);
         }
     }
 }
@@ -3486,7 +3693,8 @@ fn dashboard_scalar_range(block: &crate::model::Block) -> (f64, f64) {
 /// Scan lines in the current subsystem for connections to/from the given block.
 fn print_line_based_connections(
     block: &crate::model::Block,
-    entities: &crate::egui_app::state::SubsystemEntities,
+    blocks: &[crate::model::Block],
+    lines: &[crate::model::Line],
 ) {
     let block_sid = match &block.sid {
         Some(s) => s.as_str(),
@@ -3515,15 +3723,14 @@ fn print_line_based_connections(
     }
 
     // Build a SID→name lookup for blocks in this subsystem.
-    let block_name_by_sid: std::collections::HashMap<&str, &str> = entities
-        .blocks
+    let block_name_by_sid: std::collections::HashMap<&str, &str> = blocks
         .iter()
         .filter_map(|b| b.sid.as_deref().map(|s| (s, b.name.as_str())))
         .collect();
 
     let mut found_any = false;
 
-    for line in &entities.lines {
+    for line in lines {
         let signal_name = line.name.as_deref().unwrap_or("<unnamed>");
 
         // Check if this block is a source of the line
@@ -3563,7 +3770,7 @@ fn print_line_based_connections(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dashboard"))]
 mod tests {
     use super::{
         dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,

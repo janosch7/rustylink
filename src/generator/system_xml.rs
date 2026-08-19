@@ -197,6 +197,12 @@ fn write_port_counts(out: &mut String, pc: &PortCounts, level: usize) {
     if let Some(outs) = pc.outs {
         out.push_str(&format!(" out=\"{}\"", outs));
     }
+    if let Some(enable) = pc.enable {
+        out.push_str(&format!(" enable=\"{}\"", enable));
+    }
+    if let Some(trigger) = pc.trigger {
+        out.push_str(&format!(" trigger=\"{}\"", trigger));
+    }
     out.push_str("/>\n");
 }
 

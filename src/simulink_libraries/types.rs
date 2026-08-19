@@ -30,6 +30,14 @@ pub enum SimulinkIcon {
     Svg(&'static str),
     /// A Phosphor icon name.
     Phosphor(&'static str),
+    /// Typeset math drawn by the painter (fraction bar / superscript / overbar).
+    /// See [`crate::egui_app::render::draw_math_icon`] for the notation, e.g.
+    /// `"frac:1/s"`, `"sup:e^u"`, `"over:u"`, `"lines:a|b"`.
+    Math(&'static str),
+    /// Line-art drawn by the painter from a compact polyline notation.  See
+    /// [`crate::egui_app::render::draw_plot_icon`], e.g. a saturation curve
+    /// `"p 0,.85 .3,.85 .7,.15 1,.15"`.
+    Plot(&'static str),
 }
 
 /// The body shape used to draw a block.
@@ -48,6 +56,14 @@ pub enum SimulinkShape {
     Goto,
     /// Rectangle with a triangular tab pointing right (From).
     From,
+    /// Obround / stadium: a rectangle whose short ends are full semicircles
+    /// (used for subsystem In/Outport blocks).
+    Obround,
+    /// No body drawn by the shared fill/stroke passes: the block's
+    /// `static_renderer` paints the entire body (fill + outline + interior)
+    /// itself.  Used for metadata-dependent bodies such as Logic gates, whose
+    /// outline changes per instance (rectangular text box vs. distinctive gate).
+    None,
 }
 
 /// Where a port sits on a block body.
@@ -63,11 +79,29 @@ pub enum PortPlacement {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PortPositionOverride {
     pub is_input: bool,
-    /// 1-based port index.
+    /// 1-based port index, counted from the end when `from_end` is set.
     pub port_index: u32,
+    /// Count `port_index` back from the last port instead of forward from the
+    /// first.  Simulink's round Sum, for example, always puts its *last* input
+    /// on the bottom edge, whether it has two or five of them.
+    pub from_end: bool,
     pub placement: PortPlacement,
     /// Position along the chosen side, `0.0..=1.0`.
     pub fraction: f32,
+}
+
+impl PortPositionOverride {
+    /// Whether this override applies to port `index` (1-based) of a side that
+    /// has `count` ports in total.
+    pub fn matches(&self, is_input: bool, index: u32, count: u32) -> bool {
+        self.is_input == is_input
+            && index
+                == if self.from_end {
+                    count.saturating_sub(self.port_index.saturating_sub(1))
+                } else {
+                    self.port_index
+                }
+    }
 }
 
 /// Number of ports on one side of a block.
@@ -199,6 +233,13 @@ pub struct RenderContext<'a> {
     pub port_label_widths: Option<crate::egui_app::render::PortLabelMaxWidths>,
     /// Foreground/contrast color for plain-text labels drawn by renderers.
     pub text_color: eframe::egui::Color32,
+    /// Background/fill color of the block body (already resolved for the active
+    /// theme and less-color mode).  Renderers that paint their own body (shape
+    /// [`SimulinkShape::None`]) fill with this.
+    pub fill_color: eframe::egui::Color32,
+    /// Outline color of the block body (already resolved for the active theme
+    /// and less-color mode).  Used by self-painting renderers.
+    pub border_color: eframe::egui::Color32,
 }
 
 /// Signature of an interior renderer used when **live mode is OFF**.
@@ -207,6 +248,9 @@ pub struct RenderContext<'a> {
 /// `false` tells the general renderer to fall back to default icon/label
 /// rendering; returning `true` means the renderer fully handled the interior.
 pub type StaticRendererFn = fn(&Painter, &Block, &eframe::egui::Rect, &RenderContext<'_>) -> bool;
+
+/// Signature of a property-driven port-position override selector.
+pub type PortOverridesFn = fn(&Block, &BlockMetadata) -> &'static [PortPositionOverride];
 
 /// Signature of an interior renderer used when **live mode is ON**.
 ///
@@ -295,6 +339,11 @@ pub struct SimulinkBlockDefinition {
     pub live_renderer: Option<LiveRendererFn>,
     /// Per-port position overrides.
     pub port_position_overrides: &'static [PortPositionOverride],
+    /// Per-port position overrides that depend on the block's properties, e.g.
+    /// a round Sum puts its last input on the bottom edge while the
+    /// rectangular one keeps every input on the left.  Takes precedence over
+    /// [`Self::port_position_overrides`] when set.
+    pub port_overrides_fn: Option<PortOverridesFn>,
     /// Properties extracted from `block.properties` into metadata, each with an
     /// optional default applied when the model omits the property.
     pub metadata_keys: &'static [MetadataKey],
@@ -347,6 +396,7 @@ impl SimulinkBlockDefinition {
             static_renderer: None,
             live_renderer: None,
             port_position_overrides: &[],
+            port_overrides_fn: None,
             metadata_keys: &[],
             metadata_fn: None,
             compute_instance_label: None,
@@ -412,6 +462,11 @@ impl SimulinkBlockDefinition {
 
     pub const fn with_port_overrides(mut self, overrides: &'static [PortPositionOverride]) -> Self {
         self.port_position_overrides = overrides;
+        self
+    }
+
+    pub const fn with_port_overrides_fn(mut self, f: PortOverridesFn) -> Self {
+        self.port_overrides_fn = Some(f);
         self
     }
 

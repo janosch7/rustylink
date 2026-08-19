@@ -118,7 +118,7 @@ pub fn port_indicator_positions_with_overrides(
 
     let mut ins = Vec::new();
     for i in 1..=in_count {
-        if let Some(ovr) = overrides.iter().find(|o| o.is_input && o.port_index == i) {
+        if let Some(ovr) = overrides.iter().find(|o| o.matches(true, i, in_count)) {
             ins.push(placement_pos(r, ovr.placement, ovr.fraction));
         } else {
             ins.push(port_anchor_pos(r, in_side, i, Some(in_count.max(1))));
@@ -126,7 +126,7 @@ pub fn port_indicator_positions_with_overrides(
     }
     let mut outs = Vec::new();
     for i in 1..=out_count {
-        if let Some(ovr) = overrides.iter().find(|o| !o.is_input && o.port_index == i) {
+        if let Some(ovr) = overrides.iter().find(|o| o.matches(false, i, out_count)) {
             outs.push(placement_pos(r, ovr.placement, ovr.fraction));
         } else {
             outs.push(port_anchor_pos(r, out_side, i, Some(out_count.max(1))));

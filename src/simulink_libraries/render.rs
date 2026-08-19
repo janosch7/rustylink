@@ -31,6 +31,10 @@ pub struct InteriorParams<'a> {
     pub port_label_widths: Option<crate::egui_app::render::PortLabelMaxWidths>,
     /// Foreground/contrast color used for plain-text labels.
     pub text_color: Color32,
+    /// Resolved body fill color (for shape-`None` self-painting renderers).
+    pub fill_color: Color32,
+    /// Resolved body outline color (for shape-`None` self-painting renderers).
+    pub border_color: Color32,
 }
 
 /// Render the interior of a block, driven entirely by its definition.
@@ -65,6 +69,8 @@ pub fn render_block_interior(
         port_y: params.port_y,
         port_label_widths: params.port_label_widths,
         text_color: params.text_color,
+        fill_color: params.fill_color,
+        border_color: params.border_color,
     };
 
     // 1. Solid-fill blocks (BusCreator/BusSelector) draw nothing inside.
@@ -83,8 +89,17 @@ pub fn render_block_interior(
     if let Some(label) = block_label_text(block, def, &metadata)
         && !label.is_empty()
     {
-        let font = FontId::proportional(12.0 * ctx.font_scale);
-        let galley = painter.layout_no_wrap(label, font, params.text_color);
+        let mut px = 12.0 * ctx.font_scale;
+        let mut galley =
+            painter.layout_no_wrap(label.clone(), FontId::proportional(px), params.text_color);
+        // Simulink shrinks a block's caption until it fits; do the same rather
+        // than letting long labels ("hermitian", "Clear bit 0") spill out.
+        let avail = rect.size() * 0.88;
+        let overflow = (galley.size().x / avail.x).max(galley.size().y / avail.y);
+        if overflow > 1.0 {
+            px = (px / overflow).max(1.0);
+            galley = painter.layout_no_wrap(label, FontId::proportional(px), params.text_color);
+        }
         let pos = rect.center() - galley.size() * 0.5;
         painter.galley(pos, galley, params.text_color);
         return;
@@ -95,13 +110,14 @@ pub fn render_block_interior(
     // blocks that also exist in a bridged virtual library).
     if let Some(icon) = def.icon {
         let spec = super::config::icon_to_spec(icon);
-        let color = crate::egui_app::render::block_icon_color(block);
+        // Use the contrast color derived from the block's actual fill (which may
+        // be the neutral gray of "less colorful" mode) so glyphs stay legible.
         crate::egui_app::render::draw_icon_spec(
             painter,
             rect,
             ctx.font_scale,
             &spec,
-            color,
+            params.text_color,
             ctx.port_label_widths,
         );
         return;
@@ -122,8 +138,61 @@ pub fn render_block_interior(
         block,
         rect,
         ctx.font_scale,
+        params.text_color,
         ctx.port_label_widths,
     );
+}
+
+/// Resolve the label of a single port from the block's definition.
+///
+/// This is the catalog-side entry point used by the UI's port-label resolver so
+/// that [`super::types::PortLabelPolicy::MetadataDependent`] policies actually
+/// take effect: the definition is resolved, its metadata extracted, and the
+/// policy asked for the label of `index` (1-based).  `None` means "the policy
+/// has nothing to say for this port", letting the caller fall back.
+pub fn port_label(block: &Block, index: u32, is_input: bool) -> Option<String> {
+    use super::types::PortLabelPolicy;
+
+    let def = resolve_definition(block);
+    let policy = if is_input {
+        def.input_port_label
+    } else {
+        def.output_port_label
+    };
+    let names = match policy {
+        PortLabelPolicy::None => return None,
+        PortLabelPolicy::Fixed(list) => list.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        PortLabelPolicy::MetadataDependent(f) => {
+            let metadata = extract_metadata(block, def);
+            f(block, &metadata, is_input)
+        }
+    };
+    if index == 0 {
+        return None;
+    }
+    names
+        .get((index - 1) as usize)
+        // The reset/enable markers stand for line art the block's renderer
+        // paints, not for a text label.
+        .filter(|s| {
+            !s.is_empty()
+                && s.as_str() != super::renderers::RESET_PORT
+                && s.as_str() != super::renderers::ENABLE_PORT
+        })
+        .cloned()
+}
+
+/// Whether the block's definition wants labels drawn on the given port side.
+pub fn shows_port_labels(block: &Block, is_input: bool) -> bool {
+    use super::types::PortLabelPolicy;
+
+    let def = resolve_definition(block);
+    let policy = if is_input {
+        def.input_port_label
+    } else {
+        def.output_port_label
+    };
+    !matches!(policy, PortLabelPolicy::None)
 }
 
 /// Resolve the textual block label per the definition's policy.

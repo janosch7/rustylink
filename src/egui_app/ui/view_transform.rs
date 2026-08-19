@@ -75,11 +75,12 @@ impl ViewTransform {
 
     /// Font scaling factor for in-canvas text.
     ///
-    /// The baseline is 400% zoom → scale = zoom / 4.0.  The user requested
-    /// double font size, so we use zoom / 2.0 instead.
+    /// Coupled to the model's measurement unit: `base_scale * zoom` is the
+    /// screen-pixels-per-model-unit scale used for block geometry, so text and
+    /// icons scale exactly with the on-screen block size.
     #[inline]
     pub fn font_scale(&self) -> f32 {
-        (self.zoom / 2.0).max(0.01)
+        (self.base_scale * self.zoom / 2.0).max(0.01)
     }
 
     /// Compute the new zoom and pan values when zooming at `cursor` by `factor`.

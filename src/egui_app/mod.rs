@@ -57,23 +57,37 @@ pub fn port_label_display_name(
     is_input: bool,
     cfg: &crate::block_types::BlockTypeConfig,
 ) -> String {
+    port_label_defined_name(block, index, is_input, cfg)
+        .unwrap_or_else(|| format!("{}{}", if is_input { "In" } else { "Out" }, index))
+}
+
+/// The label the model/catalog defines for a port, or `None` when there is
+/// none.  Unlike [`port_label_display_name`] this does not invent an
+/// `In<N>`/`Out<N>` placeholder, so callers can tell a genuinely named port
+/// (which Simulink prints whether or not a signal is attached) from an
+/// anonymous one.
+pub fn port_label_defined_name(
+    block: &crate::model::Block,
+    index: u32,
+    is_input: bool,
+    cfg: &crate::block_types::BlockTypeConfig,
+) -> Option<String> {
     let mirrored = block.block_mirror.unwrap_or(false);
     let logical_is_input = if mirrored { !is_input } else { is_input };
 
-    let fallback_name = || {
+    let catalog_name = || {
         let names = if logical_is_input {
             &cfg.input_port_names
         } else {
             &cfg.output_port_names
         };
-        if index > 0 && (index as usize) <= names.len() {
-            names[(index - 1) as usize].clone()
-        } else {
-            format!("{}{}", if is_input { "In" } else { "Out" }, index)
-        }
+        names.get(index.checked_sub(1)? as usize).cloned()
     };
 
-    subsystem_boundary_port_name(block, index, logical_is_input).unwrap_or_else(fallback_name)
+    subsystem_boundary_port_name(block, index, logical_is_input)
+        .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
+        .or_else(catalog_name)
+        .filter(|name| !name.is_empty())
 }
 
 fn subsystem_boundary_port_name(
@@ -111,10 +125,25 @@ fn subsystem_boundary_port_index(block: &crate::model::Block) -> u32 {
         .unwrap_or(1)
 }
 
+/// Strip Simulink's default `In<N>` / `Out<N>` boundary-block naming so a
+/// subsystem shows the port *number* (what the Inport block's own icon draws),
+/// while user-chosen names such as `u` or `theta` are kept verbatim.
+fn simplify_boundary_name(name: &str) -> String {
+    for prefix in ["In", "Out"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.chars().all(|c| c.is_ascii_digit())
+        {
+            return rest.to_string();
+        }
+    }
+    name.to_string()
+}
+
 fn boundary_block_display_name(block: &crate::model::Block) -> Option<String> {
     let name = block.name.trim();
     if !name.is_empty() {
-        return Some(name.to_string());
+        return Some(simplify_boundary_name(name));
     }
 
     block
@@ -138,5 +167,13 @@ pub fn render_block_icon(
     font_scale: f32,
     port_label_widths: Option<PortLabelMaxWidths>,
 ) {
-    render::render_block_icon(painter, block, rect, font_scale, port_label_widths);
+    let icon_color = render::block_icon_color(block);
+    render::render_block_icon(
+        painter,
+        block,
+        rect,
+        font_scale,
+        icon_color,
+        port_label_widths,
+    );
 }

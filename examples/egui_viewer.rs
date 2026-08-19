@@ -40,6 +40,14 @@ struct Args {
 
 #[cfg(feature = "egui")]
 fn main() -> Result<()> {
+    // Limit rayon to 2 threads — the only parallel work is parsing, which is
+    // done before the GUI starts.  This avoids spawning one thread per logical
+    // core (24+ sleeping threads) that contribute to overall system overhead.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build_global()
+        .ok();
+
     let args = Args::parse();
     let path = Utf8PathBuf::from(&args.file);
 
@@ -100,6 +108,7 @@ fn main() -> Result<()> {
         // Build combined chart map: include name-based keys
         let chart_map: std::collections::BTreeMap<String, u32> = name_map;
 
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts_by_id, &chart_map);
         (sys, charts_by_id, chart_map)
     } else {
         let root_dir = Utf8PathBuf::from(".");
@@ -148,6 +157,7 @@ fn main() -> Result<()> {
         for (name, cid) in parser.get_system_to_chart_map().iter() {
             chart_map.entry(name.clone()).or_insert(*cid);
         }
+        rustylink::parser::annotate_matlab_function_names(&mut sys, &charts, &chart_map);
         (sys, charts, chart_map)
     };
 
@@ -320,6 +330,7 @@ fn main() -> Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(

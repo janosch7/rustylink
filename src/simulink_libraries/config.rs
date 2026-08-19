@@ -18,6 +18,8 @@ pub fn icon_to_spec(icon: SimulinkIcon) -> IconSpec {
         SimulinkIcon::Utf8(s) => IconSpec::Utf8(s),
         SimulinkIcon::Svg(s) => IconSpec::Svg(s),
         SimulinkIcon::Phosphor(s) => IconSpec::Phosphor(s),
+        SimulinkIcon::Math(s) => IconSpec::Math(s),
+        SimulinkIcon::Plot(s) => IconSpec::Plot(s),
     }
 }
 
