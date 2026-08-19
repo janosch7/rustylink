@@ -812,7 +812,7 @@ fn print_targets(targets: &[ConnectionTarget]) {
 
     for target in targets {
         println!(
-            "    - path='{}' origin={:?} signal={:?} signal_names={:?} resolve={:?} index={:?} signals_only={} testpoint={}",
+            "    - path='{}' origin={:?} signal={:?} signal_names={:?} resolve={:?} index={:?} signals_only={} testpoint={} block_type={:?}",
             target.path,
             target.origin,
             target.signal_name,
@@ -820,7 +820,8 @@ fn print_targets(targets: &[ConnectionTarget]) {
             target.resolve,
             target.element_index,
             target.signals_only,
-            target.testpoint
+            target.testpoint,
+            target.block_type
         );
     }
 }
