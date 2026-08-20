@@ -650,7 +650,9 @@ pub fn static_state_parameter_access(
         eframe::egui::Align2::CENTER_CENTER,
         glyph,
         eframe::egui::FontId::proportional(
-            (rect.height() * 0.5).clamp(6.0, 24.0 * ctx.font_scale.max(0.2)),
+            (rect.height() * 0.5)
+                .min(24.0 * ctx.font_scale)
+                .clamp(1.0, 24.0),
         ),
         colors.text,
     );
