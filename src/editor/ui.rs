@@ -820,7 +820,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         }
         let mut port_counts: HashMap<(String, u8), u32> = HashMap::new();
         fn reg_ep(ep: &EndpointRef, port_counts: &mut HashMap<(String, u8), u32>) {
-            let key = (ep.sid.clone(), if ep.port_type == "out" { 1 } else { 0 });
+            let key = (
+                ep.sid.clone(),
+                crate::egui_app::ui::signal_routing::port_kind(&ep.port_type),
+            );
             let idx1 = if ep.port_index == 0 { 1 } else { ep.port_index };
             port_counts
                 .entry(key)
@@ -858,7 +861,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 continue;
             };
             let num_src = port_counts
-                .get(&(src.sid.clone(), if src.port_type == "out" { 1 } else { 0 }))
+                .get(&(
+                    src.sid.clone(),
+                    crate::egui_app::ui::signal_routing::port_kind(&src.port_type),
+                ))
                 .copied();
             let mirrored_src = sid_mirrored.get(&src.sid).copied().unwrap_or(false);
             let mut cur = endpoint_pos_maybe_mirrored(*sr, src, num_src, mirrored_src);
@@ -874,7 +880,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 && let Some(dr) = sid_map.get(&dst.sid)
             {
                 let num_dst = port_counts
-                    .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
+                    .get(&(
+                        dst.sid.clone(),
+                        crate::egui_app::ui::signal_routing::port_kind(&dst.port_type),
+                    ))
                     .copied();
                 let mirrored_dst = sid_mirrored.get(&dst.sid).copied().unwrap_or(false);
                 let dst_pt = endpoint_pos_maybe_mirrored(*dr, dst, num_dst, mirrored_dst);
@@ -1283,7 +1292,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     port_index: src_port_index,
                 };
                 let num_ports = port_counts
-                    .get(&(src_sid.clone(), if src_port_type == "out" { 1 } else { 0 }))
+                    .get(&(
+                        src_sid.clone(),
+                        crate::egui_app::ui::signal_routing::port_kind(src_port_type),
+                    ))
                     .copied();
                 let model_pos = endpoint_pos_maybe_mirrored(*sr, &ep, num_ports, mirrored);
                 Some(to_screen(model_pos))
@@ -2083,7 +2095,7 @@ fn draw_branch_rec(
     {
         let key = (
             dstb.sid.clone(),
-            if dstb.port_type == "out" { 1 } else { 0 },
+            crate::egui_app::ui::signal_routing::port_kind(&dstb.port_type),
         );
         let num_dst = port_counts.get(&key).copied();
         let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);

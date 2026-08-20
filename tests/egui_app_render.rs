@@ -417,3 +417,33 @@ fn display_still_hides_input_port_labels() {
 
     assert!(!cfg.show_input_port_labels);
 }
+
+/// The subsystem variants of the reference model must expose exactly the
+/// top-edge control ports their contents ask for: an enable and a trigger port
+/// for the enabled+triggered subsystem, a reset port for the resettable ones,
+/// and the reinitialize event port of a nested function subsystem.
+#[test]
+fn subsystem_control_ports_come_from_the_contained_port_blocks() {
+    use rustylink::model::SlxArchive;
+    use rustylink::simulink_libraries::renderers::subsystem_control_port_count;
+
+    let file = std::fs::File::open("simulink_test_models/Simulink_Blocks.slx")
+        .expect("open Simulink_Blocks.slx");
+    let archive = SlxArchive::from_reader(std::io::BufReader::new(file)).expect("read archive");
+    let system = archive.assembled_root_system().expect("assemble root");
+
+    let count_of = |name: &str| {
+        system
+            .blocks
+            .iter()
+            .find(|b| b.name == name)
+            .map(subsystem_control_port_count)
+            .unwrap_or_else(|| panic!("{name} missing from the model"))
+    };
+
+    assert_eq!(count_of("Subsystem"), 0);
+    assert_eq!(count_of("Enabled Subsystem"), 1);
+    assert_eq!(count_of("Enabled and Triggered Subsystem"), 2);
+    assert_eq!(count_of("Resettable Subsystem"), 1);
+    assert_eq!(count_of("Atomic Subsystem with Reinit"), 1);
+}

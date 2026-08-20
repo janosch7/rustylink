@@ -136,20 +136,33 @@ pub fn get_branch_mut<'a>(
 // Port-count accumulation
 // ---------------------------------------------------------------------------
 
+/// The port-count bucket an endpoint belongs to: input side, output side, or
+/// the control ports on the top edge.  Control ports are counted separately so
+/// an `enable:1` endpoint is not mistaken for data input 1.
+pub fn port_kind(port_type: &str) -> u8 {
+    match port_type {
+        "out" => 1,
+        other if crate::egui_app::geometry::is_control_port_type(other) => 2,
+        _ => 0,
+    }
+}
+
 /// Register an endpoint's port in the port-count and connected-ports maps.
 pub fn register_endpoint(
     ep: &crate::model::EndpointRef,
     port_counts: &mut std::collections::HashMap<(String, u8), u32>,
     connected_ports: &mut std::collections::HashSet<(String, u32, bool)>,
 ) {
-    let key = (ep.sid.clone(), if ep.port_type == "out" { 1 } else { 0 });
+    let kind = port_kind(&ep.port_type);
+    let key = (ep.sid.clone(), kind);
     let idx1 = if ep.port_index == 0 { 1 } else { ep.port_index };
     port_counts
         .entry(key)
         .and_modify(|v| *v = (*v).max(idx1))
         .or_insert(idx1);
-    let is_input = ep.port_type != "out";
-    connected_ports.insert((ep.sid.clone(), ep.port_index, is_input));
+    if kind != 2 {
+        connected_ports.insert((ep.sid.clone(), ep.port_index, kind == 0));
+    }
 }
 
 /// Recursively register branch endpoint ports.
@@ -211,6 +224,14 @@ pub fn compute_port_info(
                     .entry(key)
                     .and_modify(|v| *v = (*v).max(outs))
                     .or_insert(outs);
+            }
+            let controls = pc.control_count();
+            if controls > 0 {
+                let key = (sid.clone(), 2u8);
+                port_counts
+                    .entry(key)
+                    .and_modify(|v| *v = (*v).max(controls))
+                    .or_insert(controls);
             }
         }
     }

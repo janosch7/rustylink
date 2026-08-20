@@ -1476,7 +1476,7 @@ pub(crate) fn update_internal(
             };
             let mut offsets_pts: Vec<Pos2> = Vec::new();
             let num_src = port_counts
-                .get(&(src.sid.clone(), if src.port_type == "out" { 1 } else { 0 }))
+                .get(&(src.sid.clone(), signal_routing::port_kind(&src.port_type)))
                 .copied();
             let mirrored_src = sid_mirrored.get(&src.sid).copied().unwrap_or(false);
             let mut cur = endpoint_pos_maybe_mirrored(*sr, src, num_src, mirrored_src);
@@ -1499,7 +1499,7 @@ pub(crate) fn update_internal(
             if let Some(dst) = line.dst.as_ref()
                 && let Some(dr) = sid_map.get(&dst.sid) {
                     let num_dst = port_counts
-                        .get(&(dst.sid.clone(), if dst.port_type == "out" { 1 } else { 0 }))
+                        .get(&(dst.sid.clone(), signal_routing::port_kind(&dst.port_type)))
                         .copied();
                     let mirrored_dst = owned_blocks
                         .iter()
@@ -1622,7 +1622,7 @@ pub(crate) fn update_internal(
                 && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
-                        if dstb.port_type == "out" { 1 } else { 0 },
+                        signal_routing::port_kind(&dstb.port_type),
                     );
                     let num_dst = port_counts.get(&key).copied();
                     let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
@@ -1710,7 +1710,7 @@ pub(crate) fn update_internal(
                 && let Some(dr) = sid_map.get(&dstb.sid) {
                     let key = (
                         dstb.sid.clone(),
-                        if dstb.port_type == "out" { 1 } else { 0 },
+                        signal_routing::port_kind(&dstb.port_type),
                     );
                     let num_dst = port_counts.get(&key).copied();
                     let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
@@ -2771,12 +2771,9 @@ pub(crate) fn update_internal(
                     );
                 }
             }
-            // Enable/trigger ports enter through the block's top edge.
-            let control_count = b
-                .port_counts
-                .as_ref()
-                .map(|p| p.control_count())
-                .unwrap_or(0);
+            // Enable/trigger/reset/event ports enter through the top edge.
+            let control_count =
+                crate::simulink_libraries::renderers::subsystem_control_port_count(b);
             for i in 0..control_count {
                 let x = r_screen.left()
                     + (i as f32 + 1.0) / (control_count as f32 + 1.0) * r_screen.width();

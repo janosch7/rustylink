@@ -398,22 +398,28 @@ impl ConnectionTargetResolver {
             let mut changed = false;
 
             for (index, line) in system.lines.iter().enumerate() {
-                let Some(dst) = &line.dst else {
-                    continue;
-                };
-                let Some(block) = block_lookup.get(dst.sid.as_str()).copied() else {
-                    continue;
-                };
-
-                let propagated = self.upstream_propagated_targets(
-                    system,
-                    system_path,
-                    block,
-                    line,
-                    parent_ctx,
-                    child_summaries,
-                    line_targets,
-                );
+                // A branched line ends at several blocks at once, and each of
+                // them can hand metadata back upstream.
+                let mut propagated = Vec::new();
+                let mut crosses_boundary = false;
+                for dst in line_destination_endpoints(line) {
+                    let Some(block) = block_lookup.get(dst.sid.as_str()).copied() else {
+                        continue;
+                    };
+                    propagated.extend(self.upstream_propagated_targets(
+                        system,
+                        system_path,
+                        block,
+                        dst,
+                        parent_ctx,
+                        child_summaries,
+                        line_targets,
+                    ));
+                    crosses_boundary |= matches!(
+                        block.block_type.as_str(),
+                        "SubSystem" | "Reference" | "Outport"
+                    );
+                }
                 if propagated.is_empty() {
                     continue;
                 }
@@ -422,10 +428,7 @@ impl ConnectionTargetResolver {
                     line,
                     &line_targets[index],
                     &propagated,
-                    matches!(
-                        block.block_type.as_str(),
-                        "SubSystem" | "Reference" | "Outport"
-                    ),
+                    crosses_boundary,
                 );
                 if merged != line_targets[index] {
                     line_targets[index] = merged;
@@ -658,7 +661,7 @@ impl ConnectionTargetResolver {
         system: &System,
         system_path: &[String],
         block: &Block,
-        line: &Line,
+        dst: &EndpointRef,
         parent_ctx: Option<&ParentSubsystemContext>,
         child_summaries: &HashMap<String, ChildSubsystemSummary>,
         line_targets: &[Vec<ConnectionTarget>],
@@ -666,7 +669,7 @@ impl ConnectionTargetResolver {
         match block.block_type.as_str() {
             "BusCreator" => self.bus_creator_upstream_targets(system, block, line_targets),
             "BusSelector" => self.bus_selector_upstream_targets(system, block, line_targets),
-            "Mux" => self.mux_upstream_targets(system, block, line, line_targets),
+            "Mux" => self.mux_upstream_targets(system, block, dst.port_index, line_targets),
             "Demux" => self.demux_upstream_targets(system, block, line_targets),
             "Inport" => outgoing_line_indices_for_block(system, block)
                 .into_iter()
@@ -678,11 +681,8 @@ impl ConnectionTargetResolver {
                 .unwrap_or_default(),
             "SubSystem" | "Reference" => child_summaries
                 .get(block.sid.as_deref().unwrap_or_default())
-                .and_then(|summary| {
-                    line.dst
-                        .as_ref()
-                        .and_then(|dst| summary.incoming_by_port.get(&dst.port_index))
-                })
+                .filter(|_| !is_control_port_type(&dst.port_type))
+                .and_then(|summary| summary.incoming_by_port.get(&dst.port_index))
                 .map(|targets| {
                     let mut propagated =
                         boundary_targets(targets, self.full_block_path(system_path, &block.name));
@@ -726,13 +726,9 @@ impl ConnectionTargetResolver {
         &self,
         system: &System,
         block: &Block,
-        line: &Line,
+        input_index: u32,
         line_targets: &[Vec<ConnectionTarget>],
     ) -> Vec<ConnectionTarget> {
-        let Some(input_index) = line.dst.as_ref().map(|dst| dst.port_index) else {
-            return Vec::new();
-        };
-
         outgoing_line_indices_for_block(system, block)
             .into_iter()
             .flat_map(|(line_index, _)| {
@@ -917,6 +913,21 @@ fn input_port_indices(block: &Block, line: &Line) -> Vec<u32> {
     } else {
         ports.into_iter().collect()
     }
+}
+
+/// Every endpoint a line ends at: its own `dst` plus the destination of every
+/// branch, because a branched line has no `dst` of its own.
+fn line_destination_endpoints(line: &Line) -> Vec<&EndpointRef> {
+    fn collect<'a>(branches: &'a [Branch], out: &mut Vec<&'a EndpointRef>) {
+        for branch in branches {
+            out.extend(branch.dst.as_ref());
+            collect(&branch.branches, out);
+        }
+    }
+
+    let mut endpoints: Vec<&EndpointRef> = line.dst.as_ref().into_iter().collect();
+    collect(&line.branches, &mut endpoints);
+    endpoints
 }
 
 fn is_control_port_type(port_type: &str) -> bool {
@@ -1208,10 +1219,13 @@ fn apply_line_resolve_hint(
         return;
     }
 
-    if let Some(dst) = &line.dst
-        && let Some(block) = block_lookup.get(dst.sid.as_str())
-        && block.block_type == "Mux"
-    {
+    // The mux input this line ends at – for a branched line that is one of the
+    // branch endpoints, not `line.dst`.
+    if let Some(dst) = line_destination_endpoints(line).into_iter().find(|dst| {
+        block_lookup
+            .get(dst.sid.as_str())
+            .is_some_and(|block| block.block_type == "Mux")
+    }) {
         target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
         return;
     }

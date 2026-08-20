@@ -575,6 +575,13 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_ports(IOPorts::None, IOPorts::None)
         .with_icon(icon("\u{2191}")),
 
+    SimulinkBlockDefinition::new("ResetPort", "Ports & Subsystems")
+        .with_aliases(&["Reset"])
+        .with_description("Add reset port to subsystem")
+        .with_ports(IOPorts::None, IOPorts::None)
+        .with_metadata_keys(&[MetadataKey::with_default("ResetTriggerType", "rising")])
+        .with_static_renderer(renderers::static_reset_port),
+
     SimulinkBlockDefinition::new("PMIOPort", "Ports & Subsystems")
         .with_aliases(&["Connection Port", "Simscape Port"])
         .with_description("Physical modeling connection port")
