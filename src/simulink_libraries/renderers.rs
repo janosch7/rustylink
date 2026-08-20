@@ -593,6 +593,70 @@ pub fn static_subsystem(
     true
 }
 
+/// Static renderer for the Data Store Read/Write blocks: the name of the store
+/// they access, framed by the rules Simulink draws above and below it.
+pub fn static_data_store_access(
+    painter: &Painter,
+    _block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let name = ctx
+        .metadata
+        .get("DataStoreName")
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("A");
+    let spec = format!("p 0.14,0.18 0.86,0.18; p 0.14,0.82 0.86,0.82; t 0.50,0.50,0.46 {name}");
+    crate::egui_app::render::draw_plot_icon(
+        painter,
+        rect,
+        ctx.font_scale,
+        &spec,
+        ctx.text_color,
+        ctx.port_label_widths,
+    );
+    true
+}
+
+/// Static renderer for the blocks that write into another block's state or
+/// parameters: a diamond carrying `x` (state) or `p` (parameter).  The block
+/// they act on is named in the label Simulink prints beside the diamond.
+pub fn static_state_parameter_access(
+    painter: &Painter,
+    block: &Block,
+    rect: &Rect,
+    ctx: &RenderContext<'_>,
+) -> bool {
+    let glyph = if block.block_type == "ParameterWriter" {
+        "p"
+    } else {
+        "x"
+    };
+    let colors = body_colors(ctx);
+    let center = rect.center();
+    painter.add(eframe::egui::Shape::convex_polygon(
+        vec![
+            eframe::egui::pos2(center.x, rect.top()),
+            eframe::egui::pos2(rect.right(), center.y),
+            eframe::egui::pos2(center.x, rect.bottom()),
+            eframe::egui::pos2(rect.left(), center.y),
+        ],
+        colors.fill,
+        eframe::egui::Stroke::new((1.4 * ctx.font_scale).max(0.75), colors.border),
+    ));
+    painter.text(
+        center,
+        eframe::egui::Align2::CENTER_CENTER,
+        glyph,
+        eframe::egui::FontId::proportional(
+            (rect.height() * 0.5).clamp(6.0, 24.0 * ctx.font_scale.max(0.2)),
+        ),
+        colors.text,
+    );
+    true
+}
+
 /// Static renderer for the ResetPort block: the pictogram of the edge it
 /// resets on – the same one its subsystem shows at the reset port it adds.
 pub fn static_reset_port(
@@ -649,20 +713,48 @@ fn event_port_glyph(kind: &EventKind) -> &'static str {
     }
 }
 
-/// How many ports a subsystem carries on its top edge, derived from the blocks
-/// it contains so the port markers and their pictograms always agree.  Falls
-/// back to the model's `<PortCounts>` for a subsystem whose contents are not
-/// loaded.
-pub fn subsystem_control_port_count(block: &Block) -> u32 {
-    let declared = block
-        .port_counts
-        .as_ref()
-        .map(|counts| counts.control_count())
-        .unwrap_or(0);
+/// The endpoint types of the subsystem's top-edge ports, left to right, in the
+/// same order [`control_port_glyphs`] draws their pictograms.  This is what
+/// turns an `enable:1` / `trigger:1` endpoint – both numbered 1, each in its
+/// own type's numbering – into the slot it occupies on the edge.  Falls back to
+/// the model's `<PortCounts>` for a subsystem whose contents are not loaded.
+pub fn subsystem_control_port_types(block: &Block) -> Vec<&'static str> {
     if block.subsystem.is_none() {
-        return declared;
+        let Some(counts) = block.port_counts.as_ref() else {
+            return Vec::new();
+        };
+        return [
+            ("enable", counts.enable),
+            ("trigger", counts.trigger),
+            ("reset", counts.reset),
+            ("event", counts.event),
+        ]
+        .into_iter()
+        .flat_map(|(port_type, count)| std::iter::repeat_n(port_type, count.unwrap_or(0) as usize))
+        .collect();
     }
-    control_port_glyphs(&SubsystemContent::of(block)).len() as u32
+
+    let content = SubsystemContent::of(block);
+    let mut types = Vec::new();
+    if content.enabled {
+        types.push("enable");
+    }
+    if content.triggered.is_some() {
+        types.push("trigger");
+    }
+    if content.reset.is_some() {
+        types.push("reset");
+    }
+    if content.event_port.is_some() {
+        types.push("event");
+    }
+    types
+}
+
+/// How many ports a subsystem carries on its top edge, derived from the blocks
+/// it contains so the port markers and their pictograms always agree.
+pub fn subsystem_control_port_count(block: &Block) -> u32 {
+    subsystem_control_port_types(block).len() as u32
 }
 
 /// The parts of a subsystem's contents that shape how Simulink draws it.

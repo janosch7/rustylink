@@ -933,7 +933,7 @@ fn line_destination_endpoints(line: &Line) -> Vec<&EndpointRef> {
 fn is_control_port_type(port_type: &str) -> bool {
     matches!(
         port_type.to_ascii_lowercase().as_str(),
-        "enable" | "trigger" | "ifaction" | "action" | "reset" | "state"
+        "enable" | "trigger" | "ifaction" | "action" | "reset" | "state" | "event"
     )
 }
 

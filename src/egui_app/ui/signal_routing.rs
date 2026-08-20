@@ -147,6 +147,47 @@ pub fn port_kind(port_type: &str) -> u8 {
     }
 }
 
+/// Bucket holding the top-edge *slot* of a control port type rather than a
+/// port count; no endpoint maps to it, so it cannot collide with the counts.
+const CONTROL_SLOT_KIND: u8 = 3;
+
+fn control_slot_key(sid: &str, port_type: &str) -> (String, u8) {
+    (
+        format!("{sid}\u{1}{}", port_type.to_ascii_lowercase()),
+        CONTROL_SLOT_KIND,
+    )
+}
+
+/// Where an endpoint attaches to its block.
+///
+/// Control ports are numbered per type (`enable:1` *and* `trigger:1`), so their
+/// index says nothing about where they sit on the top edge; the slot recorded
+/// by [`compute_port_info`] does.
+pub fn endpoint_pos(
+    rect: eframe::egui::Rect,
+    ep: &crate::model::EndpointRef,
+    port_counts: &std::collections::HashMap<(String, u8), u32>,
+    mirrored: bool,
+) -> Pos2 {
+    let kind = port_kind(&ep.port_type);
+    let num_ports = port_counts.get(&(ep.sid.clone(), kind)).copied();
+    let index = if kind == 2 {
+        port_counts
+            .get(&control_slot_key(&ep.sid, &ep.port_type))
+            .copied()
+            .map(|slot| slot + ep.port_index.saturating_sub(1))
+            .unwrap_or(ep.port_index)
+    } else {
+        ep.port_index
+    };
+    crate::egui_app::geometry::port_anchor_pos(
+        rect,
+        crate::egui_app::geometry::port_side_for(&ep.port_type, mirrored),
+        index,
+        num_ports,
+    )
+}
+
 /// Register an endpoint's port in the port-count and connected-ports maps.
 pub fn register_endpoint(
     ep: &crate::model::EndpointRef,
@@ -225,14 +266,22 @@ pub fn compute_port_info(
                     .and_modify(|v| *v = (*v).max(outs))
                     .or_insert(outs);
             }
-            let controls = pc.control_count();
-            if controls > 0 {
-                let key = (sid.clone(), 2u8);
-                port_counts
-                    .entry(key)
-                    .and_modify(|v| *v = (*v).max(controls))
-                    .or_insert(controls);
-            }
+        }
+
+        let Some(sid) = &b.sid else { continue };
+        let control_types = crate::simulink_libraries::renderers::subsystem_control_port_types(b);
+        if control_types.is_empty() {
+            continue;
+        }
+        let controls = control_types.len() as u32;
+        port_counts
+            .entry((sid.clone(), 2u8))
+            .and_modify(|v| *v = (*v).max(controls))
+            .or_insert(controls);
+        for (slot, port_type) in control_types.into_iter().enumerate() {
+            port_counts
+                .entry(control_slot_key(sid, port_type))
+                .or_insert(slot as u32 + 1);
         }
     }
 

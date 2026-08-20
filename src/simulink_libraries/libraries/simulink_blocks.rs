@@ -912,11 +912,34 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
         .with_aliases(&["State Reader"])
         .with_description("Read block state for logging or initialisation")
         .with_ports(IOPorts::None, IOPorts::Fixed(1))
-        .with_icon(icon("SR")),
+        .with_shape(SimulinkShape::None)
+        .with_static_renderer(renderers::static_state_parameter_access),
 
     SimulinkBlockDefinition::new("StateWriter", "Ports & Subsystems")
         .with_aliases(&["State Writer"])
         .with_description("Write values into block state")
         .with_ports(IOPorts::Fixed(1), IOPorts::None)
-        .with_icon(icon("SW")),
+        .with_shape(SimulinkShape::None)
+        .with_static_renderer(renderers::static_state_parameter_access),
+
+    SimulinkBlockDefinition::new("ParameterWriter", "Ports & Subsystems")
+        .with_aliases(&["Parameter Writer"])
+        .with_description("Write values into another block's parameters")
+        .with_ports(IOPorts::Fixed(1), IOPorts::None)
+        .with_shape(SimulinkShape::None)
+        .with_static_renderer(renderers::static_state_parameter_access),
+
+    SimulinkBlockDefinition::new("DataStoreRead", "Signal Routing")
+        .with_aliases(&["Data Store Read"])
+        .with_description("Read from a data store")
+        .with_ports(IOPorts::None, IOPorts::Fixed(1))
+        .with_metadata_keys(&[MetadataKey::with_default("DataStoreName", "A")])
+        .with_static_renderer(renderers::static_data_store_access),
+
+    SimulinkBlockDefinition::new("DataStoreWrite", "Signal Routing")
+        .with_aliases(&["Data Store Write"])
+        .with_description("Write to a data store")
+        .with_ports(IOPorts::Fixed(1), IOPorts::None)
+        .with_metadata_keys(&[MetadataKey::with_default("DataStoreName", "A")])
+        .with_static_renderer(renderers::static_data_store_access),
 ];
