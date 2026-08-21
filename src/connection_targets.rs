@@ -1,6 +1,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -61,11 +63,64 @@ impl ConnectionTarget {
     }
 }
 
-/// How often a system re-resolves its children while their input contexts are
-/// still changing (chains of sibling subsystems feeding one another).  Only
-/// children whose context actually changed are resolved again, so a pass over
-/// a settled system costs nothing but the comparison.
-const MAX_CHILD_RESOLVE_PASSES: usize = 8;
+/// How many times the root-level resolution loop re-resolves the entire
+/// tree, waiting for cross-boundary signal targets to settle.  Each pass
+/// propagates information one subsystem level, so 32 passes handles models
+/// up to ~16 levels deep with multi-hop sibling chains.
+pub const MAX_GLOBAL_RESOLVE_PASSES: usize = 32;
+
+/// Tracks progress of `ConnectionTargetResolver` construction for background
+/// builds.  `tick()` is called on every `resolve_system` visit; the shared
+/// atomics let the UI thread read live progress without locking.
+struct ProgressTracker {
+    /// Total `resolve_system` calls across all root-level passes.
+    counter: AtomicUsize,
+    /// Shared with the UI thread: 0..=1000 (0.0%..=100.0% for the bar fill).
+    progress: Arc<AtomicU32>,
+    /// Shared with the UI thread: total subsystems visited so far.
+    visited: Arc<AtomicUsize>,
+    /// Estimated total work: `estimated_passes × total_subsystems`.
+    total: usize,
+}
+
+impl ProgressTracker {
+    fn new(progress: Arc<AtomicU32>, visited: Arc<AtomicUsize>, total: usize) -> Self {
+        Self {
+            counter: AtomicUsize::new(0),
+            progress,
+            visited,
+            total,
+        }
+    }
+    fn tick(&self) {
+        let count = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+        self.visited.store(count, Ordering::Relaxed);
+        let p = ((count as u32 * 1000) / self.total.max(1) as u32).min(1000);
+        self.progress.store(p, Ordering::Relaxed);
+    }
+}
+
+/// Count the total number of `System` nodes in the tree (root + all nested
+/// subsystems).  Used to estimate progress for the background build.
+pub fn count_subsystems(system: &System) -> usize {
+    1 + system
+        .blocks
+        .iter()
+        .filter_map(|b| b.subsystem.as_ref())
+        .map(|sub| count_subsystems(sub))
+        .sum::<usize>()
+}
+
+/// Maximum nesting depth of subsystems in the tree (root = 1).
+pub fn max_subsystem_depth(system: &System) -> usize {
+    1 + system
+        .blocks
+        .iter()
+        .filter_map(|b| b.subsystem.as_ref())
+        .map(|sub| max_subsystem_depth(sub))
+        .max()
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct ParentSubsystemContext {
@@ -84,6 +139,10 @@ pub struct ConnectionTargetResolver {
     block_targets: HashMap<String, Vec<ConnectionTarget>>,
     line_targets: HashMap<String, Vec<ConnectionTarget>>,
     model_name: String,
+    /// Child subsystem summaries keyed by block SID, persisted across root-level
+    /// resolution passes so that information from a previous pass can seed the
+    /// next one without re-resolving every child at every recursion level.
+    child_summaries: HashMap<String, ChildSubsystemSummary>,
 }
 
 impl ConnectionTargetResolver {
@@ -92,9 +151,58 @@ impl ConnectionTargetResolver {
             block_targets: HashMap::new(),
             line_targets: HashMap::new(),
             model_name: root.properties.get("Name").cloned().unwrap_or_default(),
+            child_summaries: HashMap::new(),
         };
         let empty_path: Vec<String> = Vec::new();
-        resolver.resolve_system(root, &empty_path, None);
+        // Re-resolve the entire tree until the cached targets stop changing.
+        // Each pass propagates cross-boundary signal information one subsystem
+        // level, so this converges in O(depth) passes instead of the
+        // exponential 8^depth that a per-recursion-level loop would cost.
+        for _ in 0..MAX_GLOBAL_RESOLVE_PASSES {
+            let prev_block = resolver.block_targets.clone();
+            let prev_line = resolver.line_targets.clone();
+            resolver.resolve_system(root, &empty_path, None, None);
+            if resolver.block_targets == prev_block && resolver.line_targets == prev_line {
+                break;
+            }
+        }
+        resolver
+    }
+
+    /// Like [`new`](Self::new) but reports build progress through shared atomics.
+    ///
+    /// `progress` is written as 0..=1000 (0.0%..=100.0%) and `visited` as the
+    /// total number of `resolve_system` calls so far.  Both use
+    /// `Ordering::Relaxed` so the UI thread can read them without locking.
+    pub fn new_with_progress(
+        root: &System,
+        progress: Arc<AtomicU32>,
+        visited: Arc<AtomicUsize>,
+    ) -> Self {
+        let total_subsystems = count_subsystems(root).max(1);
+        let max_depth = max_subsystem_depth(root);
+        let estimated_passes = MAX_GLOBAL_RESOLVE_PASSES.min(max_depth + 2).max(1);
+        let total_work = estimated_passes * total_subsystems;
+        let tracker = ProgressTracker::new(progress, visited, total_work);
+
+        let mut resolver = Self {
+            block_targets: HashMap::new(),
+            line_targets: HashMap::new(),
+            model_name: root.properties.get("Name").cloned().unwrap_or_default(),
+            child_summaries: HashMap::new(),
+        };
+        let empty_path: Vec<String> = Vec::new();
+        for _ in 0..MAX_GLOBAL_RESOLVE_PASSES {
+            let prev_block = resolver.block_targets.clone();
+            let prev_line = resolver.line_targets.clone();
+            resolver.resolve_system(root, &empty_path, None, Some(&tracker));
+            if resolver.block_targets == prev_block && resolver.line_targets == prev_line {
+                break;
+            }
+        }
+        // Ensure progress shows 100% when done.
+        tracker.progress.store(1000, Ordering::Relaxed);
+        tracker.visited.store(total_work, Ordering::Relaxed);
         resolver
     }
 
@@ -147,7 +255,11 @@ impl ConnectionTargetResolver {
         system: &System,
         system_path: &[String],
         parent_ctx: Option<&ParentSubsystemContext>,
+        progress: Option<&ProgressTracker>,
     ) -> ChildSubsystemSummary {
+        if let Some(p) = progress {
+            p.tick();
+        }
         let block_lookup = build_block_lookup(system);
         let mut line_targets: Vec<Vec<ConnectionTarget>> = system
             .lines
@@ -155,12 +267,15 @@ impl ConnectionTargetResolver {
             .map(|line| self.base_line_targets(system, system_path, &block_lookup, line))
             .collect();
 
+        // Initial propagation with child summaries from the previous root-level
+        // pass.  On the first pass this is empty, so lines fall back to their
+        // base targets; subsequent passes see the summaries computed below.
         self.propagate_line_targets(
             system,
             system_path,
             &block_lookup,
             parent_ctx,
-            &HashMap::new(),
+            &self.child_summaries,
             &mut line_targets,
         );
         self.propagate_line_metadata_upward(
@@ -168,60 +283,45 @@ impl ConnectionTargetResolver {
             system_path,
             &block_lookup,
             parent_ctx,
-            &HashMap::new(),
+            &self.child_summaries,
             &mut line_targets,
         );
 
-        // Resolving a child needs the targets of the lines feeding it, and a
-        // line fed by a *sibling* subsystem only gets its real targets once
-        // that sibling has been resolved.  So alternate between resolving the
-        // children and re-propagating this system's lines until the children's
-        // contexts stop changing; a child whose context is unchanged is not
-        // resolved again, which keeps the common case a single pass.
-        let mut child_summaries: HashMap<String, ChildSubsystemSummary> = HashMap::new();
-        let mut child_contexts: HashMap<&str, ParentSubsystemContext> = HashMap::new();
-        for _ in 0..MAX_CHILD_RESOLVE_PASSES {
-            let mut resolved_any = false;
-            for block in &system.blocks {
-                if let Some(subsystem) = &block.subsystem {
-                    let child_ctx = ParentSubsystemContext {
-                        incoming_by_port: incoming_targets_by_port(system, block, &line_targets),
-                        outgoing_by_port: outgoing_targets_by_port(system, block, &line_targets),
-                    };
-                    if child_contexts.get(block.name.as_str()) == Some(&child_ctx) {
-                        continue;
-                    }
-                    let child_path = child_system_path(system_path, &block.name);
-                    let summary = self.resolve_system(subsystem, &child_path, Some(&child_ctx));
-                    child_contexts.insert(block.name.as_str(), child_ctx);
-                    if let Some(sid) = &block.sid {
-                        child_summaries.insert(sid.clone(), summary);
-                    }
-                    resolved_any = true;
+        // Resolve each child subsystem once.  The root-level loop in `new`
+        // re-invokes `resolve_system` until the cached targets converge, which
+        // is what lets cross-boundary signal information propagate across
+        // sibling subsystems without an exponential per-level loop here.
+        for block in &system.blocks {
+            if let Some(subsystem) = &block.subsystem {
+                let child_ctx = ParentSubsystemContext {
+                    incoming_by_port: incoming_targets_by_port(system, block, &line_targets),
+                    outgoing_by_port: outgoing_targets_by_port(system, block, &line_targets),
+                };
+                let child_path = child_system_path(system_path, &block.name);
+                let summary = self.resolve_system(subsystem, &child_path, Some(&child_ctx), progress);
+                if let Some(sid) = &block.sid {
+                    self.child_summaries.insert(sid.clone(), summary);
                 }
             }
-
-            self.propagate_line_targets(
-                system,
-                system_path,
-                &block_lookup,
-                parent_ctx,
-                &child_summaries,
-                &mut line_targets,
-            );
-            self.propagate_line_metadata_upward(
-                system,
-                system_path,
-                &block_lookup,
-                parent_ctx,
-                &child_summaries,
-                &mut line_targets,
-            );
-
-            if !resolved_any {
-                break;
-            }
         }
+
+        // Final propagation with the freshly computed child summaries.
+        self.propagate_line_targets(
+            system,
+            system_path,
+            &block_lookup,
+            parent_ctx,
+            &self.child_summaries,
+            &mut line_targets,
+        );
+        self.propagate_line_metadata_upward(
+            system,
+            system_path,
+            &block_lookup,
+            parent_ctx,
+            &self.child_summaries,
+            &mut line_targets,
+        );
 
         for (line, targets) in system.lines.iter().zip(line_targets.iter()) {
             self.line_targets.insert(
@@ -820,8 +920,28 @@ pub fn debug_print_block_targets(root: &System, system_path: &[String], block: &
     print_targets(&targets);
 }
 
+pub fn debug_print_block_targets_with_resolver(
+    resolver: &ConnectionTargetResolver,
+    system_path: &[String],
+    block: &Block,
+) {
+    let targets = resolver.block_targets_for_block(system_path, block);
+    println!("  [Targets] block '{}'", block.name);
+    print_targets(&targets);
+}
+
 pub fn debug_print_line_targets(root: &System, system_path: &[String], line: &Line) {
     let resolver = ConnectionTargetResolver::new(root);
+    let targets = resolver.line_targets_for_line(system_path, line);
+    println!("  [Targets] line {}", line_identity(line));
+    print_targets(&targets);
+}
+
+pub fn debug_print_line_targets_with_resolver(
+    resolver: &ConnectionTargetResolver,
+    system_path: &[String],
+    line: &Line,
+) {
     let targets = resolver.line_targets_for_line(system_path, line);
     println!("  [Targets] line {}", line_identity(line));
     print_targets(&targets);

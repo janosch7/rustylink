@@ -18,7 +18,7 @@ use crate::egui_app::render::wrap_text_to_max_width;
 use crate::egui_app::render::{ComputedPortYCoordinates, PortLabelMaxWidths};
 use crate::egui_app::state::ViewerDragState;
 use crate::egui_app::state::{
-    LiveTooltipEntry, LiveTooltipKind, SubsystemApp, resolve_subsystem_by_vec_mut,
+    LiveTooltipEntry, LiveTooltipKind, ResolverStatus, SubsystemApp, resolve_subsystem_by_vec_mut,
 };
 use crate::egui_app::text::highlight_query_job;
 use crate::egui_app::{get_block_type_cfg, port_label_defined_name, port_label_display_name};
@@ -1124,15 +1124,21 @@ pub(crate) fn update_internal(
             let mut block_action: Option<ClickAction> = None;
             if resp.double_clicked() {
                 println!("Block {} double-clicked", b.name);
-                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
+                if let Some(r) = app.connection_target_resolver() {
+                    crate::connection_targets::debug_print_block_targets_with_resolver(r.as_ref(), &app.path, b);
+                }
                 block_action = Some(ClickAction::DoublePrimary);
             } else if resp.secondary_clicked() {
                 println!("Block {} secondary clicked", b.name);
-                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
+                if let Some(r) = app.connection_target_resolver() {
+                    crate::connection_targets::debug_print_block_targets_with_resolver(r.as_ref(), &app.path, b);
+                }
                 block_action = Some(ClickAction::Secondary);
             } else if resp.clicked() {
                 println!("Block {} clicked", b.name);
-                crate::connection_targets::debug_print_block_targets(&app.root, &app.path, b);
+                if let Some(r) = app.connection_target_resolver() {
+                    crate::connection_targets::debug_print_block_targets_with_resolver(r.as_ref(), &app.path, b);
+                }
                 if !app.move_mode_enabled {
                     if app.live_mode_enabled && b.block_type == "ManualSwitch" {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
@@ -1422,8 +1428,31 @@ pub(crate) fn update_internal(
         }
 
         // The connection-target resolver depends only on model topology and is
-        // rebuilt only when that changes (not on navigation or layout drags).
-        let connection_target_resolver = app.view_cache.ensure_resolver(&app.root);
+        // rebuilt in a background thread when that changes (not on navigation
+        // or layout drags).  While the build is in progress we show a progress
+        // bar and skip rendering the model for this frame.
+        let connection_target_resolver = match app.view_cache.resolver_status(&app.root) {
+            ResolverStatus::Ready(r) => r,
+            ResolverStatus::Building {
+                progress,
+                current,
+                total,
+            } => {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() / 3.0);
+                    ui.label(format!("Resolving signal targets… {}/{}", current, total));
+                    ui.add_space(8.0);
+                    ui.add(egui::ProgressBar::new(progress));
+                });
+                ui.ctx().request_repaint();
+                // Restore cache data moved out earlier (lines 870-873).
+                app.view_cache.cached_sys_lines = sys_lines;
+                app.view_cache.cached_sys_annotations = sys_annotations;
+                app.view_cache.cached_owned_blocks = owned_blocks;
+                app.view_cache.cached_subsystem_block_lookup = subsystem_block_lookup;
+                return;
+            }
+        };
 
         // Use cached line colors and port info when possible; recompute on model change.
         let cache_gen = app.view_cache.generation;
@@ -1839,15 +1868,15 @@ pub(crate) fn update_internal(
                         let double_clicked = ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
                         let action = if double_clicked {
                             println!("Line {} double-clicked", li);
-                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
+                            crate::connection_targets::debug_print_line_targets_with_resolver(&connection_target_resolver, &app.path, line);
                             Some(ClickAction::DoublePrimary)
                         } else if secondary_clicked {
                             println!("Line {} secondary clicked", li);
-                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
+                            crate::connection_targets::debug_print_line_targets_with_resolver(&connection_target_resolver, &app.path, line);
                             Some(ClickAction::Secondary)
                         } else if primary_clicked {
                             println!("Line {} clicked", li);
-                            crate::connection_targets::debug_print_line_targets(&app.root, &app.path, line);
+                            crate::connection_targets::debug_print_line_targets_with_resolver(&connection_target_resolver, &app.path, line);
                             Some(ClickAction::Primary)
                         } else {
                             None
