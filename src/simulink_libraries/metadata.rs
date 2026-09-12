@@ -9,7 +9,7 @@
 
 #![cfg(feature = "egui")]
 
-use std::collections::HashMap;
+use std::borrow::Cow;
 
 use crate::model::Block;
 
@@ -18,21 +18,31 @@ use super::types::SimulinkBlockDefinition;
 /// Resolved model data for a single block instance, keyed by name.
 ///
 /// Values are stored as strings (the native form in the SLX model) and parsed
-/// on demand via the typed accessors.
+/// on demand via the typed accessors.  A definition declares a handful of keys
+/// at most, so the entries live in a `Vec` scanned linearly: building one map
+/// per block per frame costs more than the scan saves.
 #[derive(Clone, Debug, Default)]
 pub struct BlockMetadata {
-    values: HashMap<String, String>,
+    values: Vec<(Cow<'static, str>, String)>,
 }
 
 impl BlockMetadata {
     /// Look up a raw string value previously extracted for this block.
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.values.get(key).map(|s| s.as_str())
+        self.values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 
     /// Insert a value into the metadata map.
-    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.values.insert(key.into(), value.into());
+    pub fn insert(&mut self, key: impl Into<Cow<'static, str>>, value: impl Into<String>) {
+        let key = key.into();
+        let value = value.into();
+        match self.values.iter_mut().find(|(k, _)| *k == key) {
+            Some(entry) => entry.1 = value,
+            None => self.values.push((key, value)),
+        }
     }
 
     /// Parse a value as `f64`, if present and numeric.

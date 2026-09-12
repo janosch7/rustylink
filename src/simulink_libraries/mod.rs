@@ -30,6 +30,8 @@ pub mod stubs;
 pub mod traits;
 
 #[cfg(feature = "egui")]
+pub mod block_memo;
+#[cfg(feature = "egui")]
 pub mod browser;
 #[cfg(feature = "egui")]
 pub mod config;

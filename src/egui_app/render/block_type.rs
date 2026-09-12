@@ -2,8 +2,12 @@
 
 #![cfg(feature = "egui")]
 
+use std::cell::RefCell;
+use std::sync::Arc;
+
 use crate::block_types::{self, BlockTypeConfig};
 use crate::model::Block;
+use crate::simulink_libraries::block_memo::{BlockIdentity, BlockMemo};
 
 fn normalize_library_block_path(path: &str) -> Option<String> {
     let path = path.trim();
@@ -37,16 +41,37 @@ fn normalize_library_block_path(path: &str) -> Option<String> {
     Some(format!("{lib_norm}/{rest}"))
 }
 
-pub fn get_block_type_cfg(block: &Block) -> BlockTypeConfig {
-    let mut cfg = lookup_block_type_cfg(block);
+/// The rendering configuration of `block`.
+///
+/// Shared so that the several call sites per block and frame do not each clone
+/// the configuration; the copy-on-write only happens for the few definitions
+/// whose port placement depends on the block's own properties.
+pub fn get_block_type_cfg(block: &Block) -> Arc<BlockTypeConfig> {
+    let mut cfg = cached_block_type_cfg(block);
     // Port placement can depend on the block's own properties (a round Sum
     // wraps its last input onto the bottom edge, the rectangular one does not).
     let def = crate::simulink_libraries::resolve_definition(block);
     if let Some(f) = def.port_overrides_fn {
         let metadata = crate::simulink_libraries::metadata::extract_metadata(block, def);
-        cfg.port_position_overrides = f(block, &metadata);
+        Arc::make_mut(&mut cfg).port_position_overrides = f(block, &metadata);
     }
     cfg
+}
+
+/// Cached [`lookup_block_type_cfg`]: the configuration depends only on the
+/// block's identity fields and on the configuration map itself.
+fn cached_block_type_cfg(block: &Block) -> Arc<BlockTypeConfig> {
+    thread_local! {
+        static MEMO: RefCell<BlockMemo<Arc<BlockTypeConfig>>> = RefCell::new(BlockMemo::default());
+    }
+    let identity = BlockIdentity::of(block);
+    let generation = block_types::block_type_config_generation();
+    MEMO.with(|memo| {
+        memo.borrow_mut()
+            .get_or_insert_with(&identity, generation, || {
+                Arc::new(lookup_block_type_cfg(block))
+            })
+    })
 }
 
 fn lookup_block_type_cfg(block: &Block) -> BlockTypeConfig {

@@ -7,6 +7,7 @@
 
 #![cfg(feature = "egui")]
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -14,6 +15,7 @@ use once_cell::sync::OnceCell;
 
 use crate::model::Block;
 
+use super::block_memo::{BlockIdentity, BlockMemo};
 use super::types::{DefinitionRegistry, SimulinkBlockDefinition, unknown_block_definition};
 
 /// Normalise a block/library name: collapse whitespace, lowercase.
@@ -134,6 +136,18 @@ fn normalize_library_path(path: &str) -> String {
 /// 4. Generic `block_type`.
 /// 5. The fallback [`unknown_block_definition`].
 pub fn resolve_definition(block: &Block) -> &'static SimulinkBlockDefinition {
+    thread_local! {
+        static MEMO: RefCell<BlockMemo<&'static SimulinkBlockDefinition>> =
+            RefCell::new(BlockMemo::default());
+    }
+    let identity = BlockIdentity::of(block);
+    MEMO.with(|memo| {
+        memo.borrow_mut()
+            .get_or_insert_with(&identity, 0, || resolve_definition_uncached(block))
+    })
+}
+
+fn resolve_definition_uncached(block: &Block) -> &'static SimulinkBlockDefinition {
     let reg = registry();
 
     if block.is_matlab_function
