@@ -10,24 +10,20 @@ use serde::{Deserialize, Serialize};
 use crate::model::{
     Block, Branch, DashboardBinding, DashboardTargetPath, EndpointRef, Line, System,
 };
+use crate::simulink_libraries::traits::{SignalRole, block_traits};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Variant configuration: sim vs codegen switching mode.
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Which variant is active in "sim codegen switching" mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SimCodegenMode {
     /// Use the `(codegen)` variant (default).
+    #[default]
     Codegen,
     /// Use the `(sim)` variant.
     Sim,
-}
-
-impl Default for SimCodegenMode {
-    fn default() -> Self {
-        SimCodegenMode::Codegen
-    }
 }
 
 static VARIANT_CONFIG: OnceCell<std::sync::RwLock<SimCodegenMode>> = OnceCell::new();
@@ -464,20 +460,14 @@ impl ConnectionTargetResolver {
                 }
                 let sid = block.sid.as_deref();
                 let is_active = active.as_deref() == sid;
-                if active.is_none() || is_active {
-                    if let Some(summary) = sid.and_then(|s| self.child_summaries.get(s)) {
-                        for (port, targets) in &summary.incoming_by_port {
-                            incoming
-                                .entry(*port)
-                                .or_default()
-                                .extend(targets.clone());
-                        }
-                        for (port, targets) in &summary.outgoing_by_port {
-                            outgoing
-                                .entry(*port)
-                                .or_default()
-                                .extend(targets.clone());
-                        }
+                if (active.is_none() || is_active)
+                    && let Some(summary) = sid.and_then(|s| self.child_summaries.get(s))
+                {
+                    for (port, targets) in &summary.incoming_by_port {
+                        incoming.entry(*port).or_default().extend(targets.clone());
+                    }
+                    for (port, targets) in &summary.outgoing_by_port {
+                        outgoing.entry(*port).or_default().extend(targets.clone());
                     }
                 }
             }
@@ -523,33 +513,38 @@ impl ConnectionTargetResolver {
                     continue;
                 };
 
-                let mut new_targets = match block.block_type.as_str() {
-                    "BusCreator" => {
+                let traits = block_traits(&block.block_type);
+                let mut new_targets = match traits.signal_role {
+                    SignalRole::BusCreator => {
                         self.bus_creator_targets(system, system_path, block, line, line_targets)
                     }
-                    "BusSelector" => self.bus_selector_targets(system, block, line, line_targets),
-                    "BusAssignment" => {
+                    SignalRole::BusSelector => {
+                        self.bus_selector_targets(system, block, line, line_targets)
+                    }
+                    SignalRole::BusAssignment => {
                         self.bus_assignment_targets(system, block, line, line_targets)
                     }
-                    "Mux" => self.mux_targets(system, block, line_targets),
-                    "Demux" => self.demux_targets(system, block, src.port_index, line_targets),
-                    "Inport" | "InportShadow" => parent_ctx
+                    SignalRole::Mux => self.mux_targets(system, block, line_targets),
+                    SignalRole::Demux => {
+                        self.demux_targets(system, block, src.port_index, line_targets)
+                    }
+                    SignalRole::BoundaryInput => parent_ctx
                         .and_then(|ctx| ctx.incoming_by_port.get(&boundary_port_index(block)))
                         .cloned()
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
-                    "SubSystem" | "Reference" => child_summaries
+                    SignalRole::Container => child_summaries
                         .get(&src.sid)
                         .and_then(|summary| summary.outgoing_by_port.get(&src.port_index))
                         .map(|targets| {
                             let mut propagated = targets.clone();
-                            // When the signal originates from a Reference block,
-                            // tag the propagated targets so downstream matchers
-                            // know to use prefix path matching.
-                            if block.block_type == "Reference" {
+                            // A block whose paths are prefix-matched tags the
+                            // propagated targets, so downstream matchers know
+                            // not to compare the paths exactly.
+                            if traits.path_prefix_matched {
                                 for t in &mut propagated {
-                                    t.block_type = Some("Reference".to_string());
+                                    t.block_type = Some(block.block_type.clone());
                                 }
                             }
                             propagated
@@ -557,8 +552,10 @@ impl ConnectionTargetResolver {
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
-                    "From" => self.resolve_from_block_targets(system, block, line_targets),
-                    "EnablePort" | "TriggerPort" | "ResetPort" => parent_ctx
+                    SignalRole::From => {
+                        self.resolve_from_block_targets(system, block, line_targets)
+                    }
+                    SignalRole::ControlPort => parent_ctx
                         .and_then(|ctx| {
                             if ctx.control_incoming_targets.is_empty() {
                                 None
@@ -569,7 +566,7 @@ impl ConnectionTargetResolver {
                         .unwrap_or_else(|| {
                             self.base_line_targets(system, system_path, block_lookup, line)
                         }),
-                    "VariantStart" | "VariantSink" => {
+                    SignalRole::VariantSelect => {
                         let input_targets =
                             incoming_line_targets_for_block(system, block, line_targets);
                         if let Some(active) = active_variant_port_index(block) {
@@ -582,7 +579,7 @@ impl ConnectionTargetResolver {
                             input_targets
                         }
                     }
-                    "VariantEnd" | "VariantSource" => {
+                    SignalRole::VariantMerge => {
                         if let Some(active) = active_variant_port_index(block) {
                             incoming_line_targets_for_block_on_port(
                                 system,
@@ -594,29 +591,12 @@ impl ConnectionTargetResolver {
                             incoming_line_targets_for_block(system, block, line_targets)
                         }
                     }
-                    _ => self.base_line_targets(system, system_path, block_lookup, line),
+                    SignalRole::Plain | SignalRole::Goto | SignalRole::BoundaryOutput => {
+                        self.base_line_targets(system, system_path, block_lookup, line)
+                    }
                 };
 
-                if matches!(
-                    block.block_type.as_str(),
-                    "BusCreator"
-                        | "BusSelector"
-                        | "BusAssignment"
-                        | "Mux"
-                        | "Demux"
-                        | "Inport"
-                        | "InportShadow"
-                        | "SubSystem"
-                        | "Reference"
-                        | "From"
-                        | "EnablePort"
-                        | "TriggerPort"
-                        | "ResetPort"
-                        | "VariantStart"
-                        | "VariantEnd"
-                        | "VariantSink"
-                        | "VariantSource"
-                ) {
+                if traits.signal_role.propagates_local_metadata() {
                     apply_local_line_metadata(line, &mut new_targets);
                     apply_source_port_testpoint(block, line, &mut new_targets);
                 }
@@ -664,10 +644,9 @@ impl ConnectionTargetResolver {
                         child_summaries,
                         line_targets,
                     ));
-                    crosses_boundary |= matches!(
-                        block.block_type.as_str(),
-                        "SubSystem" | "Reference" | "Outport"
-                    );
+                    crosses_boundary |= block_traits(&block.block_type)
+                        .signal_role
+                        .crosses_system_boundary();
                 }
                 if propagated.is_empty() {
                     continue;
@@ -998,7 +977,7 @@ impl ConnectionTargetResolver {
         let goto_blocks: Vec<&Block> = system
             .blocks
             .iter()
-            .filter(|b| b.block_type == "Goto")
+            .filter(|b| block_traits(&b.block_type).signal_role == SignalRole::Goto)
             .filter(|b| b.properties.get("GotoTag").map(|s| s.trim()).unwrap_or("A") == tag)
             .collect();
 
@@ -1029,31 +1008,27 @@ impl ConnectionTargetResolver {
         child_summaries: &HashMap<String, ChildSubsystemSummary>,
         line_targets: &[Vec<ConnectionTarget>],
     ) -> Vec<ConnectionTarget> {
-        match block.block_type.as_str() {
-            "BusCreator" => self.bus_creator_upstream_targets(system, block, line_targets),
-            "BusSelector" => self.bus_selector_upstream_targets(system, block, line_targets),
-            "BusAssignment" => self.bus_selector_upstream_targets(system, block, line_targets),
-            "Mux" => self.mux_upstream_targets(system, block, dst.port_index, line_targets),
-            "Demux" => self.demux_upstream_targets(system, block, line_targets),
-            "Inport" | "InportShadow" => outgoing_line_indices_for_block(system, block)
-                .into_iter()
-                .flat_map(|(line_index, _)| line_targets[line_index].clone())
-                .collect(),
-            "EnablePort" | "TriggerPort" | "ResetPort" => outgoing_line_indices_for_block(
-                system,
-                block,
-            )
-            .into_iter()
-            .flat_map(|(line_index, _)| line_targets[line_index].clone())
-            .collect(),
-            "VariantStart" | "VariantSink" => {
+        let traits = block_traits(&block.block_type);
+        match traits.signal_role {
+            SignalRole::BusCreator => {
+                self.bus_creator_upstream_targets(system, block, line_targets)
+            }
+            SignalRole::BusSelector | SignalRole::BusAssignment => {
+                self.bus_selector_upstream_targets(system, block, line_targets)
+            }
+            SignalRole::Mux => {
+                self.mux_upstream_targets(system, block, dst.port_index, line_targets)
+            }
+            SignalRole::Demux => self.demux_upstream_targets(system, block, line_targets),
+            SignalRole::BoundaryInput | SignalRole::ControlPort | SignalRole::VariantMerge => {
+                outgoing_line_indices_for_block(system, block)
+                    .into_iter()
+                    .flat_map(|(line_index, _)| line_targets[line_index].clone())
+                    .collect()
+            }
+            SignalRole::VariantSelect => {
                 if let Some(active) = active_variant_port_index(block) {
-                    outgoing_line_targets_for_block_on_port(
-                        system,
-                        block,
-                        active,
-                        line_targets,
-                    )
+                    outgoing_line_targets_for_block_on_port(system, block, active, line_targets)
                 } else {
                     outgoing_line_indices_for_block(system, block)
                         .into_iter()
@@ -1061,29 +1036,25 @@ impl ConnectionTargetResolver {
                         .collect()
                 }
             }
-            "VariantEnd" | "VariantSource" => outgoing_line_indices_for_block(system, block)
-                .into_iter()
-                .flat_map(|(line_index, _)| line_targets[line_index].clone())
-                .collect(),
-            "Outport" => parent_ctx
+            SignalRole::BoundaryOutput => parent_ctx
                 .and_then(|ctx| ctx.outgoing_by_port.get(&boundary_port_index(block)))
                 .cloned()
                 .unwrap_or_default(),
-            "SubSystem" | "Reference" => child_summaries
+            SignalRole::Container => child_summaries
                 .get(block.sid.as_deref().unwrap_or_default())
                 .filter(|_| !is_control_port_type(&dst.port_type))
                 .and_then(|summary| summary.incoming_by_port.get(&dst.port_index))
                 .map(|targets| {
                     let mut propagated = targets.clone();
-                    if block.block_type == "Reference" {
+                    if traits.path_prefix_matched {
                         for t in &mut propagated {
-                            t.block_type = Some("Reference".to_string());
+                            t.block_type = Some(block.block_type.clone());
                         }
                     }
                     propagated
                 })
                 .unwrap_or_default(),
-            _ => Vec::new(),
+            SignalRole::Plain | SignalRole::From | SignalRole::Goto => Vec::new(),
         }
     }
 
@@ -1314,7 +1285,9 @@ fn is_variant_system(system: &System) -> bool {
 /// Returns `None` when the active variant cannot be determined (expression
 /// mode with non-literal controls, or ambiguous `true`/`false`).
 fn active_variant_child_sid(system: &System, parent_block: Option<&Block>) -> Option<String> {
-    let mode = parent_block.and_then(|b| b.properties.get("VariantControlMode")).map(|s| s.trim());
+    let mode = parent_block
+        .and_then(|b| b.properties.get("VariantControlMode"))
+        .map(|s| s.trim());
 
     match mode {
         Some("label") => {
@@ -1324,18 +1297,24 @@ fn active_variant_child_sid(system: &System, parent_block: Option<&Block>) -> Op
             if active_choice.is_empty() {
                 return None;
             }
-            system.blocks.iter().find(|b| {
-                b.properties.get("VariantControl").map(|s| s.trim()) == Some(active_choice)
-            }).and_then(|b| b.sid.clone())
+            system
+                .blocks
+                .iter()
+                .find(|b| {
+                    b.properties.get("VariantControl").map(|s| s.trim()) == Some(active_choice)
+                })
+                .and_then(|b| b.sid.clone())
         }
         Some("sim codegen switching") => {
             let target = match current_sim_codegen_mode() {
                 SimCodegenMode::Codegen => "(codegen)",
                 SimCodegenMode::Sim => "(sim)",
             };
-            system.blocks.iter().find(|b| {
-                b.properties.get("VariantControl").map(|s| s.trim()) == Some(target)
-            }).and_then(|b| b.sid.clone())
+            system
+                .blocks
+                .iter()
+                .find(|b| b.properties.get("VariantControl").map(|s| s.trim()) == Some(target))
+                .and_then(|b| b.sid.clone())
         }
         _ => {
             // Expression mode (no VariantControlMode or unknown):
@@ -1561,12 +1540,10 @@ fn child_outgoing_targets_by_port(
     line_targets: &[Vec<ConnectionTarget>],
 ) -> BTreeMap<u32, Vec<ConnectionTarget>> {
     let mut by_port = BTreeMap::new();
-    let inport_boundary_paths: BTreeSet<String> = subsystem_boundary_paths(resolver, system, system_path, "Inport")
-        .union(&subsystem_boundary_paths(resolver, system, system_path, "InportShadow"))
-        .cloned()
-        .collect();
+    let inport_boundary_paths =
+        subsystem_boundary_paths(resolver, system, system_path, SignalRole::BoundaryInput);
     for block in &system.blocks {
-        if block.block_type != "Outport" {
+        if block_traits(&block.block_type).signal_role != SignalRole::BoundaryOutput {
             continue;
         }
 
@@ -1595,7 +1572,7 @@ fn child_incoming_targets_by_port(
 ) -> BTreeMap<u32, Vec<ConnectionTarget>> {
     let mut by_port = BTreeMap::new();
     for block in &system.blocks {
-        if !matches!(block.block_type.as_str(), "Inport" | "InportShadow") {
+        if block_traits(&block.block_type).signal_role != SignalRole::BoundaryInput {
             continue;
         }
 
@@ -1878,7 +1855,7 @@ fn apply_line_resolve_hint(
     if let Some(dst) = line_destination_endpoints(line).into_iter().find(|dst| {
         block_lookup
             .get(dst.sid.as_str())
-            .is_some_and(|block| block.block_type == "Mux")
+            .is_some_and(|block| block_traits(&block.block_type).signal_role == SignalRole::Mux)
     }) {
         target.resolve = Some(ConnectionTargetResolve::Index(dst.port_index));
         return;
@@ -2010,12 +1987,12 @@ fn subsystem_boundary_paths(
     resolver: &ConnectionTargetResolver,
     system: &System,
     system_path: &[String],
-    boundary_type: &str,
+    boundary: SignalRole,
 ) -> BTreeSet<String> {
     system
         .blocks
         .iter()
-        .filter(|block| block.block_type == boundary_type)
+        .filter(|block| block_traits(&block.block_type).signal_role == boundary)
         .map(|block| resolver.full_block_path(system_path, &block.name))
         .collect()
 }

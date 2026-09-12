@@ -855,36 +855,6 @@ fn draw_stacked_lines(painter: &egui::Painter, avail: &Rect, spec: &str, color: 
     }
 }
 
-/// Draw a line-art block icon from a compact notation.
-///
-/// Simulink draws many icons (source waveforms, saturation/backlash curves,
-/// scope screens, verification plots) as vector line art rather than as a
-/// glyph.  `spec` is a `;`-separated list of drawing commands whose coordinates
-/// are normalised to `0.0..=1.0` inside the icon area, with `y` pointing
-/// **down** so the notation reads like screen space:
-///
-/// * `p X,Y X,Y …` – polyline through the listed points.
-/// * `a X,Y X,Y …` – same, but faint: Simulink's thin grey axis cross.
-/// * `b X0,Y0,X1,Y1` – translucent filled band (Simulink's grey limit bands).
-/// * `r X0,Y0,X1,Y1` – stroked rectangle.
-/// * `f X0,Y0,X1,Y1` – solid rectangle (Simulink's black bus bars).
-/// * `c CX,CY,R` – stroked circle (`R` is a fraction of the icon width).
-/// * `d CX,CY,R` – filled dot.
-/// * `o CX,CY,W,H` – stroked obround (the In/Out ports of a subsystem preview).
-/// * `pg R,G,B,A X1,Y1 X2,Y2 X3,Y3 …` – filled polygon with an explicit RGBA
-///   fill (each channel 0..=255, alpha included) and the standard outline
-///   stroke.  Used for the shaded 3-D faces of the Matrix Concatenate icon.
-/// * `pf R,G,B,A X1,Y1 X2,Y2 X3,Y3 …` – filled polygon with an explicit RGBA
-///   fill but NO outline stroke.  Used for the concave L-shape pieces of the
-///   Matrix Concatenate icon so the internal seam is not stroked; the external
-///   boundary is drawn separately by a `p` command.
-/// * `t X,Y,H TEXT` – `TEXT` centred at `X,Y` with cap height `H` (a fraction
-///   of the icon height), for the letters Simulink sets inside its pictograms
-///   (`A ⇒ D`, the `U` of Is Triangular).
-///
-/// Unknown commands are skipped, so a malformed spec degrades to blank rather
-/// than panicking.
-
 /// Triangulate a (possibly concave) simple polygon via ear-clipping and
 /// return a filled [`Mesh`].  Used by the `pf` command for the stepped band
 /// shapes of the Check Dynamic block icons, which are concave and therefore
@@ -958,11 +928,8 @@ fn concave_polygon_mesh(pts: &[Pos2], fill: Color32) -> Mesh {
         if !clipped {
             // Fallback: fan triangulation from vertex 0.
             for i in 1..indices.len() - 1 {
-                mesh.indices.extend([
-                    indices[0] as u32,
-                    indices[i] as u32,
-                    indices[i + 1] as u32,
-                ]);
+                mesh.indices
+                    .extend([indices[0] as u32, indices[i] as u32, indices[i + 1] as u32]);
             }
             break;
         }
@@ -970,6 +937,35 @@ fn concave_polygon_mesh(pts: &[Pos2], fill: Color32) -> Mesh {
     mesh
 }
 
+/// Draw a line-art block icon from a compact notation.
+///
+/// Simulink draws many icons (source waveforms, saturation/backlash curves,
+/// scope screens, verification plots) as vector line art rather than as a
+/// glyph.  `spec` is a `;`-separated list of drawing commands whose coordinates
+/// are normalised to `0.0..=1.0` inside the icon area, with `y` pointing
+/// **down** so the notation reads like screen space:
+///
+/// * `p X,Y X,Y …` – polyline through the listed points.
+/// * `a X,Y X,Y …` – same, but faint: Simulink's thin grey axis cross.
+/// * `b X0,Y0,X1,Y1` – translucent filled band (Simulink's grey limit bands).
+/// * `r X0,Y0,X1,Y1` – stroked rectangle.
+/// * `f X0,Y0,X1,Y1` – solid rectangle (Simulink's black bus bars).
+/// * `c CX,CY,R` – stroked circle (`R` is a fraction of the icon width).
+/// * `d CX,CY,R` – filled dot.
+/// * `o CX,CY,W,H` – stroked obround (the In/Out ports of a subsystem preview).
+/// * `pg R,G,B,A X1,Y1 X2,Y2 X3,Y3 …` – filled polygon with an explicit RGBA
+///   fill (each channel 0..=255, alpha included) and the standard outline
+///   stroke.  Used for the shaded 3-D faces of the Matrix Concatenate icon.
+/// * `pf R,G,B,A X1,Y1 X2,Y2 X3,Y3 …` – filled polygon with an explicit RGBA
+///   fill but NO outline stroke.  Used for the concave L-shape pieces of the
+///   Matrix Concatenate icon so the internal seam is not stroked; the external
+///   boundary is drawn separately by a `p` command.
+/// * `t X,Y,H TEXT` – `TEXT` centred at `X,Y` with cap height `H` (a fraction
+///   of the icon height), for the letters Simulink sets inside its pictograms
+///   (`A ⇒ D`, the `U` of Is Triangular).
+///
+/// Unknown commands are skipped, so a malformed spec degrades to blank rather
+/// than panicking.
 pub fn draw_plot_icon(
     painter: &egui::Painter,
     rect: &Rect,
@@ -1016,7 +1012,7 @@ pub fn draw_plot_icon(
             // subsequent group of 3 pairs is a cubic segment (SVG C: two
             // control points + endpoint).  Each segment is sampled with 16
             // steps for a smooth polyline.
-            "bc" if nums.len() >= 8 && (nums.len() - 2) % 6 == 0 => {
+            "bc" if nums.len() >= 8 && (nums.len() - 2).is_multiple_of(6) => {
                 let mut pts: Vec<Pos2> = Vec::new();
                 pts.push(at(nums[0], nums[1]));
                 let segs = (nums.len() - 2) / 6;
@@ -1073,10 +1069,7 @@ pub fn draw_plot_icon(
                     nums[2].round().clamp(0.0, 255.0) as u8,
                     nums[3].round().clamp(0.0, 255.0) as u8,
                 );
-                let pts: Vec<Pos2> = nums[4..]
-                    .chunks_exact(2)
-                    .map(|c| at(c[0], c[1]))
-                    .collect();
+                let pts: Vec<Pos2> = nums[4..].chunks_exact(2).map(|c| at(c[0], c[1])).collect();
                 if pts.len() >= 3 {
                     painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
                 }
@@ -1093,10 +1086,7 @@ pub fn draw_plot_icon(
                     nums[2].round().clamp(0.0, 255.0) as u8,
                     nums[3].round().clamp(0.0, 255.0) as u8,
                 );
-                let pts: Vec<Pos2> = nums[4..]
-                    .chunks_exact(2)
-                    .map(|c| at(c[0], c[1]))
-                    .collect();
+                let pts: Vec<Pos2> = nums[4..].chunks_exact(2).map(|c| at(c[0], c[1])).collect();
                 if pts.len() >= 3 {
                     painter.add(egui::Shape::mesh(concave_polygon_mesh(&pts, fill)));
                 }
@@ -2275,9 +2265,7 @@ pub fn round_sum_slot_angles(slots: &[Option<char>]) -> Vec<Option<f32>> {
 ///
 /// For the left semicircle (90°..270°), the ray from the center hits the
 /// top, left, or bottom edge.  The fraction is the position along that edge.
-pub fn angle_to_placement(
-    angle: f32,
-) -> (crate::simulink_libraries::types::PortPlacement, f32) {
+pub fn angle_to_placement(angle: f32) -> (crate::simulink_libraries::types::PortPlacement, f32) {
     use crate::simulink_libraries::types::PortPlacement;
 
     let cos_a = angle.cos();
@@ -2325,15 +2313,13 @@ pub fn round_sum_label_positions(rect: &Rect, inputs_str: &str) -> Vec<Pos2> {
     let label_radius = radius * 0.65;
 
     let mut positions = Vec::new();
-    for angle_opt in &angles {
-        if let Some(angle) = angle_opt {
-            // Convert math angle to screen direction:
-            // math: x = cos, y = sin (up)
-            // screen: x = cos, y = -sin (y is flipped)
-            let dx = angle.cos() * label_radius;
-            let dy = -angle.sin() * label_radius;
-            positions.push(Pos2::new(center.x + dx, center.y + dy));
-        }
+    for angle in angles.iter().flatten() {
+        // Convert math angle to screen direction:
+        // math: x = cos, y = sin (up)
+        // screen: x = cos, y = -sin (y is flipped)
+        let dx = angle.cos() * label_radius;
+        let dy = -angle.sin() * label_radius;
+        positions.push(Pos2::new(center.x + dx, center.y + dy));
     }
     positions
 }

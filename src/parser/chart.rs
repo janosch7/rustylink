@@ -235,7 +235,7 @@ fn annotate_matlab_function_names_in(
         } else {
             format!("{path}/{}", block.name)
         };
-        if block.is_matlab_function || block.block_type == "MATLAB Function" {
+        if crate::simulink_libraries::traits::is_matlab_function(block) {
             let chart = block
                 .sid
                 .as_ref()

@@ -183,10 +183,7 @@ fn show_pointer_tooltip_text(ui: &egui::Ui, id: egui::Id, tooltip: &str) {
 /// Returns true if the pointer is currently hovering over any of the given
 /// block screen rects.  Used to skip line tooltips when the pointer is
 /// actually over a block (blocks are visually on top of lines).
-fn pointer_over_any_block(
-    ui: &egui::Ui,
-    sid_screen_map: &HashMap<String, egui::Rect>,
-) -> bool {
+fn pointer_over_any_block(ui: &egui::Ui, sid_screen_map: &HashMap<String, egui::Rect>) -> bool {
     let Some(pos) = ui.ctx().pointer_hover_pos() else {
         return false;
     };
@@ -2722,11 +2719,10 @@ pub(crate) fn update_internal(
                     if wired.contains(&(sid.clone(), index, is_input)) {
                         return;
                     }
-                    if let Some(name) = port_label_defined_name(b, index, is_input, &cfg) {
-                        if !name.is_empty() {
+                    if let Some(name) = port_label_defined_name(b, index, is_input, &cfg)
+                        && !name.is_empty() {
                             port_label_requests.push((sid.clone(), index, is_input, y));
                         }
-                    }
                 };
                 if reinit {
                     for (i, p) in ins.iter().enumerate() {

@@ -812,7 +812,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
         // Draw lines
         let mut sid_mirrored: HashMap<String, bool> = HashMap::new();
-        let mut sid_port_overrides: HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>> = HashMap::new();
+        let mut sid_port_overrides: HashMap<
+            String,
+            Vec<crate::simulink_libraries::types::PortPositionOverride>,
+        > = HashMap::new();
         for (b, _r) in &blocks {
             if let Some(sid) = &b.sid {
                 sid_mirrored.insert(sid.clone(), b.block_mirror.unwrap_or(false));
@@ -836,7 +839,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 continue;
             };
             let mirrored_src = sid_mirrored.get(&src.sid).copied().unwrap_or(false);
-            let src_overrides = sid_port_overrides.get(&src.sid).map(|v| v.as_slice()).unwrap_or(&[]);
+            let src_overrides = sid_port_overrides
+                .get(&src.sid)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             let mut cur = crate::egui_app::ui::signal_routing::endpoint_pos(
                 *sr,
                 src,
@@ -856,7 +862,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 && let Some(dr) = sid_map.get(&dst.sid)
             {
                 let mirrored_dst = sid_mirrored.get(&dst.sid).copied().unwrap_or(false);
-                let dst_overrides = sid_port_overrides.get(&dst.sid).map(|v| v.as_slice()).unwrap_or(&[]);
+                let dst_overrides = sid_port_overrides
+                    .get(&dst.sid)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
                 let dst_pt = crate::egui_app::ui::signal_routing::endpoint_pos(
                     *dr,
                     dst,
@@ -878,8 +887,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
 
             // Draw segments
             let has_in_dst = line.dst.as_ref().is_some_and(|d| {
-                d.port_type == "in"
-                    || crate::egui_app::geometry::is_control_port_type(&d.port_type)
+                d.port_type == "in" || crate::egui_app::geometry::is_control_port_type(&d.port_type)
             });
             for (seg_idx, seg) in screen_pts.windows(2).enumerate() {
                 let is_last = has_in_dst && seg_idx == screen_pts.len().saturating_sub(2);
@@ -1277,7 +1285,10 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                     port_type: src_port_type.clone(),
                     port_index: src_port_index,
                 };
-                let src_overrides = sid_port_overrides.get(src_sid).map(|v| v.as_slice()).unwrap_or(&[]);
+                let src_overrides = sid_port_overrides
+                    .get(src_sid)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
                 let model_pos = crate::egui_app::ui::signal_routing::endpoint_pos(
                     *sr,
                     &ep,
@@ -2065,7 +2076,10 @@ fn draw_branch_rec(
     stroke: Stroke,
     color: Color32,
     sid_mirrored: &HashMap<String, bool>,
-    sid_port_overrides: &HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>>,
+    sid_port_overrides: &HashMap<
+        String,
+        Vec<crate::simulink_libraries::types::PortPositionOverride>,
+    >,
 ) {
     let mut pts: Vec<Pos2> = vec![start];
     let mut cur = start;
@@ -2082,9 +2096,17 @@ fn draw_branch_rec(
         && let Some(dr) = sid_map.get(&dstb.sid)
     {
         let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
-        let dst_overrides = sid_port_overrides.get(&dstb.sid).map(|v| v.as_slice()).unwrap_or(&[]);
-        let end_pt =
-            crate::egui_app::ui::signal_routing::endpoint_pos(*dr, dstb, port_counts, mirrored_dst, dst_overrides);
+        let dst_overrides = sid_port_overrides
+            .get(&dstb.sid)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let end_pt = crate::egui_app::ui::signal_routing::endpoint_pos(
+            *dr,
+            dstb,
+            port_counts,
+            mirrored_dst,
+            dst_overrides,
+        );
         let a = to_screen(*pts.last().unwrap_or(&cur));
         let b = to_screen(end_pt);
         let is_in_dst = dstb.port_type == "in"

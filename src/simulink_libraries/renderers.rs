@@ -67,20 +67,16 @@ pub fn sum_port_overrides(
 
     let angles = crate::egui_app::render::round_sum_slot_angles(&slots);
     let mut overrides = Vec::new();
-    let mut port_index = 0u32;
 
-    for angle_opt in &angles {
-        if let Some(angle) = angle_opt {
-            port_index += 1;
-            let (placement, fraction) = crate::egui_app::render::angle_to_placement(*angle);
-            overrides.push(super::types::PortPositionOverride {
-                is_input: true,
-                port_index,
-                from_end: false,
-                placement,
-                fraction,
-            });
-        }
+    for (slot, angle) in angles.iter().flatten().enumerate() {
+        let (placement, fraction) = crate::egui_app::render::angle_to_placement(*angle);
+        overrides.push(super::types::PortPositionOverride {
+            is_input: true,
+            port_index: slot as u32 + 1,
+            from_end: false,
+            placement,
+            fraction,
+        });
     }
 
     overrides
@@ -826,10 +822,7 @@ pub fn static_subsystem(
         // spans the full block width beneath it, and the data inputs are
         // distributed in the lower section.
         let sep_y = rect.top() + REINIT_SEP_FRAC * rect.height();
-        let stroke = eframe::egui::Stroke::new(
-            (1.4 * ctx.font_scale).max(0.75),
-            ctx.border_color,
-        );
+        let stroke = eframe::egui::Stroke::new((1.4 * ctx.font_scale).max(0.75), ctx.border_color);
         painter.line_segment(
             [
                 eframe::egui::pos2(rect.left(), sep_y),
@@ -1153,7 +1146,10 @@ pub fn static_reset_port(
     // right end of the sub-rect) sits comfortably inside the block rather
     // than on its right border.
     let sub_rect = Rect::from_min_size(
-        eframe::egui::pos2(rect.center().x - sub_w * 0.5 - rect.width() * 0.06, rect.top()),
+        eframe::egui::pos2(
+            rect.center().x - sub_w * 0.5 - rect.width() * 0.06,
+            rect.top(),
+        ),
         eframe::egui::vec2(sub_w, rect.height()),
     );
     crate::egui_app::render::draw_plot_icon(
@@ -2371,8 +2367,20 @@ pub fn live_variant_connector(
         // Can't determine the active variant — fall back to static.
         return false;
     }
-    draw_variant_port_squares(&ui.painter().with_clip_rect(*rect), block, rect, ctx, active);
-    draw_variant_lever(&ui.painter().with_clip_rect(*rect), block, rect, ctx, active);
+    draw_variant_port_squares(
+        &ui.painter().with_clip_rect(*rect),
+        block,
+        rect,
+        ctx,
+        active,
+    );
+    draw_variant_lever(
+        &ui.painter().with_clip_rect(*rect),
+        block,
+        rect,
+        ctx,
+        active,
+    );
     true
 }
 
@@ -2562,24 +2570,12 @@ fn variant_port_counts(block: &Block) -> (u32, u32) {
         .port_counts
         .as_ref()
         .and_then(|c| c.ins)
-        .unwrap_or_else(|| {
-            block
-                .ports
-                .iter()
-                .filter(|p| p.port_type == "in")
-                .count() as u32
-        });
+        .unwrap_or_else(|| block.ports.iter().filter(|p| p.port_type == "in").count() as u32);
     let outs = block
         .port_counts
         .as_ref()
         .and_then(|c| c.outs)
-        .unwrap_or_else(|| {
-            block
-                .ports
-                .iter()
-                .filter(|p| p.port_type == "out")
-                .count() as u32
-        });
+        .unwrap_or_else(|| block.ports.iter().filter(|p| p.port_type == "out").count() as u32);
     (ins, outs)
 }
 

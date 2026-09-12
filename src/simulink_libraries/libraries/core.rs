@@ -10,8 +10,8 @@
 use crate::simulink_libraries::labels;
 use crate::simulink_libraries::renderers;
 use crate::simulink_libraries::types::{
-    BlockLabelPolicy, IOPorts, MetadataKey, PortLabelPolicy,
-    SimulinkBlockDefinition, SimulinkIcon, SimulinkShape,
+    BlockLabelPolicy, IOPorts, MetadataKey, PortLabelPolicy, SimulinkBlockDefinition, SimulinkIcon,
+    SimulinkShape,
 };
 
 const fn icon(glyph: &'static str) -> SimulinkIcon {
