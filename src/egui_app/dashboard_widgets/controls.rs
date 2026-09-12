@@ -262,7 +262,7 @@ fn render_edit_field_control_widget(
     let palette = widget_palette(block);
     let initial = live_text
         .map(str::to_string)
-        .unwrap_or_else(|| crate::egui_app::ui::update::format_live_scalar_csv(live_value));
+        .unwrap_or_else(|| crate::egui_app::ui::block_text::format_live_scalar_csv(live_value));
     let storage_key = dashboard_control_storage_key(block);
     let edit_id = ui.make_persistent_id(("dashboard_edit_field", storage_key.as_str()));
     let buffer = app

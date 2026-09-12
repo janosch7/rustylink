@@ -522,8 +522,9 @@ pub fn live_manual_switch(
         return false;
     };
     let mut live_block = block.clone();
-    live_block.current_setting =
-        Some(crate::egui_app::ui::update::manual_switch_setting_from_live_value(value).to_string());
+    live_block.current_setting = Some(
+        crate::egui_app::ui::live_values::manual_switch_setting_from_live_value(value).to_string(),
+    );
     crate::egui_app::render::render_manual_switch(
         &ui.painter().with_clip_rect(*rect),
         &live_block,
