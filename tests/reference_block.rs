@@ -91,11 +91,8 @@ fn check_verification_reference_blocks_have_no_output_port() {
     let source = MemSource { files };
     let mut parser = SimulinkParser::new("/", source);
     let system = parser.parse_system_file(&path).expect("parse system XML");
-    SimulinkParser::<MemSource>::resolve_library_references(
-        &mut system.clone(),
-        &[],
-    )
-    .expect("resolve library references");
+    SimulinkParser::<MemSource>::resolve_library_references(&mut system.clone(), &[])
+        .expect("resolve library references");
 
     assert_eq!(system.blocks.len(), 2);
 
@@ -104,14 +101,20 @@ fn check_verification_reference_blocks_have_no_output_port() {
     assert_eq!(gap.name, "Check Static Gap");
     let pc = gap.port_counts.as_ref().expect("has PortCounts");
     assert_eq!(pc.ins, Some(1));
-    assert_eq!(pc.outs, None, "Check Static Gap must not have an output port");
+    assert_eq!(
+        pc.outs, None,
+        "Check Static Gap must not have an output port"
+    );
 
     // Check Dynamic Range: 3 inputs, no output
     let range = &system.blocks[1];
     assert_eq!(range.name, "Check Dynamic Range");
     let pc = range.port_counts.as_ref().expect("has PortCounts");
     assert_eq!(pc.ins, Some(3));
-    assert_eq!(pc.outs, None, "Check Dynamic Range must not have an output port");
+    assert_eq!(
+        pc.outs, None,
+        "Check Dynamic Range must not have an output port"
+    );
 }
 
 #[test]

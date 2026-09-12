@@ -14,7 +14,7 @@ pub fn resolve_subsystem_by_path<'a>(root: &'a System, path: &str) -> Option<&'a
     for name in parts.by_ref() {
         let mut found = None;
         for b in &cur.blocks {
-            if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            if crate::simulink_libraries::traits::is_container(b)
                 && b.name == name
                 && let Some(sub) = &b.subsystem
             {
@@ -33,7 +33,7 @@ pub fn resolve_subsystem_by_vec<'a>(root: &'a System, path: &[String]) -> Option
     for name in path {
         let mut found = None;
         for b in &cur.blocks {
-            if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            if crate::simulink_libraries::traits::is_container(b)
                 && &b.name == name
                 && let Some(sub) = &b.subsystem
             {
@@ -51,7 +51,7 @@ pub fn resolve_subsystem_by_vec<'a>(root: &'a System, path: &[String]) -> Option
 pub fn collect_subsystems_paths(root: &System) -> Vec<Vec<String>> {
     fn rec(cur: &System, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
         for b in &cur.blocks {
-            if (b.block_type == "SubSystem" || b.block_type == "Reference")
+            if crate::simulink_libraries::traits::is_container(b)
                 && let Some(sub) = &b.subsystem
                 && sub.chart.is_none()
             {

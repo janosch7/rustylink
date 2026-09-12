@@ -8,6 +8,9 @@
 //!
 //! Layout:
 //! - [`stubs`]      – core (non-`egui`) parser-facing port/stub metadata.
+//! - [`traits`]     – core (non-`egui`) structural facts: what a block does to
+//!   the signals passing through it, whether it holds a child system, carries
+//!   source code, or shows live data.
 //! - [`types`]      – the definition struct, enums and renderer signatures.
 //! - [`metadata`]   – per-instance metadata extraction into a `HashMap`.
 //! - [`labels`]     – metadata-dependent label helpers.
@@ -24,7 +27,10 @@
 //! pulling in `egui`.
 
 pub mod stubs;
+pub mod traits;
 
+#[cfg(feature = "egui")]
+pub mod block_memo;
 #[cfg(feature = "egui")]
 pub mod browser;
 #[cfg(feature = "egui")]

@@ -10,9 +10,7 @@ fn build_chart_view_for_block(
     app: &SubsystemApp,
     block: &crate::model::Block,
 ) -> Option<ChartView> {
-    let is_chart_block = block.block_type == "MATLAB Function"
-        || (block.block_type == "SubSystem" && block.is_matlab_function);
-    if !is_chart_block {
+    if !crate::simulink_libraries::traits::is_matlab_function(block) {
         return None;
     }
     let by_sid = block
@@ -343,7 +341,7 @@ fn show_block_window(app: &mut SubsystemApp, ui: &mut egui::Ui) {
                             }
                         });
                 }
-                if block.block_type == "CFunction"
+                if crate::simulink_libraries::traits::carries_c_code(block)
                     && let Some(cfg) = &block.c_function
                 {
                     ui.separator();

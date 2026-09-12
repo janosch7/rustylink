@@ -736,17 +736,22 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
         value_cols = cols;
     }
 
-    // Simulink omits <P Name="Value"> for Constant blocks with default value "1".
+    // Simulink omits <P Name="Value"> when the block carries its default value.
     // Set the convenience field but do NOT synthesize it in properties.
-    if block_type == "Constant" && block_value.is_none() {
-        block_value = Some("1".to_string());
+    if block_value.is_none()
+        && let Some(implicit) =
+            crate::simulink_libraries::traits::block_traits(&block_type).implicit_value
+    {
+        block_value = Some(implicit.to_string());
     }
 
     // Note: we do NOT mutate block_type for MATLAB Function blocks.
     // The is_matlab_function flag indicates this status without changing
     // the block_type, which is needed for round-trip XML fidelity.
 
-    let c_function = if block_type == "CFunction" {
+    let carries_c_code = crate::simulink_libraries::traits::block_traits(&block_type).code
+        == Some(crate::simulink_libraries::traits::CodeKind::C);
+    let c_function = if carries_c_code {
         Some(CFunctionCode {
             output_code: c_output_code,
             start_code: c_start_code,
@@ -857,11 +862,7 @@ pub fn parse_block_shallow(node: Node, base_dir: &Utf8Path) -> Result<Block> {
         && blk.ports.is_empty()
         && crate::simulink_libraries::stubs::is_dashboard_block_type(&blk.block_type)
     {
-        let (ins, outs) = if blk.block_type == "Display" {
-            (1u32, 0u32)
-        } else {
-            (0u32, 0u32)
-        };
+        let (ins, outs) = crate::simulink_libraries::traits::dashboard_port_counts(&blk.block_type);
         blk.port_counts = Some(crate::model::PortCounts {
             ins: Some(ins),
             outs: Some(outs),

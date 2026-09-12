@@ -68,7 +68,7 @@ fn authored_navigation_view_states(root: &System) -> BTreeMap<String, Navigation
         }
 
         for block in &system.blocks {
-            if !matches!(block.block_type.as_str(), "SubSystem" | "Reference") {
+            if !crate::simulink_libraries::traits::is_container(block) {
                 continue;
             }
             let Some(subsystem) = block.subsystem.as_ref() else {
@@ -1328,8 +1328,7 @@ impl SubsystemApp {
 
     /// If the block is a non-chart subsystem, open it and return true.
     pub fn open_block_if_subsystem(&mut self, b: &Block) -> bool {
-        if (b.block_type == "SubSystem" || b.block_type == "Reference")
-            && !b.is_matlab_function
+        if crate::simulink_libraries::traits::is_navigable_subsystem(b)
             && let Some(sub) = &b.subsystem
             && sub.chart.is_none()
         {

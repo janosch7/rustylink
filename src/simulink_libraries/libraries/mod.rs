@@ -1,39 +1,64 @@
-//! The block-definition catalog: one folder, several files.
+//! The block-definition catalog: one file per Simulink library group.
 //!
-//! Each submodule is a *library* contributing a `static` slice of
-//! [`SimulinkBlockDefinition`]s.  To add your own blocks, create a new file
-//! here, expose a `pub static BLOCKS: &[SimulinkBlockDefinition]`, and add it to
-//! [`ALL_LIBRARIES`].  No renderer changes are required.
+//! Each group module exposes a `pub static BLOCKS: &[SimulinkBlockDefinition]`
+//! holding the definitions of one Simulink palette group, and is listed in
+//! [`ALL_LIBRARIES`].  To add your own blocks, extend the matching group (or
+//! create a new file and list it here); no renderer changes are required.
+//! Helpers shared by the group files live in [`prelude`].
 
 #![cfg(feature = "egui")]
 
 pub mod catalog;
-pub mod core;
+pub mod continuous;
 pub mod dashboard;
+pub mod dashboard_misc;
+pub mod discontinuities;
+pub mod discrete;
+pub mod logic;
+pub mod lookup;
+pub mod math;
 pub mod matrix;
-pub mod simulink_blocks;
+pub mod ports_subsystems;
+mod prelude;
+pub mod signal_attributes;
+pub mod signal_routing;
+pub mod sinks;
+pub mod sources;
+pub mod strings;
+pub mod user_defined;
+pub mod verification;
 
 use crate::simulink_libraries::types::SimulinkLibrary;
+
+macro_rules! group {
+    ($name:literal, $module:ident) => {
+        SimulinkLibrary {
+            name: $name,
+            blocks: self::$module::BLOCKS,
+        }
+    };
+}
 
 /// Hand-written libraries with full rendering metadata (icons, shapes, custom
 /// static/live renderers).  Registered first so they win on key collisions.
 pub static ALL_LIBRARIES: &[SimulinkLibrary] = &[
-    SimulinkLibrary {
-        name: "simulink",
-        blocks: self::core::BLOCKS,
-    },
-    SimulinkLibrary {
-        name: "simulink",
-        blocks: self::simulink_blocks::BLOCKS,
-    },
-    SimulinkLibrary {
-        name: "dashboard",
-        blocks: self::dashboard::BLOCKS,
-    },
-    SimulinkLibrary {
-        name: "matrix_library",
-        blocks: self::matrix::BLOCKS,
-    },
+    group!("simulink", sources),
+    group!("simulink", sinks),
+    group!("simulink", continuous),
+    group!("simulink", discrete),
+    group!("simulink", math),
+    group!("simulink", logic),
+    group!("simulink", discontinuities),
+    group!("simulink", lookup),
+    group!("simulink", signal_routing),
+    group!("simulink", signal_attributes),
+    group!("simulink", ports_subsystems),
+    group!("simulink", user_defined),
+    group!("simulink", verification),
+    group!("simulink", strings),
+    group!("dashboard", dashboard),
+    group!("dashboard", dashboard_misc),
+    group!("matrix_library", matrix),
 ];
 
 /// The metadata-only browser/palette catalog (~786 entries).  Registered after

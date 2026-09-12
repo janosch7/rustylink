@@ -795,18 +795,7 @@ pub fn create_default_block(
         child_order.push(BlockChildKind::PortProperties);
     }
 
-    let is_subsystem = block_type == "SubSystem"
-        || block_type == "AtomicSubSystem"
-        || block_type == "EnabledSubSystem"
-        || block_type == "TriggeredSubSystem"
-        || block_type == "ForEachSubSystem"
-        || block_type == "ForIterator"
-        || block_type == "WhileIterator"
-        || block_type == "MaskedSubSystem"
-        || block_type == "ConfigSubSystem"
-        || block_type == "VariantSubSystem";
-
-    let subsystem = if is_subsystem {
+    let subsystem = if crate::simulink_libraries::traits::owns_child_system(block_type) {
         Some(Box::new(System {
             properties: IndexMap::new(),
             blocks: Vec::new(),
@@ -827,7 +816,8 @@ pub fn create_default_block(
         zorder: None,
         commented: false,
         name_location: NameLocation::Bottom,
-        is_matlab_function: block_type == "MATLAB Function",
+        is_matlab_function: crate::simulink_libraries::traits::block_traits(block_type)
+            .stateflow_backed,
         value: None,
         value_kind: crate::model::ValueKind::Unknown,
         value_rows: None,
@@ -838,7 +828,9 @@ pub fn create_default_block(
         ports,
         subsystem,
         system_ref: None,
-        c_function: if block_type == "CFunction" {
+        c_function: if crate::simulink_libraries::traits::block_traits(block_type).code
+            == Some(crate::simulink_libraries::traits::CodeKind::C)
+        {
             Some(crate::model::CFunctionCode::default())
         } else {
             None
