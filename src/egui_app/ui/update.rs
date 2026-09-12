@@ -240,7 +240,7 @@ fn show_pointer_tooltip_entries(ui: &egui::Ui, id: egui::Id, entries: &[LiveTool
 }
 
 fn format_block_value_for_display(block: &crate::model::Block, raw: &str) -> String {
-    if block.block_type == "Constant" {
+    if crate::simulink_libraries::traits::has_editable_value(&block.block_type) {
         raw.trim().to_string()
     } else {
         raw.to_string()
@@ -301,7 +301,7 @@ fn toggle_manual_switch_setting(
 }
 
 fn uses_live_value_text(block_type: &str) -> bool {
-    matches!(block_type, "Display" | "Constant")
+    crate::simulink_libraries::traits::shows_value_text(block_type)
 }
 
 fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
@@ -484,7 +484,7 @@ fn update_scope_live_sample(
     block: &crate::model::Block,
     lines: &[crate::model::Line],
 ) {
-    if !matches!(block.block_type.as_str(), "Scope" | "DashboardScope") {
+    if !crate::simulink_libraries::traits::shows_live_trace(&block.block_type) {
         return;
     }
 
@@ -853,7 +853,7 @@ pub(crate) fn update_internal(
             let mut unresolved_refs: Vec<(String, Option<String>)> = Vec::new();
             fn collect_unresolved(sys: &crate::model::System, acc: &mut Vec<(String, Option<String>)>) {
                 for b in &sys.blocks {
-                    if b.block_type == "Reference" && b.subsystem.is_none() {
+                    if crate::simulink_libraries::traits::is_library_reference(&b.block_type) && b.subsystem.is_none() {
                         acc.push((b.name.clone(), b.system_ref.clone()));
                     }
                     if let Some(sub) = &b.subsystem {
@@ -941,8 +941,7 @@ pub(crate) fn update_internal(
                 .collect();
             app.view_cache.cached_subsystem_block_lookup = sys.blocks.iter()
                 .filter(|b| parse_block_rect(b).is_some())
-                .filter(|b| (b.block_type == "SubSystem" || b.block_type == "Reference")
-                    && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none()))
+                .filter(|b| crate::simulink_libraries::traits::is_navigable_subsystem(b))
                 .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
                 .collect();
         }
@@ -1220,7 +1219,7 @@ pub(crate) fn update_internal(
                     crate::connection_targets::debug_print_block_targets_with_resolver(r.as_ref(), &app.path, b);
                 }
                 if !app.move_mode_enabled {
-                    if app.live_mode_enabled && b.block_type == "ManualSwitch" {
+                    if app.live_mode_enabled && crate::simulink_libraries::traits::is_click_toggle(&b.block_type) {
                         if let Some(enabled) = toggle_manual_switch_setting(app, b) {
                             #[cfg(feature = "dashboard")]
                             app.queue_dashboard_control(
@@ -1236,13 +1235,13 @@ pub(crate) fn update_internal(
                         // Also handle traditional signal-line blocks like Scope and Display.
                         if crate::simulink_libraries::stubs::is_dashboard_block_type(
                             &b.block_type,
-                        ) || matches!(b.block_type.as_str(), "Scope" | "Display")
+                        ) || crate::simulink_libraries::traits::reads_signal_line(&b.block_type)
                         {
                             print_dashboard_connected_signals(b, &sys_lines);
                         }
                         // Open a scope popout window when a Scope/DashboardScope is clicked.
                         #[cfg(feature = "dashboard")]
-                        if matches!(b.block_type.as_str(), "Scope" | "DashboardScope") {
+                        if crate::simulink_libraries::traits::shows_live_trace(&b.block_type) {
                             let key = app.scope_key_for_block(b);
                             app.scope_popout = Some(crate::egui_app::state::ScopePopout {
                                 title: scope_title_for_block(b, &sys_lines),
@@ -1252,7 +1251,7 @@ pub(crate) fn update_internal(
                         }
                     }
                 }
-                if !(app.live_mode_enabled && b.block_type == "ManualSwitch") {
+                if !(app.live_mode_enabled && crate::simulink_libraries::traits::is_click_toggle(&b.block_type)) {
                     block_action = Some(ClickAction::Primary);
                 }
             }
@@ -1356,7 +1355,7 @@ pub(crate) fn update_internal(
                     }
                     // Double-click on Constant block opens inline editor.
                     #[cfg(feature = "dashboard")]
-                    if !handled && b.block_type == "Constant"
+                    if !handled && crate::simulink_libraries::traits::has_editable_value(&b.block_type)
                         && let Some(sid) = &b.sid {
                             // Seed the edit buffer with the current value if not yet present.
                             if !app.constant_edits.contains_key(sid.as_str()) {
@@ -1373,7 +1372,10 @@ pub(crate) fn update_internal(
                             .cloned()
                             .or_else(|| Some((*b).clone()));
                         handled = true;
-                    } else if !handled && b.block_type == "Reference" && b.subsystem.is_none() {
+                    } else if !handled
+                        && crate::simulink_libraries::traits::is_library_reference(&b.block_type)
+                        && b.subsystem.is_none()
+                    {
                         // Inform user when a Reference block can't be opened because the
                         // referenced library/subsystem was not resolved.
                         // Trim/crunch whitespace in the block name before logging.
@@ -3047,7 +3049,7 @@ pub(crate) fn update_internal(
             let fg = contrast_color(*bg);
             #[cfg(feature = "dashboard")]
             update_scope_live_sample(app, b, &sys_lines);
-            let display_signal_label = if b.block_type == "Display" {
+            let display_signal_label = if crate::simulink_libraries::traits::shows_live_value(&b.block_type) {
                 let sid = b.sid.as_deref();
                 sid.and_then(|sid| {
                     sys_lines.iter().find_map(|line| {
@@ -3075,7 +3077,7 @@ pub(crate) fn update_internal(
             } else {
                 None
             };
-            let static_constant_value = if b.block_type == "Constant" {
+            let static_constant_value = if crate::simulink_libraries::traits::has_editable_value(&b.block_type) {
                 #[cfg(feature = "dashboard")]
                 {
                     if app.live_mode_enabled {
@@ -3107,7 +3109,7 @@ pub(crate) fn update_internal(
             // Icon/value rendering with precedence: mask > value > custom/icon
             if let Some(text) = live_text.clone() {
                 let shown_text = format_block_value_for_display(b, &text);
-                if matches!(b.block_type.as_str(), "Display" | "Constant") {
+                if crate::simulink_libraries::traits::shows_value_text(&b.block_type) {
                     paint_fitted_centered_text(
                         &painter,
                         *r_screen,
@@ -3124,7 +3126,7 @@ pub(crate) fn update_internal(
                     painter.galley(pos, galley, fg);
                 }
                 value_tooltip = Some(shown_text);
-            } else if b.block_type == "Constant" && app.live_mode_enabled {
+            } else if crate::simulink_libraries::traits::has_editable_value(&b.block_type) && app.live_mode_enabled {
                 let shown_value = format_constant_value_for_display(&static_constant_value);
                 paint_fitted_centered_text(
                     &painter,
@@ -3160,10 +3162,10 @@ pub(crate) fn update_internal(
                 .as_ref()
                 .map(|s| !s.trim().is_empty())
                 .unwrap_or(false)
-                && b.block_type != "Constant"
+                && !crate::simulink_libraries::traits::has_editable_value(&b.block_type)
             {
                 let text = b.value.as_ref().unwrap().clone();
-                if b.block_type == "Display" {
+                if crate::simulink_libraries::traits::shows_live_value(&b.block_type) {
                     paint_fitted_centered_text(
                         &painter,
                         *r_screen,
@@ -3192,7 +3194,7 @@ pub(crate) fn update_internal(
                 let pos = r_screen.center() - galley.size() * 0.5;
                 painter.galley(pos, galley, color);
             } else if app.live_mode_enabled
-                && matches!(b.block_type.as_str(), "Scope" | "DashboardScope")
+                && crate::simulink_libraries::traits::shows_live_trace(&b.block_type)
             {
                 // The live scope view is an interactive liveplot tile that needs
                 // `ui`/app state, so it cannot be a pure painter renderer and is
@@ -3778,7 +3780,7 @@ fn print_dashboard_connected_signals(block: &crate::model::Block, lines: &[crate
             );
         }
         None => {
-            if matches!(block.block_type.as_str(), "Display" | "Scope") {
+            if crate::simulink_libraries::traits::reads_signal_line(&block.block_type) {
                 println!(
                     "    · line-based block (no BindingPersistence expected) for SID {}",
                     block.sid.as_deref().unwrap_or("<none>")

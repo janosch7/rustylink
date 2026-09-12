@@ -265,10 +265,7 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         .blocks
         .iter()
         .filter(|b| parse_block_rect(b).is_some())
-        .filter(|b| {
-            (b.block_type == "SubSystem" || b.block_type == "Reference")
-                && b.subsystem.as_ref().is_some_and(|sub| sub.chart.is_none())
-        })
+        .filter(|b| crate::simulink_libraries::traits::is_navigable_subsystem(b))
         .filter_map(|b| b.sid.as_ref().map(|sid| (sid.clone(), b.clone())))
         .collect();
     let blocks: Vec<(&crate::model::Block, Rect)> = owned_blocks
@@ -1846,16 +1843,11 @@ fn show_code_editor(state: &mut EditorState, ui: &mut egui::Ui) {
 // ────────────────────────────────────────────────────────────────────────────
 
 pub fn is_code_block(block: &crate::model::Block) -> bool {
-    block.block_type == "SubSystem" && block.is_matlab_function
-        || block.block_type == "MATLABSystem"
-        || block.block_type == "Fcn"
-        || block.block_type == "MATLABFcn"
-        || block.block_type == "CFunction"
+    crate::simulink_libraries::traits::carries_code(block)
 }
 
 pub fn is_subsystem_block(block: &crate::model::Block) -> bool {
-    (block.block_type == "SubSystem" || block.block_type == "Reference")
-        && block.subsystem.as_ref().is_some_and(|s| s.chart.is_none())
+    crate::simulink_libraries::traits::is_navigable_subsystem(block)
 }
 
 fn open_code_editor(state: &mut EditorState, block_idx: usize, block: &crate::model::Block) {

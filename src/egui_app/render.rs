@@ -418,11 +418,8 @@ fn lookup_block_type_cfg(block: &Block) -> BlockTypeConfig {
 
     // Phase 3 – Simulink-semantic overrides that are expressed through block
     // properties rather than via a SourceBlock/library path.
-    // A plain Product block with Multiplication="Matrix(*)" is the standard way
-    // Simulink encodes a matrix-multiply.  Show the dedicated SVG for it.
-    if block.block_type == "Product"
-        && block.properties.get("Multiplication").map(|v| v.trim()) == Some("Matrix(*)")
-        && let Some(cfg) = g.get("matrix multiply")
+    if let Some(key) = crate::simulink_libraries::traits::property_variant_key(block)
+        && let Some(cfg) = g.get(key)
     {
         return cfg.clone();
     }
@@ -499,15 +496,13 @@ pub(crate) fn subsystem_boundary_port_name(
     index: u32,
     logical_is_input: bool,
 ) -> Option<String> {
-    let boundary_type = match block.block_type.as_str() {
-        "SubSystem" | "Reference" => {
-            if logical_is_input {
-                "Inport"
-            } else {
-                "Outport"
-            }
-        }
-        _ => return None,
+    if !crate::simulink_libraries::traits::is_container(block) {
+        return None;
+    }
+    let boundary_role = if logical_is_input {
+        crate::simulink_libraries::traits::SignalRole::BoundaryInput
+    } else {
+        crate::simulink_libraries::traits::SignalRole::BoundaryOutput
     };
 
     block
@@ -516,8 +511,8 @@ pub(crate) fn subsystem_boundary_port_name(
         .blocks
         .iter()
         .filter(|child| {
-            child.block_type == boundary_type
-                || (boundary_type == "Inport" && child.block_type == "InportShadow")
+            crate::simulink_libraries::traits::block_traits(&child.block_type).signal_role
+                == boundary_role
         })
         .find(|child| subsystem_boundary_port_index(child) == index)
         .and_then(|child| boundary_block_display_name(child, index))

@@ -82,8 +82,10 @@ pub enum LiveRole {
     Value,
     /// Plots the signal over time (`Scope`, `DashboardScope`).
     Trace,
-    /// The user drives the value from the canvas (`ManualSwitch`, `Constant`).
+    /// The user edits the value on the canvas (`Constant`).
     Input,
+    /// The user flips the block by clicking it (`ManualSwitch`).
+    Toggle,
 }
 
 /// The structural facts about one block type.
@@ -98,8 +100,16 @@ pub struct BlockTraits {
     pub path_prefix_matched: bool,
     /// The source code the block carries, if any.
     pub code: Option<CodeKind>,
+    /// Whether the block's MATLAB code lives in a Stateflow chart (the
+    /// `MATLAB Function` block, which the editors open as a script).
+    pub stateflow_backed: bool,
+    /// Whether creating the block gives it an empty child system.
+    pub owns_child_system: bool,
     /// How the block shows live data, if at all.
     pub live: Option<LiveRole>,
+    /// Whether the block takes its live data from the signal line reaching it
+    /// rather than from a dashboard binding.
+    pub reads_signal_line: bool,
     /// Value assumed when the model omits the block's `Value` property.
     pub implicit_value: Option<&'static str>,
     /// Port counts a dashboard block gets when the model states none.
@@ -112,7 +122,10 @@ impl BlockTraits {
         container: false,
         path_prefix_matched: false,
         code: None,
+        stateflow_backed: false,
+        owns_child_system: false,
         live: None,
+        reads_signal_line: false,
         implicit_value: None,
         dashboard_ports: None,
     };
@@ -143,9 +156,12 @@ pub fn block_traits(block_type: &str) -> BlockTraits {
         "EnablePort" | "TriggerPort" | "ResetPort" => BlockTraits::signal(SignalRole::ControlPort),
         "VariantStart" | "VariantSink" => BlockTraits::signal(SignalRole::VariantSelect),
         "VariantEnd" | "VariantSource" => BlockTraits::signal(SignalRole::VariantMerge),
-        "SubSystem" => BlockTraits {
+        "SubSystem" | "AtomicSubSystem" | "EnabledSubSystem" | "TriggeredSubSystem"
+        | "ForEachSubSystem" | "ForIterator" | "WhileIterator" | "MaskedSubSystem"
+        | "ConfigSubSystem" | "VariantSubSystem" => BlockTraits {
             signal_role: SignalRole::Container,
             container: true,
+            owns_child_system: true,
             ..BlockTraits::PLAIN
         },
         "Reference" => BlockTraits {
@@ -154,7 +170,12 @@ pub fn block_traits(block_type: &str) -> BlockTraits {
             path_prefix_matched: true,
             ..BlockTraits::PLAIN
         },
-        "MATLAB Function" | "MATLABSystem" | "MATLABFcn" => BlockTraits {
+        "MATLAB Function" => BlockTraits {
+            code: Some(CodeKind::Matlab),
+            stateflow_backed: true,
+            ..BlockTraits::PLAIN
+        },
+        "MATLABSystem" | "MATLABFcn" => BlockTraits {
             code: Some(CodeKind::Matlab),
             ..BlockTraits::PLAIN
         },
@@ -172,15 +193,22 @@ pub fn block_traits(block_type: &str) -> BlockTraits {
             ..BlockTraits::PLAIN
         },
         "ManualSwitch" => BlockTraits {
-            live: Some(LiveRole::Input),
+            live: Some(LiveRole::Toggle),
             ..BlockTraits::PLAIN
         },
         "Display" => BlockTraits {
             live: Some(LiveRole::Value),
+            reads_signal_line: true,
             dashboard_ports: Some((1, 0)),
             ..BlockTraits::PLAIN
         },
-        "Scope" | "DashboardScope" => BlockTraits {
+        "Scope" => BlockTraits {
+            live: Some(LiveRole::Trace),
+            reads_signal_line: true,
+            dashboard_ports: Some((0, 0)),
+            ..BlockTraits::PLAIN
+        },
+        "DashboardScope" => BlockTraits {
             live: Some(LiveRole::Trace),
             dashboard_ports: Some((0, 0)),
             ..BlockTraits::PLAIN
@@ -204,9 +232,106 @@ pub fn is_container(block: &Block) -> bool {
     block_traits(&block.block_type).container
 }
 
-/// Whether the block runs MATLAB code the user can open in an editor.
+/// Whether the block is a MATLAB Function block: either the dedicated block
+/// type or a subsystem flagged as one by its `SFBlockType`.
 pub fn is_matlab_function(block: &Block) -> bool {
-    traits_of(block).code == Some(CodeKind::Matlab)
+    block.is_matlab_function || block_traits(&block.block_type).stateflow_backed
+}
+
+/// Whether a freshly created block of this type starts with a child system.
+pub fn owns_child_system(block_type: &str) -> bool {
+    block_traits(block_type).owns_child_system
+}
+
+/// Whether the block owns a child system the user can descend into.
+///
+/// A MATLAB Function block is technically a subsystem wrapping a Stateflow
+/// S-function, but Simulink shows its MATLAB source rather than that wiring,
+/// so it is not navigable.
+pub fn is_navigable_subsystem(block: &Block) -> bool {
+    is_container(block)
+        && !is_matlab_function(block)
+        && block
+            .subsystem
+            .as_ref()
+            .is_some_and(|sub| sub.chart.is_none())
+}
+
+/// Whether the block carries source code the user can open in an editor.
+pub fn carries_code(block: &Block) -> bool {
+    traits_of(block).code.is_some()
+}
+
+/// Whether the block carries C code (`CFunction`).
+pub fn carries_c_code(block: &Block) -> bool {
+    traits_of(block).code == Some(CodeKind::C)
+}
+
+/// How the block presents live simulation data, if at all.
+pub fn live_role(block_type: &str) -> Option<LiveRole> {
+    block_traits(block_type).live
+}
+
+/// Whether the block plots live data over time rather than printing it.
+pub fn shows_live_trace(block_type: &str) -> bool {
+    live_role(block_type) == Some(LiveRole::Trace)
+}
+
+/// Whether the block prints a live value as text.
+pub fn shows_live_value(block_type: &str) -> bool {
+    live_role(block_type) == Some(LiveRole::Value)
+}
+
+/// Whether the block shows its value as centred text on the canvas, either
+/// live (`Display`) or as the value the user typed (`Constant`).
+pub fn shows_value_text(block_type: &str) -> bool {
+    matches!(
+        live_role(block_type),
+        Some(LiveRole::Value | LiveRole::Input)
+    )
+}
+
+/// Whether the user can edit this block's value on the canvas.
+pub fn has_editable_value(block_type: &str) -> bool {
+    live_role(block_type) == Some(LiveRole::Input)
+}
+
+/// Whether clicking the block flips it (`ManualSwitch`).
+pub fn is_click_toggle(block_type: &str) -> bool {
+    live_role(block_type) == Some(LiveRole::Toggle)
+}
+
+/// Whether the block reads its live data from the signal line reaching it.
+pub fn reads_signal_line(block_type: &str) -> bool {
+    block_traits(block_type).reads_signal_line
+}
+
+/// Whether the block is a link into another library or model file.
+pub fn is_library_reference(block_type: &str) -> bool {
+    block_traits(block_type).path_prefix_matched
+}
+
+/// The value the canvas shows when the model states none.
+pub fn implicit_value(block_type: &str) -> Option<&'static str> {
+    block_traits(block_type).implicit_value
+}
+
+/// Catalog key selected by a block's own properties rather than by its type
+/// or its library path, for the block types Simulink draws differently
+/// depending on how they are configured.
+pub fn property_variant_key(block: &Block) -> Option<&'static str> {
+    match block.block_type.as_str() {
+        "Product"
+            if block
+                .properties
+                .get("Multiplication")
+                .map(|v| v.trim())
+                .is_some_and(|v| v == "Matrix(*)") =>
+        {
+            Some("matrix multiply")
+        }
+        _ => None,
+    }
 }
 
 /// Default port counts for a dashboard block the model gives no ports for.
