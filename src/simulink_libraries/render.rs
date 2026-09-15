@@ -89,19 +89,7 @@ pub fn render_block_interior(
     if let Some(label) = block_label_text(block, def, &metadata)
         && !label.is_empty()
     {
-        let mut px = 12.0 * ctx.font_scale;
-        let mut galley =
-            painter.layout_no_wrap(label.clone(), FontId::proportional(px), params.text_color);
-        // Simulink shrinks a block's caption until it fits; do the same rather
-        // than letting long labels ("hermitian", "Clear bit 0") spill out.
-        let avail = rect.size() * 0.88;
-        let overflow = (galley.size().x / avail.x).max(galley.size().y / avail.y);
-        if overflow > 1.0 {
-            px = (px / overflow).max(1.0);
-            galley = painter.layout_no_wrap(label, FontId::proportional(px), params.text_color);
-        }
-        let pos = rect.center() - galley.size() * 0.5;
-        painter.galley(pos, galley, params.text_color);
+        draw_fitted_label(painter, rect, &label, params);
         return;
     }
 
@@ -130,6 +118,14 @@ pub fn render_block_interior(
         return;
     }
 
+    // Rectangular, iconless and captionless.  A block that links into a library
+    // still knows what it links to, so name that library instead of stamping an
+    // uninformative `?`.
+    if let Some(label) = super::labels::library_link(block) {
+        draw_fitted_label(painter, rect, &label, params);
+        return;
+    }
+
     // Rectangular & iconless: fall back to the legacy config-map icon path, which
     // is the single place that rasterises every icon kind and emits the `?`
     // fallback (plus a one-time warning) for unknown rectangular blocks.
@@ -141,6 +137,31 @@ pub fn render_block_interior(
         params.text_color,
         ctx.port_label_widths,
     );
+}
+
+/// Draw a caption centred in the block, shrunk until it fits.
+///
+/// Simulink scales a block's caption down rather than letting it spill out of
+/// the body.
+fn draw_fitted_label(painter: &Painter, rect: &Rect, label: &str, params: &InteriorParams<'_>) {
+    let mut px = 12.0 * params.font_scale;
+    let mut galley = painter.layout_no_wrap(
+        label.to_string(),
+        FontId::proportional(px),
+        params.text_color,
+    );
+    let avail = rect.size() * 0.88;
+    let overflow = (galley.size().x / avail.x).max(galley.size().y / avail.y);
+    if overflow > 1.0 {
+        px = (px / overflow).max(1.0);
+        galley = painter.layout_no_wrap(
+            label.to_string(),
+            FontId::proportional(px),
+            params.text_color,
+        );
+    }
+    let pos = rect.center() - galley.size() * 0.5;
+    painter.galley(pos, galley, params.text_color);
 }
 
 /// Resolve the label of a single port from the block's definition.

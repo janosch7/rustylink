@@ -37,9 +37,7 @@ pub fn parse_endpoint(s: &str) -> Result<EndpointRef> {
         .ok_or_else(|| anyhow!("Invalid endpoint format: {}", s))?;
     let sid: String = sid_str.trim().to_string();
     let (port_type, port_index) = match rest.trim().split_once(':') {
-        Some((ptype, pidx_str)) => {
-            (ptype.trim().to_string(), pidx_str.trim().parse::<u32>()?)
-        }
+        Some((ptype, pidx_str)) => (ptype.trim().to_string(), pidx_str.trim().parse::<u32>()?),
         // No port index (e.g. "480#enable") – default to port 1.
         None => (rest.trim().to_string(), 1),
     };

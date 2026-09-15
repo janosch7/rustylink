@@ -34,7 +34,11 @@ struct Args {
     lib: Vec<String>,
 
     /// Which variant is active in "sim codegen switching" mode: `codegen` (default) or `sim`.
-    #[arg(long = "sim-codegen-mode", value_name = "MODE", default_value = "codegen")]
+    #[arg(
+        long = "sim-codegen-mode",
+        value_name = "MODE",
+        default_value = "codegen"
+    )]
     sim_codegen_mode: String,
 }
 

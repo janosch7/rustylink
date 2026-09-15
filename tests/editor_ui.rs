@@ -71,6 +71,7 @@ fn test_is_code_block() {
         current_setting: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
     };
     assert!(is_code_block(&block));
@@ -123,6 +124,7 @@ fn test_is_subsystem_block() {
         current_setting: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
     };
     assert!(is_subsystem_block(&block));

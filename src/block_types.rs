@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use crate::simulink_libraries::types::SimulinkShape as BlockShape;
 use once_cell::sync::OnceCell;
@@ -97,6 +98,13 @@ fn default_registry() -> HashMap<String, BlockTypeConfig> {
 }
 
 static REGISTRY: OnceCell<RwLock<HashMap<String, BlockTypeConfig>>> = OnceCell::new();
+static REGISTRY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Counter bumped on every write to the configuration map, so callers can
+/// cache derived data and drop it when the map changes.
+pub fn block_type_config_generation() -> u64 {
+    REGISTRY_GENERATION.load(Ordering::Relaxed)
+}
 
 /// Get a handle to the global block type configuration map.
 ///
@@ -112,6 +120,7 @@ pub fn set_block_type_config<T: Into<String>>(block_type: T, cfg: BlockTypeConfi
     let map = get_block_type_config_map();
     if let Ok(mut w) = map.write() {
         w.insert(block_type.into(), cfg);
+        REGISTRY_GENERATION.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -126,5 +135,6 @@ where
             .entry(block_type.to_string())
             .or_insert_with(BlockTypeConfig::default);
         f(entry);
+        REGISTRY_GENERATION.fetch_add(1, Ordering::Relaxed);
     }
 }

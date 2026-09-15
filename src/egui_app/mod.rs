@@ -87,7 +87,9 @@ pub fn port_label_defined_name(
 }
 
 /// Resolve a block's [`BlockTypeConfig`] from the unified catalog.
-pub fn get_block_type_cfg(block: &crate::model::Block) -> crate::block_types::BlockTypeConfig {
+pub fn get_block_type_cfg(
+    block: &crate::model::Block,
+) -> std::sync::Arc<crate::block_types::BlockTypeConfig> {
     render::get_block_type_cfg(block)
 }
 
