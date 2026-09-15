@@ -39,6 +39,7 @@ fn test_ports_and_rect() {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order: vec![],
     };
@@ -84,6 +85,7 @@ fn test_port_indicator_positions_count_and_sides() {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order: vec![],
     };

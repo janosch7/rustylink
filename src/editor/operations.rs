@@ -289,6 +289,7 @@ fn apply_inverse(system: &mut System, cmd: &EditorCommand) -> EditorCommand {
                         block_mirror: None,
                         library_source: None,
                         library_block_path: None,
+                        library_missing: false,
                         dashboard_binding: None,
                         child_order: Vec::new(),
                     }),
@@ -349,6 +350,7 @@ fn apply_inverse(system: &mut System, cmd: &EditorCommand) -> EditorCommand {
                         block_mirror: None,
                         library_source: None,
                         library_block_path: None,
+                        library_missing: false,
                         dashboard_binding: None,
                         child_order: Vec::new(),
                     },
@@ -848,6 +850,7 @@ pub fn create_default_block(
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order,
     }

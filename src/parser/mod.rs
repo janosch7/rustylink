@@ -204,6 +204,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                                         "failed to parse library '{}' (requested by '{}'): {}",
                                         lib_name_clean, host_clean, e
                                     ));
+                                    block.library_missing = true;
                                     continue;
                                 }
                             }
@@ -218,6 +219,7 @@ impl<S: ContentSource> SimulinkParser<S> {
                                     lib_name_clean, host_clean
                                 ));
                             }
+                            block.library_missing = true;
                             continue;
                         }
                     }

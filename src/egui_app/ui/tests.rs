@@ -155,6 +155,7 @@ fn dashboard_discrete_controls_are_editable_in_live_mode() {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: Some(DashboardBinding::ParamSource {
             block_path: "Model/Combo".to_string(),
             param_name: "Value".to_string(),
@@ -206,6 +207,7 @@ fn rotary_switch_pointer_mapping_clamps_gap_and_returns_indices() {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order: Vec::new(),
     };
@@ -490,6 +492,7 @@ fn minimal_block(name: &str, sid: &str) -> crate::model::Block {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order: Vec::new(),
     }

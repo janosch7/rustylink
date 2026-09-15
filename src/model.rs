@@ -192,6 +192,10 @@ pub struct Block {
     /// Full library block path.
     #[serde(default)]
     pub library_block_path: Option<String>,
+    /// Set when the block links into a library that could not be read, so the
+    /// link's contents (child system, port names, icon) are unknown.
+    #[serde(default)]
+    pub library_missing: bool,
     /// Parsed dashboard binding from a `BindingPersistence` `.mxarray` file.
     ///
     /// Present only for Dashboard / HMI blocks that carry a `BindingPersistence`

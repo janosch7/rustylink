@@ -49,6 +49,7 @@ fn test_block(name: &str, sid: Option<&str>) -> Block {
         block_mirror: None,
         library_source: None,
         library_block_path: None,
+        library_missing: false,
         dashboard_binding: None,
         child_order: Vec::new(),
     }
