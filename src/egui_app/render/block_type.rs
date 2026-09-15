@@ -111,13 +111,17 @@ fn lookup_block_type_cfg(block: &Block) -> BlockTypeConfig {
         }
     }
 
-    // Collect all unique last-path-segments from the library candidates.
+    // Collect all unique last-path-segments from the library candidates.  A
+    // link whose library contents were read describes itself, so its name must
+    // not pick up a same-named catalog block.
     let mut last_segments: Vec<String> = Vec::new();
-    for c in &lib_candidates {
-        if let Some((_, name)) = c.rsplit_once('/') {
-            let s = name.to_string();
-            if !last_segments.contains(&s) {
-                last_segments.push(s);
+    if !crate::simulink_libraries::traits::links_to_read_library_contents(block) {
+        for c in &lib_candidates {
+            if let Some((_, name)) = c.rsplit_once('/') {
+                let s = name.to_string();
+                if !last_segments.contains(&s) {
+                    last_segments.push(s);
+                }
             }
         }
     }

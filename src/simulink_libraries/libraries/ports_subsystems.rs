@@ -48,6 +48,16 @@ pub static BLOCKS: &[SimulinkBlockDefinition] = &[
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
             PortLabelPolicy::MetadataDependent(port_labels_from_model),
         ),
+    // A link into a library the catalog does not describe.  Its ports and their
+    // names come from the linked block's own subsystem, exactly like a subsystem
+    // stored in the model; the interior names the library it links to.
+    SimulinkBlockDefinition::new("Reference", "Ports & Subsystems")
+        .with_description("Link to a block in a library")
+        .with_ports(IOPorts::Variable(0), IOPorts::Variable(0))
+        .with_port_labels(
+            PortLabelPolicy::MetadataDependent(port_labels_from_model),
+            PortLabelPolicy::MetadataDependent(port_labels_from_model),
+        ),
     // ═══════════════════════════════════════════════════════════════════════
     //  Ports & Subsystems
     // ═══════════════════════════════════════════════════════════════════════

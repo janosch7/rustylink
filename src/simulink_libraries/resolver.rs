@@ -171,11 +171,14 @@ fn resolve_definition_uncached(block: &Block) -> &'static SimulinkBlockDefinitio
         push(source.clone(), &mut candidates);
         push(normalize_library_path(source), &mut candidates);
     }
-    // Last path segments.
+    // Last path segments.  Skipped once the link's own contents are known:
+    // a library block called `Logic` must not borrow the catalog's `Logic`.
     let mut segments: Vec<String> = Vec::new();
-    for c in &candidates {
-        if let Some((_, last)) = c.rsplit_once('/') {
-            push(last.to_string(), &mut segments);
+    if !crate::simulink_libraries::traits::links_to_read_library_contents(block) {
+        for c in &candidates {
+            if let Some((_, last)) = c.rsplit_once('/') {
+                push(last.to_string(), &mut segments);
+            }
         }
     }
     for key in candidates.iter().chain(segments.iter()) {

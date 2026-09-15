@@ -295,6 +295,14 @@ impl<S: ContentSource> SimulinkParser<S> {
                         } else {
                             block.port_counts = lib_block.port_counts.clone();
                         }
+                        // Neither side declared the counts: derive them from the
+                        // linked subsystem's own In/Outport blocks.
+                        if let Some(ref contents) = block.subsystem {
+                            let (ins, outs) = Self::boundary_port_counts(contents);
+                            let counts = block.port_counts.get_or_insert_with(PortCounts::default);
+                            counts.ins.get_or_insert(ins);
+                            counts.outs.get_or_insert(outs);
+                        }
                         block.ports = lib_block.ports.clone();
 
                         block.library_source = Some(lib_name.to_string());
@@ -336,8 +344,61 @@ impl<S: ContentSource> SimulinkParser<S> {
         parser.parse_system_file(&root)
     }
 
+    /// Find the block a `SourceBlock` path points at.
+    ///
+    /// Libraries group their blocks in subsystems, so the path after the
+    /// library name (`MyLib/Group/Logic` → `Group/Logic`) walks down the
+    /// library's own block tree.  Whitespace is collapsed on both sides: SLX
+    /// word-wraps long paths, and a library block's name may itself be
+    /// multi-line.
     fn find_block_by_name(system: &System, name: &str) -> Option<Block> {
-        system.blocks.iter().find(|b| b.name == name).cloned()
+        fn child<'a>(system: &'a System, name: &str) -> Option<&'a Block> {
+            let name = crate::parser::helpers::clean_whitespace(name);
+            system
+                .blocks
+                .iter()
+                .find(|b| crate::parser::helpers::clean_whitespace(&b.name) == name)
+        }
+
+        // The whole path as one name first: virtual-library stubs are created
+        // under their full path (`Sources/Chirp Signal`).
+        if let Some(block) = child(system, name) {
+            return Some(block.clone());
+        }
+
+        let mut segments = name.split('/');
+        let mut current = segments.next()?;
+        let mut system = system;
+        loop {
+            let block = child(system, current)?;
+            match segments.next() {
+                None => return Some(block.clone()),
+                Some(next) => {
+                    system = block.subsystem.as_deref()?;
+                    current = next;
+                }
+            }
+        }
+    }
+
+    /// Data port counts implied by a subsystem's boundary blocks.
+    ///
+    /// A library block often carries no `<PortCounts>` of its own; its ports
+    /// are defined by the `Inport`/`Outport` blocks inside it, exactly like a
+    /// subsystem stored in the model itself.
+    fn boundary_port_counts(system: &System) -> (u32, u32) {
+        use crate::simulink_libraries::traits::{SignalRole, block_traits};
+        let count = |role: SignalRole| {
+            system
+                .blocks
+                .iter()
+                .filter(|b| block_traits(&b.block_type).signal_role == role)
+                .count() as u32
+        };
+        (
+            count(SignalRole::BoundaryInput),
+            count(SignalRole::BoundaryOutput),
+        )
     }
 }
 

@@ -238,6 +238,19 @@ pub fn is_matlab_function(block: &Block) -> bool {
     block.is_matlab_function || block_traits(&block.block_type).stateflow_backed
 }
 
+/// Whether the block links into a library whose contents were read.
+///
+/// Such a link defines its own ports, port names and interior through the
+/// blocks it links to, so catalog guesses made from its *name* (a library
+/// block may well be called `Logic` or `Gain`) must not override them.
+pub fn links_to_read_library_contents(block: &Block) -> bool {
+    block.library_block_path.is_some()
+        && block
+            .subsystem
+            .as_ref()
+            .is_some_and(|contents| !contents.blocks.is_empty())
+}
+
 /// Whether a freshly created block of this type starts with a child system.
 pub fn owns_child_system(block_type: &str) -> bool {
     block_traits(block_type).owns_child_system
