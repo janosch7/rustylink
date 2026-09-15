@@ -88,7 +88,10 @@ pub fn dst_segment_horizontal(
             .get(&(ep.sid.clone(), kind))
             .copied()
             .unwrap_or(ep.port_index);
-        if let Some(ovr) = overrides.iter().find(|o| o.matches(is_input, ep.port_index, count)) {
+        if let Some(ovr) = overrides
+            .iter()
+            .find(|o| o.matches(is_input, ep.port_index, count))
+        {
             return match ovr.placement {
                 PortPlacement::Left | PortPlacement::Right => Some(true),
                 PortPlacement::Top | PortPlacement::Bottom => Some(false),
@@ -421,13 +424,28 @@ pub fn compute_port_info(
 
     for line in lines {
         if let Some(src) = &line.src {
-            register_endpoint(src, &mut port_counts, &mut connected_ports, &mut connected_control_ports);
+            register_endpoint(
+                src,
+                &mut port_counts,
+                &mut connected_ports,
+                &mut connected_control_ports,
+            );
         }
         if let Some(dst) = &line.dst {
-            register_endpoint(dst, &mut port_counts, &mut connected_ports, &mut connected_control_ports);
+            register_endpoint(
+                dst,
+                &mut port_counts,
+                &mut connected_ports,
+                &mut connected_control_ports,
+            );
         }
         for br in &line.branches {
-            register_branch_endpoints(br, &mut port_counts, &mut connected_ports, &mut connected_control_ports);
+            register_branch_endpoints(
+                br,
+                &mut port_counts,
+                &mut connected_ports,
+                &mut connected_control_ports,
+            );
         }
     }
 

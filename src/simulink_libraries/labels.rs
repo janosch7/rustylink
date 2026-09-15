@@ -187,6 +187,31 @@ fn matrix_test_caption(meta: &BlockMetadata, property: &str) -> String {
     }
 }
 
+/// Caption of a block that links into a library the catalog does not describe.
+///
+/// Rather than stamping a `?`, show what the block links to: the library's
+/// name, marked `(not found)` when that library could not be read, in which
+/// case nothing about the linked block (ports, contents, icon) is known.
+pub fn library_link(block: &Block) -> Option<String> {
+    let reference = block
+        .library_block_path
+        .as_deref()
+        .or_else(|| block.properties.get("SourceBlock").map(String::as_str))?;
+    let reference = crate::parser::helpers::clean_whitespace(reference);
+    let library = crate::parser::library::split_source_block_reference(&reference)
+        .map(|(library, _)| library)
+        .unwrap_or(reference);
+    let library = library.trim();
+    if library.is_empty() {
+        return None;
+    }
+    if block.library_missing {
+        Some(format!("{library}\n(not found)"))
+    } else {
+        Some(library.to_string())
+    }
+}
+
 /// Drop a numeric value's redundant fractional part (`3.0` → `3`).
 fn trim_trailing_zeros(value: &str) -> String {
     match value.parse::<f64>() {

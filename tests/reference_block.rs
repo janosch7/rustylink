@@ -91,11 +91,8 @@ fn check_verification_reference_blocks_have_no_output_port() {
     let source = MemSource { files };
     let mut parser = SimulinkParser::new("/", source);
     let system = parser.parse_system_file(&path).expect("parse system XML");
-    SimulinkParser::<MemSource>::resolve_library_references(
-        &mut system.clone(),
-        &[],
-    )
-    .expect("resolve library references");
+    SimulinkParser::<MemSource>::resolve_library_references(&mut system.clone(), &[])
+        .expect("resolve library references");
 
     assert_eq!(system.blocks.len(), 2);
 
@@ -104,14 +101,20 @@ fn check_verification_reference_blocks_have_no_output_port() {
     assert_eq!(gap.name, "Check Static Gap");
     let pc = gap.port_counts.as_ref().expect("has PortCounts");
     assert_eq!(pc.ins, Some(1));
-    assert_eq!(pc.outs, None, "Check Static Gap must not have an output port");
+    assert_eq!(
+        pc.outs, None,
+        "Check Static Gap must not have an output port"
+    );
 
     // Check Dynamic Range: 3 inputs, no output
     let range = &system.blocks[1];
     assert_eq!(range.name, "Check Dynamic Range");
     let pc = range.port_counts.as_ref().expect("has PortCounts");
     assert_eq!(pc.ins, Some(3));
-    assert_eq!(pc.outs, None, "Check Dynamic Range must not have an output port");
+    assert_eq!(
+        pc.outs, None,
+        "Check Dynamic Range must not have an output port"
+    );
 }
 
 #[test]
@@ -157,5 +160,93 @@ fn inport_shadow_block_parses_and_renders_like_inport() {
             .get("PropagatedSignals")
             .map(|s| s.as_str()),
         Some("joint_ref_bus")
+    );
+}
+
+#[cfg(feature = "egui")]
+#[test]
+fn unresolvable_library_link_is_labelled_with_the_library_name() {
+    let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<System>
+  <Reference Name="Logic" SID="53">
+    <P Name="Position">[325, 264, 425, 306]</P>
+    <P Name="SourceBlock">ASXTestLibrary/Logic</P>
+    <P Name="SourceType">SubSystem</P>
+  </Reference>
+</System>
+"#;
+
+    let path = Utf8PathBuf::from("mem://missing_library.xml");
+    let mut files = HashMap::new();
+    files.insert(path.as_str().to_string(), xml.to_string());
+    let source = MemSource { files };
+    let mut parser = SimulinkParser::new("/", source);
+    let mut system = parser.parse_system_file(&path).expect("parse system XML");
+    SimulinkParser::<MemSource>::resolve_library_references(&mut system, &[])
+        .expect("resolve library references");
+
+    let b = &system.blocks[0];
+    assert!(b.library_missing, "library cannot be located");
+    assert_eq!(
+        rustylink::simulink_libraries::labels::library_link(b).as_deref(),
+        Some("ASXTestLibrary\n(not found)")
+    );
+}
+
+#[cfg(feature = "egui")]
+#[test]
+fn resolved_library_link_shows_the_library_and_its_port_names() {
+    let host = r#"<?xml version="1.0" encoding="utf-8"?>
+<System>
+  <Reference Name="Logic" SID="53">
+    <P Name="Position">[325, 264, 425, 306]</P>
+    <P Name="SourceBlock">ASXTestLibrary/Logic</P>
+    <P Name="SourceType">SubSystem</P>
+  </Reference>
+</System>
+"#;
+    // The system the library's `Logic` block contains; the parser copies it onto
+    // the host block once the library is located.
+    let library_contents = r#"<?xml version="1.0" encoding="utf-8"?>
+<System>
+  <Block BlockType="Inport" Name="u" SID="1">
+    <P Name="Position">[20, 20, 40, 40]</P>
+    <P Name="Port">1</P>
+  </Block>
+  <Block BlockType="Outport" Name="result" SID="2">
+    <P Name="Position">[120, 20, 140, 40]</P>
+    <P Name="Port">1</P>
+  </Block>
+</System>
+"#;
+
+    let host_path = Utf8PathBuf::from("mem://host.xml");
+    let lib_path = Utf8PathBuf::from("mem://library_logic.xml");
+    let mut files = HashMap::new();
+    files.insert(host_path.as_str().to_string(), host.to_string());
+    files.insert(lib_path.as_str().to_string(), library_contents.to_string());
+    let source = MemSource { files };
+    let mut parser = SimulinkParser::new("/", source);
+    let mut system = parser.parse_system_file(&host_path).expect("parse host");
+    let contents = parser.parse_system_file(&lib_path).expect("parse library");
+
+    let b = &mut system.blocks[0];
+    b.subsystem = Some(Box::new(contents));
+    b.library_source = Some("ASXTestLibrary".to_string());
+    b.library_block_path = Some("ASXTestLibrary/Logic".to_string());
+
+    let b = &system.blocks[0];
+    assert_eq!(
+        rustylink::simulink_libraries::labels::library_link(b).as_deref(),
+        Some("ASXTestLibrary")
+    );
+    let cfg = rustylink::egui_app::get_block_type_cfg(b);
+    assert_eq!(
+        rustylink::egui_app::port_label_display_name(b, 1, true, &cfg),
+        "u"
+    );
+    assert_eq!(
+        rustylink::egui_app::port_label_display_name(b, 1, false, &cfg),
+        "result"
     );
 }

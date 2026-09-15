@@ -92,6 +92,7 @@ fn subsystem_port_labels_use_internal_boundary_block_names() {
                 block_mirror: None,
                 library_source: None,
                 library_block_path: None,
+                library_missing: false,
                 dashboard_binding: None,
                 child_order: Vec::new(),
             },
@@ -129,6 +130,7 @@ fn subsystem_port_labels_use_internal_boundary_block_names() {
                 block_mirror: None,
                 library_source: None,
                 library_block_path: None,
+                library_missing: false,
                 dashboard_binding: None,
                 child_order: Vec::new(),
             },
@@ -207,5 +209,8 @@ fn multiport_switch_first_input_port_has_no_label() {
     assert_eq!(port_label_display_name(&block, 2, true, &cfg), "1");
     assert_eq!(port_label_display_name(&block, 3, true, &cfg), "2");
     // The defined name for the first port is an empty string, not None.
-    assert_eq!(port_label_defined_name(&block, 1, true, &cfg), Some(String::new()));
+    assert_eq!(
+        port_label_defined_name(&block, 1, true, &cfg),
+        Some(String::new())
+    );
 }

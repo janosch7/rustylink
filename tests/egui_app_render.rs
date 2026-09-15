@@ -311,8 +311,8 @@ fn subsystem_control_ports_come_from_the_contained_port_blocks() {
 fn reinit_event_port_sits_above_the_data_inputs() {
     use eframe::egui::{Pos2, Rect};
     use rustylink::egui_app::ui::signal_routing::{
-        compute_port_info, endpoint_pos, is_reinit_subsystem_counts, REINIT_PORT_FRAC,
-        REINIT_SEP_FRAC,
+        REINIT_PORT_FRAC, REINIT_SEP_FRAC, compute_port_info, endpoint_pos,
+        is_reinit_subsystem_counts,
     };
     use rustylink::model::{EndpointRef, SlxArchive};
 
@@ -362,8 +362,14 @@ fn reinit_event_port_sits_above_the_data_inputs() {
     );
     // Data inputs are below the separator line.
     let sep_y = rect.top() + REINIT_SEP_FRAC * rect.height();
-    assert!(in1.y > sep_y, "in1 {in1:?} must be below separator y={sep_y}");
-    assert!(in2.y > sep_y, "in2 {in2:?} must be below separator y={sep_y}");
+    assert!(
+        in1.y > sep_y,
+        "in1 {in1:?} must be below separator y={sep_y}"
+    );
+    assert!(
+        in2.y > sep_y,
+        "in2 {in2:?} must be below separator y={sep_y}"
+    );
     assert!(in1.y < in2.y, "in1 {in1:?} must sit above {in2:?}");
 }
 
@@ -388,7 +394,8 @@ fn enable_and_trigger_endpoints_land_on_different_top_edge_slots() {
         .expect("enabled and triggered subsystem missing from the model");
     let sid = block.sid.clone().expect("subsystem has a SID");
 
-    let (port_counts, _connected, _connected_ctrl) = compute_port_info(&[], std::slice::from_ref(block));
+    let (port_counts, _connected, _connected_ctrl) =
+        compute_port_info(&[], std::slice::from_ref(block));
     let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(90.0, 60.0));
     let control = |port_type: &str| EndpointRef {
         sid: sid.clone(),
@@ -423,9 +430,11 @@ fn round_sum_port_placement_uses_left_semicircle() {
     //        2='+' at 210° (lower-left), 3='+' at 270° (bottom)
     let mut block = rustylink::editor::operations::create_default_block("Sum", "Sum4", 0, 0, 4, 1);
     block.sid = Some("479".to_string());
-    block.properties
+    block
+        .properties
         .insert("IconShape".to_string(), "round".to_string());
-    block.properties
+    block
+        .properties
         .insert("Inputs".to_string(), "-+++".to_string());
 
     let def = resolve_definition(&block);
@@ -476,9 +485,11 @@ fn round_sum_spacer_placement() {
     // "|++": 3 slots → slot 0='|' at 90° (top, spacer),
     //        slot 1='+' at 180° (left), slot 2='+' at 270° (bottom)
     let mut block = rustylink::editor::operations::create_default_block("Sum", "Sum", 0, 0, 2, 1);
-    block.properties
+    block
+        .properties
         .insert("IconShape".to_string(), "round".to_string());
-    block.properties
+    block
+        .properties
         .insert("Inputs".to_string(), "|++".to_string());
 
     let def = resolve_definition(&block);
@@ -522,14 +533,8 @@ fn inport_shadow_resolves_to_same_definition_as_inport() {
     use rustylink::simulink_libraries::resolve_definition;
     use rustylink::simulink_libraries::types::SimulinkShape;
 
-    let block = rustylink::editor::operations::create_default_block(
-        "InportShadow",
-        "shadow",
-        0,
-        0,
-        0,
-        1,
-    );
+    let block =
+        rustylink::editor::operations::create_default_block("InportShadow", "shadow", 0, 0, 0, 1);
     let def = resolve_definition(&block);
     assert_eq!(def.block_type, "InportShadow");
     // Same shape as Inport
