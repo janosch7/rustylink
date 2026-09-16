@@ -1980,8 +1980,8 @@ pub(crate) fn update_internal(
                     if let Some(split) = best_split {
                         wrap_text = format!(
                             "{}\n{}",
-                            &label_text[..split].trim_end(),
-                            &label_text[split + 1..].trim_start()
+                            label_text[..split].trim_end(),
+                            label_text[split + 1..].trim_start()
                         );
                         vec![label_text.clone(), wrap_text.clone()]
                     } else {

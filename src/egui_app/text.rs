@@ -225,7 +225,7 @@ fn parse_annotation_html(html: &str) -> Result<AnnotationRichText, ()> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
-                let name = tag_name(e.name().as_ref())?;
+                let name = tag_name(e.name().as_ref());
                 if skip_depth > 0 {
                     skip_depth += 1;
                     continue;
@@ -247,7 +247,7 @@ fn parse_annotation_html(html: &str) -> Result<AnnotationRichText, ()> {
                 }
             }
             Ok(Event::Empty(e)) => {
-                let name = tag_name(e.name().as_ref())?;
+                let name = tag_name(e.name().as_ref());
                 if skip_depth > 0 {
                     continue;
                 }
@@ -270,7 +270,7 @@ fn parse_annotation_html(html: &str) -> Result<AnnotationRichText, ()> {
                 }
             }
             Ok(Event::End(e)) => {
-                let name = tag_name(e.name().as_ref())?;
+                let name = tag_name(e.name().as_ref());
                 if skip_depth > 0 {
                     skip_depth = skip_depth.saturating_sub(1);
                     continue;
@@ -292,18 +292,15 @@ fn parse_annotation_html(html: &str) -> Result<AnnotationRichText, ()> {
                 if skip_depth > 0 {
                     continue;
                 }
-                // Decode text as UTF-8 and unescape XML entities
-                let raw = std::str::from_utf8(e.as_ref()).map_err(|_| ())?;
-                let unesc = unescape(raw).map_err(|_| ())?;
+                // Unescape XML entities in the text content
+                let unesc = unescape(e.as_ref()).map_err(|_| ())?;
                 push_text_segment(unesc, &mut current_line, &style_stack);
             }
             Ok(Event::CData(e)) => {
                 if skip_depth > 0 {
                     continue;
                 }
-                let text = e.into_inner();
-                let owned = String::from_utf8(text.to_vec()).map_err(|_| ())?;
-                push_text_segment(Cow::Owned(owned), &mut current_line, &style_stack);
+                push_text_segment(e.into_inner(), &mut current_line, &style_stack);
             }
             Ok(Event::Comment(_))
             | Ok(Event::Decl(_))
@@ -381,9 +378,7 @@ fn collect_attributes(tag: &BytesStart<'_>) -> Result<Vec<(String, String)>, ()>
     let mut attrs: Vec<(String, String)> = Vec::new();
     for attr in tag.attributes() {
         let attr = attr.map_err(|_| ())?;
-        let key = std::str::from_utf8(attr.key.as_ref())
-            .map_err(|_| ())?
-            .to_ascii_lowercase();
+        let key = attr.key.as_ref().to_ascii_lowercase();
         let value = attr
             .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .map_err(|_| ())?
@@ -393,10 +388,8 @@ fn collect_attributes(tag: &BytesStart<'_>) -> Result<Vec<(String, String)>, ()>
     Ok(attrs)
 }
 
-fn tag_name(bytes: &[u8]) -> Result<String, ()> {
-    Ok(std::str::from_utf8(bytes)
-        .map_err(|_| ())?
-        .to_ascii_lowercase())
+fn tag_name(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, Default)]
