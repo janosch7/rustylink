@@ -13,14 +13,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # install Rust (ubuntu-latest ships rustup)
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
 
       # optionally cache cargo registry and git index
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
@@ -55,7 +55,7 @@ jobs:
       # cache the tarpaulin binary to avoid reinstalling every run
       - name: Cache tarpaulin
         id: cache-tarpaulin
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-tarpaulin
           key: ${{ runner.os }}-tarpaulin-${{ hashFiles('**/Cargo.lock') }}
@@ -71,7 +71,7 @@ jobs:
         run: cargo tarpaulin --all-features --out Xml
 
       # archive the report as an artifact so it can be inspected
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: tarpaulin-report.xml
