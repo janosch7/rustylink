@@ -99,7 +99,8 @@ fn state_parameter_owner(ctx: &RenderContext<'_>) -> Option<String> {
     )
 }
 
-pub(super) fn owner_caption(owner_path: Option<&str>, parameter: Option<&str>) -> Option<String> {
+#[doc(hidden)]
+pub fn owner_caption(owner_path: Option<&str>, parameter: Option<&str>) -> Option<String> {
     let path = owner_path.map(str::trim).filter(|path| !path.is_empty())?;
     let owner = path.rsplit('/').next().unwrap_or(path).trim();
     match parameter.map(str::trim) {

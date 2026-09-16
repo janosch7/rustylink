@@ -284,7 +284,8 @@ fn annotate_matlab_function_names_in(
 ///     myFunc(u)
 /// ```
 /// yields `myFunc`.
-fn script_function_name(script: &str) -> Option<String> {
+#[doc(hidden)]
+pub fn script_function_name(script: &str) -> Option<String> {
     let mut lines = script.lines().map(strip_comment).map(str::trim);
     // Find the first line of the function declaration.  The declaration can sit
     // anywhere in the script – behind a comment header, a blank line, or a
@@ -336,104 +337,5 @@ fn strip_comment(line: &str) -> &str {
     match line.find('%') {
         Some(at) => &line[..at],
         None => line,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::script_function_name;
-
-    #[test]
-    fn single_line_function_header() {
-        assert_eq!(
-            script_function_name("function y = fcn(u)\ny = u;"),
-            Some("fcn".to_string())
-        );
-    }
-
-    #[test]
-    fn multi_output_function_header() {
-        assert_eq!(
-            script_function_name("function [x,y] = test(u,v)\ny = u;\nx=v;"),
-            Some("test".to_string())
-        );
-    }
-
-    #[test]
-    fn function_header_with_continuation_line() {
-        let script = "function [out] = ...\n    myFunc(u)\ny = u;";
-        assert_eq!(script_function_name(script), Some("myFunc".to_string()));
-    }
-
-    #[test]
-    fn function_header_with_multiple_continuation_lines() {
-        let script = "function ...\n  result ...\n  = ...\n  compute(x)\ny = x;";
-        assert_eq!(script_function_name(script), Some("compute".to_string()));
-    }
-
-    #[test]
-    fn function_header_no_outputs_with_continuation() {
-        let script = "function ...\n  doit(u)\ny = u;";
-        assert_eq!(script_function_name(script), Some("doit".to_string()));
-    }
-
-    #[test]
-    fn function_header_after_comment_lines() {
-        let script = "% Copyright\n%% cell marker\n\nfunction y = later(u)\ny = u;";
-        assert_eq!(script_function_name(script), Some("later".to_string()));
-    }
-
-    #[test]
-    fn commented_out_header_is_ignored() {
-        let script = "% function y = wrong(u)\nfunction y = right(u)\ny = u;";
-        assert_eq!(script_function_name(script), Some("right".to_string()));
-    }
-
-    #[test]
-    fn header_without_outputs() {
-        assert_eq!(
-            script_function_name("function noOut(u)\ndisp(u);"),
-            Some("noOut".to_string())
-        );
-    }
-
-    #[test]
-    fn identifier_starting_with_function_is_not_a_header() {
-        assert_eq!(script_function_name("functions = 3;\ny = functions;"), None);
-    }
-
-    #[test]
-    fn no_function_header_returns_none() {
-        assert_eq!(script_function_name("y = u;"), None);
-    }
-
-    #[test]
-    fn function_header_with_continuation_in_arguments() {
-        let script = concat!(
-            "function [q_des, dq_des, ddq_des, running_1__ready_0, q_ref_out] = ...\n",
-            "    JojoJointInterpolator(dq_ref, ddq_ref, eigenvalues, dt, ...\n",
-            "    consider_position_constraints, consider_velocity_constraints, ...\n",
-            "    q_lowerlimit, q_upperlimit, dq_lowerlimit, dq_upperlimit, follow_q_meas, ...\n",
-            "    q_target, update_q_target, shortcut_update, reset, dq_measured, q_measured)\n",
-            "y = u;"
-        );
-        assert_eq!(
-            script_function_name(script),
-            Some("JojoJointInterpolator".to_string())
-        );
-    }
-
-    #[test]
-    fn function_header_with_long_name_on_continuation_line() {
-        let script = concat!(
-            "function [follow_q_meas, control_mode] = ...\n",
-            "    Control_Mode_Preprocessor(desired_control_mode, collision_1OK_0_danger, new_collision_trigger, internal_simulation_enabled, is_real_experiment, Robot_DEF) ...\n",
-            "%% body\n",
-            "follow_q_meas = 0;"
-        );
-        assert_eq!(
-            script_function_name(script),
-            Some("Control_Mode_Preprocessor".to_string())
-        );
     }
 }

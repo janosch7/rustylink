@@ -67,7 +67,8 @@ fn dashboard_discrete_value_from_pointer(
 }
 
 #[cfg(feature = "dashboard")]
-pub(crate) fn dashboard_scalar_value_from_pointer(
+#[doc(hidden)]
+pub fn dashboard_scalar_value_from_pointer(
     block: &Block,
     rect: Rect,
     pointer: Pos2,

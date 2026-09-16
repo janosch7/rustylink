@@ -1,22 +1,22 @@
 //! Behaviour tests for the viewer canvas: live values, line styling and dashboards.
 
-use super::dashboard_debug::{
-    dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,
-};
-use super::line_style::{
-    line_has_testpoint, line_stroke_width, line_testpoint_marker_position, resolved_line_label,
-};
-use super::live_values::{
-    manual_switch_setting_from_live_value, should_render_live_text, should_use_mask_display,
-};
-use crate::connection_targets::{
+use eframe::egui::{Pos2, Rect};
+use rustylink::connection_targets::{
     ConnectionTarget, ConnectionTargetOrigin, ConnectionTargetResolve, ConnectionTargetResolver,
 };
-use crate::egui_app::SubsystemApp;
-use crate::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
-use crate::egui_app::shared_canvas_text_font_px;
-use crate::model::{DashboardBinding, DashboardTargetPath, EndpointRef, Line, Port, System};
-use eframe::egui::{Pos2, Rect};
+use rustylink::egui_app::SubsystemApp;
+use rustylink::egui_app::dashboard_widgets::dashboard_scalar_value_from_pointer;
+use rustylink::egui_app::ui::dashboard_debug::{
+    dashboard_input_control_kind, dashboard_live_value, dashboard_widget_value,
+};
+use rustylink::egui_app::ui::line_style::{
+    line_has_testpoint, line_stroke_width, line_testpoint_marker_position, resolved_line_label,
+};
+use rustylink::egui_app::ui::live_values::{
+    manual_switch_setting_from_live_value, should_render_live_text, should_use_mask_display,
+};
+use rustylink::egui_app::ui::view_transform::shared_canvas_text_font_px;
+use rustylink::model::{DashboardBinding, DashboardTargetPath, EndpointRef, Line, Port, System};
 use std::collections::BTreeMap;
 
 #[test]
@@ -68,9 +68,9 @@ fn dashboard_param_source_uses_selected_vector_element_for_live_value() {
     });
     app.live_values.insert(
         "uuid-slider-2".to_string(),
-        crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+        rustylink::live_values::LiveValueEntry::new(rustylink::live_values::LiveValue::new(
             vec![3],
-            crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            rustylink::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
         )),
     );
 
@@ -103,16 +103,16 @@ fn dashboard_widget_value_prefers_selector_aware_binding_over_block_live_value()
     });
     app.live_values.insert(
         "uuid-slider-3".to_string(),
-        crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+        rustylink::live_values::LiveValueEntry::new(rustylink::live_values::LiveValue::new(
             vec![3],
-            crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            rustylink::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
         )),
     );
     app.live_block_values.insert(
         app.live_value_key_for_block(&block),
-        crate::live_values::LiveValueEntry::new(crate::live_values::LiveValue::new(
+        rustylink::live_values::LiveValueEntry::new(rustylink::live_values::LiveValue::new(
             vec![3],
-            crate::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
+            rustylink::live_values::LiveValueList::Float64(vec![10.0, 20.0, 30.0]),
         )),
     );
 
@@ -121,7 +121,7 @@ fn dashboard_widget_value_prefers_selector_aware_binding_over_block_live_value()
 
 #[test]
 fn dashboard_discrete_controls_are_editable_in_live_mode() {
-    let combo = crate::model::Block {
+    let combo = rustylink::model::Block {
         block_type: "ComboBox".to_string(),
         name: "Combo".to_string(),
         sid: None,
@@ -129,10 +129,10 @@ fn dashboard_discrete_controls_are_editable_in_live_mode() {
         position: None,
         zorder: None,
         commented: false,
-        name_location: crate::model::NameLocation::default(),
+        name_location: rustylink::model::NameLocation::default(),
         is_matlab_function: false,
         value: None,
-        value_kind: crate::model::ValueKind::default(),
+        value_kind: rustylink::model::ValueKind::default(),
         value_rows: None,
         value_cols: None,
         properties: indexmap::IndexMap::new(),
@@ -173,7 +173,7 @@ fn dashboard_discrete_controls_are_editable_in_live_mode() {
 
 #[test]
 fn rotary_switch_pointer_mapping_clamps_gap_and_returns_indices() {
-    let mut block = crate::model::Block {
+    let mut block = rustylink::model::Block {
         block_type: "RotarySwitchBlock".to_string(),
         name: "Rotary".to_string(),
         sid: None,
@@ -181,10 +181,10 @@ fn rotary_switch_pointer_mapping_clamps_gap_and_returns_indices() {
         position: None,
         zorder: None,
         commented: false,
-        name_location: crate::model::NameLocation::default(),
+        name_location: rustylink::model::NameLocation::default(),
         is_matlab_function: false,
         value: None,
-        value_kind: crate::model::ValueKind::default(),
+        value_kind: rustylink::model::ValueKind::default(),
         value_rows: None,
         value_cols: None,
         properties: indexmap::IndexMap::new(),
@@ -437,7 +437,7 @@ fn line_testpoint_marker_uses_first_visible_segment() {
 #[test]
 fn mask_without_display_text_falls_back_to_normal_rendering() {
     let mut block = minimal_block("Masked", "3");
-    block.mask = Some(crate::model::Mask::default());
+    block.mask = Some(rustylink::model::Mask::default());
 
     assert!(!should_use_mask_display(&block));
 
@@ -457,8 +457,8 @@ fn aux_label_font_scaling_uses_name_controls() {
     assert_eq!(scaled_down, 8.0);
 }
 
-fn minimal_block(name: &str, sid: &str) -> crate::model::Block {
-    crate::model::Block {
+fn minimal_block(name: &str, sid: &str) -> rustylink::model::Block {
+    rustylink::model::Block {
         block_type: "Constant".to_string(),
         name: name.to_string(),
         sid: Some(sid.to_string()),
@@ -466,10 +466,10 @@ fn minimal_block(name: &str, sid: &str) -> crate::model::Block {
         position: None,
         zorder: None,
         commented: false,
-        name_location: crate::model::NameLocation::default(),
+        name_location: rustylink::model::NameLocation::default(),
         is_matlab_function: false,
         value: None,
-        value_kind: crate::model::ValueKind::default(),
+        value_kind: rustylink::model::ValueKind::default(),
         value_rows: None,
         value_cols: None,
         properties: indexmap::IndexMap::new(),

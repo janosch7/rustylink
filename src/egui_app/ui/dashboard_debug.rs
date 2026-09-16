@@ -150,7 +150,8 @@ pub(super) fn is_dashboard_debug_property(name: &str) -> bool {
 }
 
 #[cfg(feature = "dashboard")]
-pub(super) fn dashboard_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
+#[doc(hidden)]
+pub fn dashboard_live_value(app: &SubsystemApp, block: &crate::model::Block) -> Option<f64> {
     let binding = block.dashboard_binding.as_ref()?;
     let entry = app.live_values.get(binding.uuid())?;
     let selector_index = match binding {
@@ -167,7 +168,8 @@ pub(super) fn dashboard_live_value(app: &SubsystemApp, block: &crate::model::Blo
 }
 
 #[cfg(feature = "dashboard")]
-pub(super) fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static str> {
+#[doc(hidden)]
+pub fn dashboard_input_control_kind(block: &crate::model::Block) -> Option<&'static str> {
     if !matches!(
         block.dashboard_binding,
         Some(crate::model::DashboardBinding::ParamSource { .. })
@@ -182,7 +184,8 @@ pub(super) fn dashboard_input_control_kind(block: &crate::model::Block) -> Optio
 }
 
 #[cfg(feature = "dashboard")]
-pub(super) fn dashboard_widget_value(app: &SubsystemApp, block: &crate::model::Block) -> f64 {
+#[doc(hidden)]
+pub fn dashboard_widget_value(app: &SubsystemApp, block: &crate::model::Block) -> f64 {
     let dashboard_value = dashboard_live_value(app, block);
     let block_value = app
         .live_block_values

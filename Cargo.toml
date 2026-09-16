@@ -173,3 +173,18 @@ path = "tests/block.rs"
 [[test]]
 name = "connection_targets"
 path = "tests/connection_targets.rs"
+
+[[test]]
+name = "simulink_renderers"
+path = "tests/simulink_renderers.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "egui_app_colors"
+path = "tests/egui_app_colors.rs"
+required-features = ["egui"]
+
+[[test]]
+name = "dashboard_ui"
+path = "tests/dashboard_ui.rs"
+required-features = ["dashboard"]

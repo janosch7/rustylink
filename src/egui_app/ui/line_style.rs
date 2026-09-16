@@ -3,11 +3,13 @@
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, Stroke, Vec2};
 use std::collections::BTreeSet;
 
-pub(super) fn line_has_testpoint(targets: &[crate::connection_targets::ConnectionTarget]) -> bool {
+#[doc(hidden)]
+pub fn line_has_testpoint(targets: &[crate::connection_targets::ConnectionTarget]) -> bool {
     targets.iter().any(|target| target.testpoint)
 }
 
-pub(super) fn resolved_line_label(
+#[doc(hidden)]
+pub fn resolved_line_label(
     line: &crate::model::Line,
     targets: &[crate::connection_targets::ConnectionTarget],
 ) -> Option<String> {
@@ -60,7 +62,8 @@ pub(super) fn is_mux_line(targets: &[crate::connection_targets::ConnectionTarget
     })
 }
 
-pub(super) fn line_stroke_width(
+#[doc(hidden)]
+pub fn line_stroke_width(
     targets: &[crate::connection_targets::ConnectionTarget],
     is_selected: bool,
 ) -> f32 {
@@ -72,7 +75,8 @@ pub(super) fn line_stroke_width(
     }
 }
 
-pub(super) fn line_testpoint_marker_position(points: &[Pos2]) -> Option<Pos2> {
+#[doc(hidden)]
+pub fn line_testpoint_marker_position(points: &[Pos2]) -> Option<Pos2> {
     let start = *points.first()?;
     for next in points.iter().skip(1) {
         let dx = next.x - start.x;

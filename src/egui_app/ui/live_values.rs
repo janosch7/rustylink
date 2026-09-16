@@ -62,11 +62,13 @@ pub(super) fn uses_live_value_text(block_type: &str) -> bool {
     crate::simulink_libraries::traits::shows_value_text(block_type)
 }
 
-pub(super) fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
+#[doc(hidden)]
+pub fn should_render_live_text(live_mode_enabled: bool, block_type: &str) -> bool {
     live_mode_enabled && uses_live_value_text(block_type)
 }
 
-pub(super) fn should_use_mask_display(block: &crate::model::Block) -> bool {
+#[doc(hidden)]
+pub fn should_use_mask_display(block: &crate::model::Block) -> bool {
     block.mask.is_some()
         && block
             .mask_display_text
@@ -74,7 +76,8 @@ pub(super) fn should_use_mask_display(block: &crate::model::Block) -> bool {
             .is_some_and(|text| !text.trim().is_empty())
 }
 
-pub(crate) fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
+#[doc(hidden)]
+pub fn manual_switch_setting_from_live_value(value: f64) -> &'static str {
     if value >= 0.5 { "1" } else { "0" }
 }
 

@@ -8,8 +8,6 @@ pub mod line_coloring;
 pub mod line_style;
 pub mod live_values;
 pub mod signal_routing;
-#[cfg(all(test, feature = "dashboard"))]
-mod tests;
 pub mod tooltips;
 pub mod types;
 pub mod update;

@@ -257,7 +257,8 @@ pub fn static_transfer_fcn(
 
 /// Format a MATLAB coefficient row-vector (e.g. `"[1 2 1]"`, `"1,2,1"`) as a
 /// polynomial string in `var`, highest power first (e.g. `"s^2+2s+1"`).
-pub(super) fn format_polynomial(raw: &str, var: char) -> String {
+#[doc(hidden)]
+pub fn format_polynomial(raw: &str, var: char) -> String {
     let coeffs: Vec<f64> = raw
         .trim()
         .trim_start_matches('[')
@@ -305,7 +306,8 @@ pub(super) fn format_polynomial(raw: &str, var: char) -> String {
 }
 
 /// Format a non-negative coefficient magnitude without a trailing `.0`.
-pub(super) fn format_coeff(mag: f64) -> String {
+#[doc(hidden)]
+pub fn format_coeff(mag: f64) -> String {
     if (mag.fract()).abs() < 1e-9 {
         format!("{}", mag.round() as i64)
     } else {
