@@ -257,7 +257,12 @@ pub fn draw_plot_icon(
             .collect();
         match kind {
             "p" | "a" => {
-                let pts: Vec<Pos2> = nums.chunks_exact(2).map(|c| at(c[0], c[1])).collect();
+                let pts: Vec<Pos2> = nums
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| at(c[0], c[1]))
+                    .collect();
                 if pts.len() >= 2 {
                     let s = if kind == "a" { axis_stroke } else { stroke };
                     painter.add(egui::Shape::line(pts, s));
@@ -324,7 +329,12 @@ pub fn draw_plot_icon(
                     nums[2].round().clamp(0.0, 255.0) as u8,
                     nums[3].round().clamp(0.0, 255.0) as u8,
                 );
-                let pts: Vec<Pos2> = nums[4..].chunks_exact(2).map(|c| at(c[0], c[1])).collect();
+                let pts: Vec<Pos2> = nums[4..]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| at(c[0], c[1]))
+                    .collect();
                 if pts.len() >= 3 {
                     painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
                 }
@@ -341,7 +351,12 @@ pub fn draw_plot_icon(
                     nums[2].round().clamp(0.0, 255.0) as u8,
                     nums[3].round().clamp(0.0, 255.0) as u8,
                 );
-                let pts: Vec<Pos2> = nums[4..].chunks_exact(2).map(|c| at(c[0], c[1])).collect();
+                let pts: Vec<Pos2> = nums[4..]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| at(c[0], c[1]))
+                    .collect();
                 if pts.len() >= 3 {
                     painter.add(egui::Shape::mesh(concave_polygon_mesh(&pts, fill)));
                 }
