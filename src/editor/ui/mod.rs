@@ -419,15 +419,19 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
         show_zoom_controls(
             ui.ctx(),
             state.app.egui_id("editor_zoom_controls"),
-            Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
-            &mut state.app.zoom,
-            &mut state.app.pan,
-            base_scale,
-            bb,
-            Pos2::new(avail.left() + margin, avail.top() + margin),
-            avail.center(),
-            &mut state.app.reset_view,
-            &mut state.app.monochrome,
+            crate::egui_app::ZoomGeometry {
+                fixed_pos: Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
+                base_scale,
+                world_bounds: bb,
+                origin: Pos2::new(avail.left() + margin, avail.top() + margin),
+                center: avail.center(),
+            },
+            &mut crate::egui_app::ZoomViewState {
+                zoom: &mut state.app.zoom,
+                pan: &mut state.app.pan,
+                reset_requested: &mut state.app.reset_view,
+                monochrome: &mut state.app.monochrome,
+            },
         );
 
         // Build SID maps
@@ -483,10 +487,12 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
                 {
                     if *block_index == block_idx {
                         let new_rect = compute_resized_rect(
-                            *original_l as f32,
-                            *original_t as f32,
-                            *original_r as f32,
-                            *original_b as f32,
+                            (
+                                *original_l as f32,
+                                *original_t as f32,
+                                *original_r as f32,
+                                *original_b as f32,
+                            ),
                             *handle,
                             *dx,
                             *dy,
@@ -695,10 +701,12 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             } = state.drag_mode
             {
                 let (nl, nt, nr, nb) = compute_resized_rect(
-                    original_l as f32,
-                    original_t as f32,
-                    original_r as f32,
-                    original_b as f32,
+                    (
+                        original_l as f32,
+                        original_t as f32,
+                        original_r as f32,
+                        original_b as f32,
+                    ),
                     handle,
                     dx,
                     dy,
@@ -915,15 +923,17 @@ fn editor_update_internal(state: &mut EditorState, ui: &mut egui::Ui) {
             for br in &line.branches {
                 draw_branch_rec(
                     ui.painter(),
-                    &to_screen,
-                    &sid_map,
-                    &port_counts,
+                    &canvas::BranchLookup {
+                        to_screen: &to_screen,
+                        sid_map: &sid_map,
+                        port_counts: &port_counts,
+                        sid_mirrored: &sid_mirrored,
+                        sid_port_overrides: &sid_port_overrides,
+                    },
                     *offsets_pts.last().unwrap_or(&cur),
                     br,
                     stroke,
                     color,
-                    &sid_mirrored,
-                    &sid_port_overrides,
                 );
             }
 

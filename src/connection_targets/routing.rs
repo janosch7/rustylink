@@ -317,11 +317,9 @@ impl ConnectionTargetResolver {
         targets
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn upstream_propagated_targets(
         &self,
         system: &System,
-        _system_path: &[String],
         block: &Block,
         dst: &EndpointRef,
         parent_ctx: Option<&ParentSubsystemContext>,

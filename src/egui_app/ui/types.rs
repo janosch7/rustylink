@@ -9,18 +9,17 @@ pub enum ClickAction {
 }
 
 #[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum UpdateResponse {
     None,
     Block {
         action: ClickAction,
-        block: Block,
+        block: Box<Block>,
         handled: bool,
     },
     Signal {
         action: ClickAction,
         line_idx: usize,
-        line: Line,
+        line: Box<Line>,
         handled: bool,
     },
 }

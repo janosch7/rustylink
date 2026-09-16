@@ -970,10 +970,9 @@ pub struct SlxArchiveEntry {
 
 /// Content of an SLX archive entry.
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum SlxContent {
     /// Raw bytes for files that are preserved verbatim.
     Raw(Vec<u8>),
     /// A parsed system XML file that will be regenerated from the [`System`] model.
-    SystemXml(System),
+    SystemXml(Box<System>),
 }

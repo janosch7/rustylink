@@ -13,7 +13,6 @@ pub fn shared_canvas_text_font_px(font_scale: f32, font_factor: f32) -> f32 {
 
 /// Immutable snapshot of the viewer's coordinate transform for a single frame.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub struct ViewTransform {
     /// Bounding-box in model space that is being fitted into the viewport.
     pub bb: Rect,
@@ -29,7 +28,6 @@ pub struct ViewTransform {
     pub pan: Vec2,
 }
 
-#[allow(dead_code)]
 impl ViewTransform {
     /// Compute a new `ViewTransform` from the given content bounds and viewport.
     pub fn new(bb: Rect, avail: Rect, margin: f32, zoom: f32, pan: Vec2) -> Self {
@@ -240,7 +238,3 @@ pub fn compute_resized_rect(
         nb.round() as i32,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------

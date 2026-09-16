@@ -103,19 +103,17 @@ pub(super) fn draw_resize_handles(
 }
 
 /// Compute the new rect after applying a resize delta from a specific handle.
-/// Returns (new_l, new_t, new_r, new_b) with minimum size enforcement and grid snapping.
-#[allow(clippy::too_many_arguments)]
+/// `orig` is the original `(l, t, r, b)`; returns `(new_l, new_t, new_r, new_b)`
+/// with minimum size enforcement and grid snapping.
 pub(super) fn compute_resized_rect(
-    l: f32,
-    t: f32,
-    r: f32,
-    b: f32,
+    orig: (f32, f32, f32, f32),
     handle: u8,
     dx: f32,
     dy: f32,
     grid_size: i32,
     snap_to_grid: bool,
 ) -> (f32, f32, f32, f32) {
+    let (l, t, r, b) = orig;
     let min_size = 10.0;
     let snap = |v: f32| -> f32 {
         if snap_to_grid && grid_size > 0 {

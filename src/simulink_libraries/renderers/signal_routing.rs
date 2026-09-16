@@ -22,12 +22,14 @@ pub fn static_switch(
     crate::egui_app::render::render_switch(
         painter,
         block,
-        rect,
-        ctx.font_scale,
         criteria,
         threshold,
-        ctx.port_y,
-        ctx.port_label_widths,
+        &crate::egui_app::render::SwitchRenderCtx {
+            rect,
+            font_scale: ctx.font_scale,
+            coords: ctx.port_y,
+            port_label_widths: ctx.port_label_widths,
+        },
     );
     true
 }
@@ -198,12 +200,14 @@ pub fn live_switch(
     crate::egui_app::render::render_switch_with_selection(
         &painter,
         block,
-        rect,
-        ctx.font_scale,
         criteria,
         threshold,
-        ctx.port_y,
-        ctx.port_label_widths,
+        &crate::egui_app::render::SwitchRenderCtx {
+            rect,
+            font_scale: ctx.font_scale,
+            coords: ctx.port_y,
+            port_label_widths: ctx.port_label_widths,
+        },
         criteria_met,
     );
     true
@@ -227,11 +231,13 @@ pub fn live_multiport_switch(
     crate::egui_app::render::render_multiport_switch_with_selection(
         &painter,
         block,
-        rect,
-        ctx.font_scale,
         data_inputs,
-        ctx.port_y,
-        ctx.port_label_widths,
+        &crate::egui_app::render::SwitchRenderCtx {
+            rect,
+            font_scale: ctx.font_scale,
+            coords: ctx.port_y,
+            port_label_widths: ctx.port_label_widths,
+        },
         selected,
     );
     true
@@ -320,11 +326,13 @@ pub fn static_multiport_switch(
     crate::egui_app::render::render_multiport_switch(
         painter,
         block,
-        rect,
-        ctx.font_scale,
         data_inputs,
-        ctx.port_y,
-        ctx.port_label_widths,
+        &crate::egui_app::render::SwitchRenderCtx {
+            rect,
+            font_scale: ctx.font_scale,
+            coords: ctx.port_y,
+            port_label_widths: ctx.port_label_widths,
+        },
     );
     true
 }

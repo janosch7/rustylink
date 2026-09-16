@@ -246,7 +246,6 @@ impl ConnectionTargetResolver {
         );
         self.propagate_line_metadata_upward(
             system,
-            system_path,
             &block_lookup,
             parent_ctx,
             &self.child_summaries,
@@ -302,7 +301,6 @@ impl ConnectionTargetResolver {
         );
         self.propagate_line_metadata_upward(
             system,
-            system_path,
             &block_lookup,
             parent_ctx,
             &self.child_summaries,
@@ -540,7 +538,6 @@ impl ConnectionTargetResolver {
     fn propagate_line_metadata_upward(
         &self,
         system: &System,
-        system_path: &[String],
         block_lookup: &HashMap<&str, &Block>,
         parent_ctx: Option<&ParentSubsystemContext>,
         child_summaries: &HashMap<String, ChildSubsystemSummary>,
@@ -560,7 +557,6 @@ impl ConnectionTargetResolver {
                     };
                     propagated.extend(self.upstream_propagated_targets(
                         system,
-                        system_path,
                         block,
                         dst,
                         parent_ctx,

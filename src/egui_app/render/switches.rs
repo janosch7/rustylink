@@ -14,6 +14,19 @@ pub struct ComputedPortYCoordinates {
     pub outputs: std::collections::HashMap<u32, f32>,
 }
 
+/// Shared drawing context for the switch-family renderers below.
+#[derive(Clone, Copy)]
+pub struct SwitchRenderCtx<'a> {
+    /// Screen-space block rect.
+    pub rect: &'a Rect,
+    /// Font scaling factor for in-icon text.
+    pub font_scale: f32,
+    /// Computed port Y positions, when available.
+    pub coords: Option<&'a ComputedPortYCoordinates>,
+    /// Max measured widths of port labels drawn inside the block.
+    pub port_label_widths: Option<PortLabelMaxWidths>,
+}
+
 /// Custom renderer for a ManualSwitch block.
 ///
 /// Draws a simple switch symbol with two input poles (left) and one output pole (right).
@@ -241,38 +254,28 @@ pub fn render_manual_switch(
 pub fn render_multiport_switch(
     painter: &egui::Painter,
     block: &Block,
-    rect: &Rect,
-    font_scale: f32,
     data_inputs: u32,
-    coords: Option<&ComputedPortYCoordinates>,
-    port_label_widths: Option<PortLabelMaxWidths>,
+    ctx: &SwitchRenderCtx,
 ) {
-    render_multiport_switch_with_selection(
-        painter,
-        block,
-        rect,
-        font_scale,
-        data_inputs,
-        coords,
-        port_label_widths,
-        0,
-    )
+    render_multiport_switch_with_selection(painter, block, data_inputs, ctx, 0)
 }
 
 /// Like [`render_multiport_switch`] but draws the lever to the `selected`-th
 /// data contact (0-based) instead of always the first.  Used by the live
 /// renderer to reflect the control signal value.
-#[allow(clippy::too_many_arguments)]
 pub fn render_multiport_switch_with_selection(
     painter: &egui::Painter,
     block: &Block,
-    rect: &Rect,
-    font_scale: f32,
     data_inputs: u32,
-    coords: Option<&ComputedPortYCoordinates>,
-    port_label_widths: Option<PortLabelMaxWidths>,
+    ctx: &SwitchRenderCtx,
     selected: u32,
 ) {
+    let SwitchRenderCtx {
+        rect,
+        font_scale,
+        coords,
+        port_label_widths,
+    } = *ctx;
     let mut max_in: u32 = 0;
     let mut max_out: u32 = 0;
     for p in &block.ports {
@@ -433,45 +436,33 @@ pub fn render_multiport_switch_with_selection(
 /// input, and output port 1 is on the right edge.  The lever connects from
 /// port 1 (top data, default selected) to the output.  All line endpoints
 /// align to the exact Y-positions of the ports.
-#[allow(clippy::too_many_arguments)]
 pub fn render_switch(
     painter: &egui::Painter,
     block: &Block,
-    rect: &Rect,
-    font_scale: f32,
     criteria: &str,
     threshold: &str,
-    coords: Option<&ComputedPortYCoordinates>,
-    port_label_widths: Option<PortLabelMaxWidths>,
+    ctx: &SwitchRenderCtx,
 ) {
-    render_switch_with_selection(
-        painter,
-        block,
-        rect,
-        font_scale,
-        criteria,
-        threshold,
-        coords,
-        port_label_widths,
-        true,
-    )
+    render_switch_with_selection(painter, block, criteria, threshold, ctx, true)
 }
 
 /// Like [`render_switch`] but draws the lever to the top data input (port 1)
 /// when `selected_top` is true, or the bottom data input (port 3) when false.
 /// Used by the live renderer to reflect the control signal value.
-#[allow(clippy::too_many_arguments)]
 pub fn render_switch_with_selection(
     painter: &egui::Painter,
     block: &Block,
-    rect: &Rect,
-    font_scale: f32,
     criteria: &str,
     threshold: &str,
-    coords: Option<&ComputedPortYCoordinates>,
-    port_label_widths: Option<PortLabelMaxWidths>,
+    ctx: &SwitchRenderCtx,
     selected_top: bool,
 ) {
+    let SwitchRenderCtx {
+        rect,
+        font_scale,
+        coords,
+        port_label_widths,
+    } = *ctx;
     let mut max_in: u32 = 0;
     let mut max_out: u32 = 0;
     for p in &block.ports {

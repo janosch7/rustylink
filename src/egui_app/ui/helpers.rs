@@ -4,7 +4,6 @@ use super::types::{ClickAction, UpdateResponse};
 /// space and trimming leading/trailing whitespace.  This is used by various
 /// UI components to avoid rendering stray newlines/tabs that may come from the
 /// parsed Simulink model.
-#[allow(dead_code)]
 pub fn clean_display_string(s: &str) -> String {
     crate::parser::helpers::clean_whitespace(s)
 }
@@ -14,7 +13,6 @@ pub fn clean_display_string(s: &str) -> String {
 /// Applies [`clean_display_string`] to both the block name and type and then
 /// formats them as "name (type)".  Having a dedicated function makes it easy to
 /// test.
-#[allow(dead_code)]
 pub fn block_dialog_title(block: &crate::model::Block) -> String {
     format!(
         "{} ({})",

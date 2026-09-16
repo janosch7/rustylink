@@ -70,7 +70,7 @@ pub fn apply_update_response(app: &mut SubsystemApp, response: &UpdateResponse) 
             // itself (see `show_block_window`) rather than in a chart popup.
             app.block_view = Some(BlockDialog {
                 title: title_cleaned.clone(),
-                block: Arc::new(block.clone()),
+                block: Arc::new((**block).clone()),
                 open: true,
             });
         }

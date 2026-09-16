@@ -59,19 +59,19 @@ impl ConnectionTarget {
     }
 }
 
-#[allow(clippy::type_complexity)]
+/// Key identifying a [`ConnectionTarget`] for deduplication in
+/// [`dedup_targets`].
+type DedupKey = (
+    String,
+    Option<String>,
+    Option<ConnectionTargetResolve>,
+    Option<u32>,
+    ConnectionTargetOrigin,
+    bool,
+);
+
 pub fn dedup_targets(targets: Vec<ConnectionTarget>) -> Vec<ConnectionTarget> {
-    let mut seen: BTreeMap<
-        (
-            String,
-            Option<String>,
-            Option<ConnectionTargetResolve>,
-            Option<u32>,
-            ConnectionTargetOrigin,
-            bool,
-        ),
-        usize,
-    > = BTreeMap::new();
+    let mut seen: BTreeMap<DedupKey, usize> = BTreeMap::new();
     let mut out: Vec<ConnectionTarget> = Vec::new();
     for target in targets {
         let key = (

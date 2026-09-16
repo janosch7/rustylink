@@ -405,16 +405,16 @@ pub fn register_branch_endpoints(
     }
 }
 
-/// Compute port counts and connected ports from a set of lines.
-#[allow(clippy::type_complexity)]
-pub fn compute_port_info(
-    lines: &[crate::model::Line],
-    blocks: &[crate::model::Block],
-) -> (
+/// Result of [`compute_port_info`]: `(port_counts, connected_ports,
+/// connected_control_ports)`.
+pub type PortInfo = (
     std::collections::HashMap<(String, u8), u32>,
     std::collections::HashSet<(String, u32, bool)>,
     std::collections::HashSet<(String, String)>,
-) {
+);
+
+/// Compute port counts and connected ports from a set of lines.
+pub fn compute_port_info(lines: &[crate::model::Line], blocks: &[crate::model::Block]) -> PortInfo {
     let mut port_counts: std::collections::HashMap<(String, u8), u32> =
         std::collections::HashMap::new();
     let mut connected_ports: std::collections::HashSet<(String, u32, bool)> =

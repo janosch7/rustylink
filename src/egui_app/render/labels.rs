@@ -2,7 +2,6 @@
 
 #![cfg(feature = "egui")]
 
-use crate::block_types::BlockTypeConfig;
 use crate::model::Block;
 use eframe::egui::{self, Color32};
 
@@ -13,56 +12,6 @@ use eframe::egui::{self, Color32};
 pub struct PortLabelMaxWidths {
     pub left: f32,
     pub right: f32,
-}
-
-#[allow(dead_code)]
-pub(crate) fn port_label_display_name(
-    block: &Block,
-    index: u32,
-    is_input: bool,
-    cfg: &BlockTypeConfig,
-) -> String {
-    // Note: The port-label drawing code treats mirroring as swapping the logical direction
-    // when looking up Port properties. Keep this logic in one place so icon sizing and
-    // label rendering stay consistent.
-    let mirrored = block.block_mirror.unwrap_or(false);
-    let logical_is_input = if mirrored { !is_input } else { is_input };
-
-    let fallback_name = || {
-        let names = if logical_is_input {
-            &cfg.input_port_names
-        } else {
-            &cfg.output_port_names
-        };
-        if index > 0 && (index as usize) <= names.len() {
-            names[(index - 1) as usize].clone()
-        } else {
-            format!("{}{}", if is_input { "In" } else { "Out" }, index)
-        }
-    };
-
-    let explicit_port_name = || {
-        block
-            .ports
-            .iter()
-            .filter(|p| {
-                p.port_type == if logical_is_input { "in" } else { "out" }
-                    && p.index.unwrap_or(0) == index
-            })
-            .find_map(|p| {
-                p.properties
-                    .get("Name")
-                    .cloned()
-                    .or_else(|| p.properties.get("name").cloned())
-                    .map(|name| name.trim().to_string())
-                    .filter(|name| !name.is_empty())
-            })
-    };
-
-    subsystem_boundary_port_name(block, index, logical_is_input)
-        .or_else(|| crate::simulink_libraries::render::port_label(block, index, logical_is_input))
-        .or_else(explicit_port_name)
-        .unwrap_or_else(fallback_name)
 }
 
 pub(crate) fn subsystem_boundary_port_name(

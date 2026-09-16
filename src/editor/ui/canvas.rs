@@ -164,21 +164,23 @@ pub(super) fn draw_arrow_with_trim(
     ));
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Shared lookup tables used while drawing a branch tree.
+pub(super) struct BranchLookup<'a> {
+    pub to_screen: &'a dyn Fn(Pos2) -> Pos2,
+    pub sid_map: &'a HashMap<String, Rect>,
+    pub port_counts: &'a HashMap<(String, u8), u32>,
+    pub sid_mirrored: &'a HashMap<String, bool>,
+    pub sid_port_overrides:
+        &'a HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>>,
+}
+
 pub(super) fn draw_branch_rec(
     painter: &egui::Painter,
-    to_screen: &dyn Fn(Pos2) -> Pos2,
-    sid_map: &HashMap<String, Rect>,
-    port_counts: &HashMap<(String, u8), u32>,
+    lk: &BranchLookup,
     start: Pos2,
     br: &crate::model::Branch,
     stroke: Stroke,
     color: Color32,
-    sid_mirrored: &HashMap<String, bool>,
-    sid_port_overrides: &HashMap<
-        String,
-        Vec<crate::simulink_libraries::types::PortPositionOverride>,
-    >,
 ) {
     let mut pts: Vec<Pos2> = vec![start];
     let mut cur = start;
@@ -187,27 +189,28 @@ pub(super) fn draw_branch_rec(
         pts.push(cur);
     }
     for seg in pts.windows(2) {
-        let a = to_screen(seg[0]);
-        let b = to_screen(seg[1]);
+        let a = (lk.to_screen)(seg[0]);
+        let b = (lk.to_screen)(seg[1]);
         painter.line_segment([a, b], stroke);
     }
     if let Some(dstb) = &br.dst
-        && let Some(dr) = sid_map.get(&dstb.sid)
+        && let Some(dr) = lk.sid_map.get(&dstb.sid)
     {
-        let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
-        let dst_overrides = sid_port_overrides
+        let mirrored_dst = lk.sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
+        let dst_overrides = lk
+            .sid_port_overrides
             .get(&dstb.sid)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
         let end_pt = crate::egui_app::ui::signal_routing::endpoint_pos(
             *dr,
             dstb,
-            port_counts,
+            lk.port_counts,
             mirrored_dst,
             dst_overrides,
         );
-        let a = to_screen(*pts.last().unwrap_or(&cur));
-        let b = to_screen(end_pt);
+        let a = (lk.to_screen)(*pts.last().unwrap_or(&cur));
+        let b = (lk.to_screen)(end_pt);
         let is_in_dst = dstb.port_type == "in"
             || crate::egui_app::geometry::is_control_port_type(&dstb.port_type);
         if is_in_dst {
@@ -218,21 +221,10 @@ pub(super) fn draw_branch_rec(
     }
     // Draw a junction dot at the sub-branch point when there are sub-branches.
     if !br.branches.is_empty() {
-        painter.circle_filled(to_screen(*pts.last().unwrap_or(&cur)), 4.0, color);
+        painter.circle_filled((lk.to_screen)(*pts.last().unwrap_or(&cur)), 4.0, color);
     }
     for sub in &br.branches {
-        draw_branch_rec(
-            painter,
-            to_screen,
-            sid_map,
-            port_counts,
-            *pts.last().unwrap_or(&cur),
-            sub,
-            stroke,
-            color,
-            sid_mirrored,
-            sid_port_overrides,
-        );
+        draw_branch_rec(painter, lk, *pts.last().unwrap_or(&cur), sub, stroke, color);
     }
 }
 

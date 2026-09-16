@@ -139,10 +139,10 @@ fn parse_authored_number_list(raw: &str) -> Option<Vec<f32>> {
     (!values.is_empty()).then_some(values)
 }
 
-#[allow(clippy::type_complexity)]
-fn load_source_model(
-    source_path: &Utf8Path,
-) -> anyhow::Result<(System, BTreeMap<u32, Chart>, BTreeMap<String, u32>)> {
+/// Result of [`load_source_model`]: `(root_system, charts, name-to-chart-id)`.
+type LoadedSourceModel = (System, BTreeMap<u32, Chart>, BTreeMap<String, u32>);
+
+fn load_source_model(source_path: &Utf8Path) -> anyhow::Result<LoadedSourceModel> {
     if source_path.extension() == Some("slx") {
         let archive = SlxArchive::from_file(source_path)?;
         let system = archive.assembled_root_system()?;
@@ -259,6 +259,15 @@ pub struct SubsystemEntities<'a> {
     pub lines: &'a [Line],
     pub annotations: Vec<&'a Annotation>,
 }
+
+/// Listener notified whenever the displayed subsystem changes.
+pub type SubsystemChangeListener =
+    Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>;
+
+/// Click handler overriding the default action when clicking a block.
+/// Return `true` from the handler to indicate the click was handled and
+/// suppress the default behavior.
+pub type BlockClickHandler = Arc<dyn Fn(&mut SubsystemApp, &Block) -> bool + Send + Sync>;
 
 /// State for a scope popout window.
 #[cfg(feature = "dashboard")]
@@ -638,13 +647,10 @@ pub struct SubsystemApp {
     /// Empty if no library lookup was performed.
     pub library_search_paths: Vec<Utf8PathBuf>,
     /// Registered listeners to be notified whenever the displayed subsystem changes.
-    #[allow(clippy::type_complexity)]
-    subsystem_change_listeners:
-        Vec<Arc<dyn for<'a> Fn(&'a [String], &'a SubsystemEntities<'a>) + Send + Sync>>, // private to encourage using the API
+    subsystem_change_listeners: Vec<SubsystemChangeListener>, // private to encourage using the API
     /// Optional click handler to override default action when clicking a block.
     /// Return true from the handler to indicate the click was handled and suppress the default behavior.
-    #[allow(clippy::type_complexity)]
-    pub block_click_handler: Option<Arc<dyn Fn(&mut SubsystemApp, &Block) -> bool + Send + Sync>>,
+    pub block_click_handler: Option<BlockClickHandler>,
 
     /// Global default for showing block names.
     ///

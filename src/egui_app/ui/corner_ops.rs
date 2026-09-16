@@ -49,7 +49,6 @@ pub fn remove_corner(points: &mut Vec<Point>, index: usize) -> Option<Point> {
 /// Merge adjacent corner points that are closer than `threshold` model
 /// units apart (Manhattan distance). The second point is absorbed into
 /// the first, preserving downstream positions.
-#[allow(dead_code)]
 pub fn merge_adjacent_corners(points: &mut Vec<Point>, threshold: i32) {
     let mut i = 0;
     while i + 1 < points.len() {
@@ -139,7 +138,6 @@ pub fn auto_adjust_branches_on_block_move(
 ///
 /// This operates on the *relative offsets* (the `Point` values), not
 /// absolute screen positions.
-#[allow(dead_code)]
 pub fn enforce_orthogonal(points: &mut [Point]) {
     for point in points.iter_mut() {
         if point.x != 0 && point.y != 0 {

@@ -60,7 +60,7 @@ impl SlxArchive {
                 let system = block::parse_system_shallow(system_node, base_dir)?;
                 entries.push(SlxArchiveEntry {
                     path,
-                    content: SlxContent::SystemXml(system),
+                    content: SlxContent::SystemXml(Box::new(system)),
                     compressed,
                 });
             } else {
@@ -140,7 +140,7 @@ impl SlxArchive {
         self.entries.iter().find_map(|e| {
             if e.path == path {
                 if let SlxContent::SystemXml(ref sys) = e.content {
-                    Some(sys)
+                    Some(&**sys)
                 } else {
                     None
                 }
@@ -155,7 +155,7 @@ impl SlxArchive {
         self.entries.iter_mut().find_map(|e| {
             if e.path == path {
                 if let SlxContent::SystemXml(ref mut sys) = e.content {
-                    Some(sys)
+                    Some(&mut **sys)
                 } else {
                     None
                 }
@@ -316,7 +316,7 @@ impl SlxArchive {
             .iter()
             .filter_map(|e| {
                 if let SlxContent::SystemXml(ref sys) = e.content {
-                    Some((e.path.as_str(), sys))
+                    Some((e.path.as_str(), &**sys))
                 } else {
                     None
                 }

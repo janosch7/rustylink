@@ -1525,7 +1525,7 @@ pub fn find_snap_port(
             // Check input ports
             for i in 1..=n_in {
                 let (px, py) =
-                    port_model_pos(rect_l, rect_t, rect_r, rect_b, "in", i, n_in, mirrored);
+                    port_model_pos((rect_l, rect_t, rect_r, rect_b), "in", i, n_in, mirrored);
                 let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
                 if dist < snap_radius && best.as_ref().is_none_or(|b| dist < b.5) {
                     best = Some((block_idx, "in".to_string(), i, px, py, dist));
@@ -1535,7 +1535,7 @@ pub fn find_snap_port(
             // Check output ports
             for i in 1..=n_out {
                 let (px, py) =
-                    port_model_pos(rect_l, rect_t, rect_r, rect_b, "out", i, n_out, mirrored);
+                    port_model_pos((rect_l, rect_t, rect_r, rect_b), "out", i, n_out, mirrored);
                 let dist = ((pos_x - px).powi(2) + (pos_y - py).powi(2)).sqrt();
                 if dist < snap_radius && best.as_ref().is_none_or(|b| dist < b.5) {
                     best = Some((block_idx, "out".to_string(), i, px, py, dist));
@@ -1547,18 +1547,15 @@ pub fn find_snap_port(
     best.map(|(idx, pt, pi, px, py, _)| (idx, pt, pi, px, py))
 }
 
-/// Compute port position in model coordinates.
-#[allow(clippy::too_many_arguments)]
+/// Compute port position in model coordinates. `rect` is `(l, t, r, b)`.
 fn port_model_pos(
-    l: f32,
-    t: f32,
-    r: f32,
-    b: f32,
+    rect: (f32, f32, f32, f32),
     port_type: &str,
     port_index: u32,
     num_ports: u32,
     mirrored: bool,
 ) -> (f32, f32) {
+    let (l, t, r, b) = rect;
     let n = num_ports.max(port_index);
     let total_segments = n * 2 + 1;
     let dy = (b - t) / (total_segments as f32);

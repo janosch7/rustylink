@@ -27,7 +27,7 @@ use super::tooltips::{
 };
 use super::types::{ClickAction, UpdateResponse};
 use super::view_transform;
-use super::zoom_controls::show_zoom_controls;
+use super::zoom_controls::{ZoomGeometry, ZoomViewState, show_zoom_controls};
 use crate::editor::operations;
 #[cfg(feature = "dashboard")]
 use crate::egui_app::DashboardControlValue;
@@ -559,15 +559,19 @@ pub(crate) fn update_internal(
         show_zoom_controls(
             ui.ctx(),
             app.egui_id("zoom_controls"),
-            Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
-            &mut staged_zoom,
-            &mut staged_pan,
-            base_scale,
-            bb,
-            Pos2::new(avail.left() + margin, avail.top() + margin),
-            avail.center(),
-            &mut staged_reset,
-            &mut app.monochrome,
+            ZoomGeometry {
+                fixed_pos: Pos2::new(avail.left() + 8.0, avail.top() + 8.0),
+                base_scale,
+                world_bounds: bb,
+                origin: Pos2::new(avail.left() + margin, avail.top() + margin),
+                center: avail.center(),
+            },
+            &mut ZoomViewState {
+                zoom: &mut staged_zoom,
+                pan: &mut staged_pan,
+                reset_requested: &mut staged_reset,
+                monochrome: &mut app.monochrome,
+            },
         );
 
         // Reset always fits every block into the viewport, recomputing the
@@ -851,7 +855,7 @@ pub(crate) fn update_internal(
                             &mut interaction,
                             UpdateResponse::Block {
                                 action: ClickAction::Secondary,
-                                block: block_for_response,
+                                block: Box::new(block_for_response),
                                 handled: false,
                             },
                         );
@@ -926,7 +930,7 @@ pub(crate) fn update_internal(
                     &mut interaction,
                     UpdateResponse::Block {
                         action,
-                        block: block_for_response,
+                        block: Box::new(block_for_response),
                         handled,
                     },
                 );
@@ -1082,15 +1086,17 @@ pub(crate) fn update_internal(
         let line_stroke_default = Stroke::new(2.0_f32, Color32::LIGHT_GREEN);
 
         // Build lines in screen space and interactive hit rects
-        #[allow(clippy::type_complexity)]
-        let mut line_views: Vec<(
-            &crate::model::Line,
+        // (line, screen-space polyline, main anchor, hover response, line index,
+        // all screen-space segments incl. branches)
+        type LineView<'a> = (
+            &'a crate::model::Line,
             Vec<Pos2>,
             Pos2,
             egui::Response,
             usize,
             Vec<(Pos2, Pos2)>,
-        )> = Vec::new();
+        );
+        let mut line_views: Vec<LineView> = Vec::new();
         let mut port_label_requests: Vec<(String, u32, bool, f32)> = Vec::new();
         let mut port_y_screen: HashMap<(String, u32, bool), f32> = HashMap::new();
         // Precompute mirroring for each block SID in this view
@@ -1190,15 +1196,17 @@ pub(crate) fn update_internal(
             signal_routing::push_orthogonal_segments(&screen_pts, &mut segments_all);
             for br in &line.branches {
                 collect_branch_segments_rec(
-                    &to_screen,
-                    &sid_map,
-                    &port_counts,
+                    &BranchLookup {
+                        to_screen: &to_screen,
+                        sid_map: &sid_map,
+                        port_counts: &port_counts,
+                        sid_mirrored: &sid_mirrored,
+                        sid_port_overrides: &sid_port_overrides,
+                    },
                     *offsets_pts.last().unwrap_or(&cur),
                     br,
                     &mut segments_all,
                     &mut port_y_screen,
-                    &sid_mirrored,
-                    &sid_port_overrides,
                 );
             }
             let pad = 8.0;
@@ -1272,18 +1280,23 @@ pub(crate) fn update_internal(
             ));
         }
 
+        // Shared lookup tables for the branch-tree helpers below.
+        struct BranchLookup<'a> {
+            to_screen: &'a dyn Fn(Pos2) -> Pos2,
+            sid_map: &'a HashMap<String, Rect>,
+            port_counts: &'a HashMap<(String, u8), u32>,
+            sid_mirrored: &'a HashMap<String, bool>,
+            sid_port_overrides:
+                &'a HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>>,
+        }
+
         // Collect segments for a branch tree (model coords in, screen-space segments out)
-        #[allow(clippy::too_many_arguments)]
         fn collect_branch_segments_rec(
-            to_screen: &dyn Fn(Pos2) -> Pos2,
-            sid_map: &HashMap<String, Rect>,
-            port_counts: &HashMap<(String, u8), u32>,
+            lk: &BranchLookup,
             start: Pos2,
             br: &crate::model::Branch,
             out: &mut Vec<(Pos2, Pos2)>,
             port_y_screen: &mut HashMap<(String, u32, bool), f32>,
-            sid_mirrored: &HashMap<String, bool>,
-            sid_port_overrides: &HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>>,
         ) {
             let mut pts: Vec<Pos2> = vec![start];
             let mut cur = start;
@@ -1291,16 +1304,16 @@ pub(crate) fn update_internal(
                 cur = Pos2::new(cur.x + off.x as f32, cur.y + off.y as f32);
                 pts.push(cur);
             }
-            let screen_pts: Vec<Pos2> = pts.iter().map(|p| to_screen(*p)).collect();
+            let screen_pts: Vec<Pos2> = pts.iter().map(|p| (lk.to_screen)(*p)).collect();
             signal_routing::push_orthogonal_segments(&screen_pts, out);
             if let Some(dstb) = &br.dst
-                && let Some(dr) = sid_map.get(&dstb.sid) {
-                    let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
-                    let dst_overrides = sid_port_overrides.get(&dstb.sid).map(|v| v.as_slice()).unwrap_or(&[]);
+                && let Some(dr) = lk.sid_map.get(&dstb.sid) {
+                    let mirrored_dst = lk.sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
+                    let dst_overrides = lk.sid_port_overrides.get(&dstb.sid).map(|v| v.as_slice()).unwrap_or(&[]);
                     let end_pt =
-                        signal_routing::endpoint_pos(*dr, dstb, port_counts, mirrored_dst, dst_overrides);
-                    let a = to_screen(*pts.last().unwrap_or(&cur));
-                    let b = to_screen(end_pt);
+                        signal_routing::endpoint_pos(*dr, dstb, lk.port_counts, mirrored_dst, dst_overrides);
+                    let a = (lk.to_screen)(*pts.last().unwrap_or(&cur));
+                    let b = (lk.to_screen)(end_pt);
                     signal_routing::push_orthogonal_segments(&[a, b], out);
                     if dstb.port_type == "in" {
                         port_y_screen.insert((dstb.sid.clone(), dstb.port_index, true), b.y);
@@ -1308,15 +1321,11 @@ pub(crate) fn update_internal(
                 }
             for sub in &br.branches {
                 collect_branch_segments_rec(
-                    to_screen,
-                    sid_map,
-                    port_counts,
+                    lk,
                     *pts.last().unwrap_or(&cur),
                     sub,
                     out,
                     port_y_screen,
-                    sid_mirrored,
-                    sid_port_overrides,
                 );
             }
         }
@@ -1351,19 +1360,14 @@ pub(crate) fn update_internal(
             ));
         }
 
-        #[allow(clippy::too_many_arguments)]
         fn draw_branch_rec(
             painter: &egui::Painter,
-            to_screen: &dyn Fn(Pos2) -> Pos2,
-            sid_map: &HashMap<String, Rect>,
-            port_counts: &HashMap<(String, u8), u32>,
+            lk: &BranchLookup,
             start: Pos2,
             br: &crate::model::Branch,
             stroke: Stroke,
             color: Color32,
             port_label_requests: &mut Vec<(String, u32, bool, f32)>,
-            sid_mirrored: &HashMap<String, bool>,
-            sid_port_overrides: &HashMap<String, Vec<crate::simulink_libraries::types::PortPositionOverride>>,
         ) {
             let mut pts: Vec<Pos2> = vec![start];
             let mut cur = start;
@@ -1371,20 +1375,20 @@ pub(crate) fn update_internal(
                 cur = Pos2::new(cur.x + off.x as f32, cur.y + off.y as f32);
                 pts.push(cur);
             }
-            let screen_pts: Vec<Pos2> = pts.iter().map(|p| to_screen(*p)).collect();
+            let screen_pts: Vec<Pos2> = pts.iter().map(|p| (lk.to_screen)(*p)).collect();
             for seg in signal_routing::orthogonalize_polyline(&screen_pts).windows(2) {
                 painter.line_segment([seg[0], seg[1]], stroke);
             }
             if let Some(dstb) = &br.dst
-                && let Some(dr) = sid_map.get(&dstb.sid) {
-                    let mirrored_dst = sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
-                    let dst_overrides = sid_port_overrides.get(&dstb.sid).map(|v| v.as_slice()).unwrap_or(&[]);
+                && let Some(dr) = lk.sid_map.get(&dstb.sid) {
+                    let mirrored_dst = lk.sid_mirrored.get(&dstb.sid).copied().unwrap_or(false);
+                    let dst_overrides = lk.sid_port_overrides.get(&dstb.sid).map(|v| v.as_slice()).unwrap_or(&[]);
                     let end_pt =
-                        signal_routing::endpoint_pos(*dr, dstb, port_counts, mirrored_dst, dst_overrides);
+                        signal_routing::endpoint_pos(*dr, dstb, lk.port_counts, mirrored_dst, dst_overrides);
                     let last = *pts.last().unwrap_or(&cur);
-                    let a = to_screen(last);
-                    let b = to_screen(end_pt);
-                    let last_seg_horiz = signal_routing::dst_segment_horizontal(dstb, dst_overrides, mirrored_dst, port_counts);
+                    let a = (lk.to_screen)(last);
+                    let b = (lk.to_screen)(end_pt);
+                    let last_seg_horiz = signal_routing::dst_segment_horizontal(dstb, dst_overrides, mirrored_dst, lk.port_counts);
                     let ortho = signal_routing::orthogonalize_polyline_with_dst_side(&[a, b], last_seg_horiz);
                     let is_in_dst = dstb.port_type == "in"
                         || crate::egui_app::geometry::is_control_port_type(&dstb.port_type);
@@ -1407,21 +1411,17 @@ pub(crate) fn update_internal(
                 }
             // Draw a junction dot at the sub-branch point when there are sub-branches.
             if !br.branches.is_empty() {
-                painter.circle_filled(to_screen(*pts.last().unwrap_or(&cur)), 4.0, color);
+                painter.circle_filled((lk.to_screen)(*pts.last().unwrap_or(&cur)), 4.0, color);
             }
             for sub in &br.branches {
                 draw_branch_rec(
                     painter,
-                    to_screen,
-                    sid_map,
-                    port_counts,
+                    lk,
                     *pts.last().unwrap_or(&cur),
                     sub,
                     stroke,
                     color,
                     port_label_requests,
-                    sid_mirrored,
-                    sid_port_overrides,
                 );
             }
         }
@@ -1487,16 +1487,18 @@ pub(crate) fn update_internal(
             for br in &line.branches {
                 draw_branch_rec(
                     &painter,
-                    &to_screen,
-                    &sid_map,
-                    &port_counts,
+                    &BranchLookup {
+                        to_screen: &to_screen,
+                        sid_map: &sid_map,
+                        port_counts: &port_counts,
+                        sid_mirrored: &sid_mirrored,
+                        sid_port_overrides: &sid_port_overrides,
+                    },
                     *main_anchor,
                     br,
                     stroke,
                     color,
                     &mut port_label_requests,
-                    &sid_mirrored,
-                    &sid_port_overrides,
                 );
             }
             if show_testpoint_marker
@@ -1583,7 +1585,7 @@ pub(crate) fn update_internal(
                                     UpdateResponse::Signal {
                                         action,
                                         line_idx: *li,
-                                        line: (*line).clone(),
+                                        line: Box::new((*line).clone()),
                                         handled: false,
                                     },
                                 );
@@ -1599,7 +1601,7 @@ pub(crate) fn update_internal(
                                     UpdateResponse::Signal {
                                         action: ClickAction::Secondary,
                                         line_idx: *li,
-                                        line: (*line).clone(),
+                                        line: Box::new((*line).clone()),
                                         handled: false,
                                     },
                                 );
@@ -1886,15 +1888,17 @@ pub(crate) fn update_internal(
             }
             for br in &line.branches {
                 collect_branch_segments_rec(
-                    &to_screen,
-                    &sid_map,
-                    &port_counts,
+                    &BranchLookup {
+                        to_screen: &to_screen,
+                        sid_map: &sid_map,
+                        port_counts: &port_counts,
+                        sid_mirrored: &sid_mirrored,
+                        sid_port_overrides: &sid_port_overrides,
+                    },
                     main_anchor,
                     br,
                     &mut segments,
                     &mut port_y_screen,
-                    &sid_mirrored,
-                    &sid_port_overrides,
                 );
             }
             let mut best_len2 = -1.0f32;
@@ -2105,7 +2109,7 @@ pub(crate) fn update_internal(
                         UpdateResponse::Signal {
                             action,
                             line_idx: *li,
-                            line: line.clone(),
+                            line: Box::new(line.clone()),
                             handled: false,
                         },
                     );
@@ -2160,7 +2164,7 @@ pub(crate) fn update_internal(
                             UpdateResponse::Signal {
                                 action: ClickAction::Secondary,
                                 line_idx: *li,
-                                line: line.clone(),
+                                line: Box::new(line.clone()),
                                 handled: false,
                             },
                         );
